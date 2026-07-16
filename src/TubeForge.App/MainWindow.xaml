@@ -3,6 +3,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="TubeForge" Height="820" Width="1240"
         MinHeight="680" MinWidth="980"
+        UseLayoutRounding="True" SnapsToDevicePixels="True"
         WindowStartupLocation="CenterScreen">
     <Grid Background="{StaticResource WindowBrush}">
         <Grid.ColumnDefinitions>
@@ -11,7 +12,8 @@
         </Grid.ColumnDefinitions>
 
         <Border Grid.Column="0" Background="{StaticResource SidebarBrush}"
-                BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,0,1,0">
+                BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,0,1,0"
+                IsEnabled="{Binding IsMainContentEnabled}">
             <Grid Margin="20,24">
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto" />
@@ -35,7 +37,8 @@
                 </StackPanel>
 
                 <StackPanel Grid.Row="2">
-                    <Button Content="↓   Download" Command="{Binding ShowDownloadCommand}">
+                    <Button Content="↓   Download" Command="{Binding ShowDownloadCommand}"
+                            AutomationProperties.Name="Download page">
                         <Button.Style>
                             <Style TargetType="Button" BasedOn="{StaticResource NavButton}">
                                 <Style.Triggers>
@@ -47,7 +50,8 @@
                             </Style>
                         </Button.Style>
                     </Button>
-                    <Button Content="≡   Queue" Command="{Binding ShowQueueCommand}">
+                    <Button Content="≡   Queue" Command="{Binding ShowQueueCommand}"
+                            AutomationProperties.Name="Download queue page">
                         <Button.Style>
                             <Style TargetType="Button" BasedOn="{StaticResource NavButton}">
                                 <Style.Triggers>
@@ -60,7 +64,8 @@
                         </Button.Style>
                     </Button>
                     <Button Style="{StaticResource NavButton}" Content="□   Library" IsEnabled="False" ToolTip="Planned" />
-                    <Button Content="⚙   Settings" Command="{Binding ShowSettingsCommand}">
+                    <Button Content="⚙   Settings" Command="{Binding ShowSettingsCommand}"
+                            AutomationProperties.Name="Settings page">
                         <Button.Style>
                             <Style TargetType="Button" BasedOn="{StaticResource NavButton}">
                                 <Style.Triggers>
@@ -72,7 +77,8 @@
                             </Style>
                         </Button.Style>
                     </Button>
-                    <Button Content="◇   Diagnostics" Command="{Binding ShowDiagnosticsCommand}">
+                    <Button Content="◇   Diagnostics" Command="{Binding ShowDiagnosticsCommand}"
+                            AutomationProperties.Name="Diagnostics page">
                         <Button.Style>
                             <Style TargetType="Button" BasedOn="{StaticResource NavButton}">
                                 <Style.Triggers>
@@ -100,6 +106,7 @@
         </Border>
 
         <ScrollViewer Grid.Column="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
+                      IsEnabled="{Binding IsMainContentEnabled}"
                       Visibility="{Binding IsDownloadPage, Converter={StaticResource BooleanToVisibilityConverter}}">
             <Grid Margin="38,30,38,40" MaxWidth="1020">
                 <Grid.RowDefinitions>
@@ -134,7 +141,7 @@
                             <ColumnDefinition Width="12" />
                             <ColumnDefinition Width="130" />
                         </Grid.ColumnDefinitions>
-                        <TextBox Grid.Column="0" Text="{Binding UrlText, UpdateSourceTrigger=PropertyChanged}"
+                        <TextBox x:Name="UrlTextBox" Grid.Column="0" Text="{Binding UrlText, UpdateSourceTrigger=PropertyChanged}"
                                  ToolTip="YouTube video URL" AutomationProperties.Name="YouTube video URL"
                                  KeyDown="UrlTextBox_OnKeyDown" />
                         <Button Grid.Column="2" Style="{StaticResource PrimaryButton}" Content="Analyze"
@@ -143,6 +150,7 @@
                 </Border>
 
                 <Border Grid.Row="4" Style="{StaticResource Card}" BorderBrush="#613143"
+                        AutomationProperties.LiveSetting="Assertive"
                         Visibility="{Binding HasError, Converter={StaticResource BooleanToVisibilityConverter}}">
                     <StackPanel Orientation="Horizontal">
                         <TextBlock Text="!" Foreground="{StaticResource ErrorBrush}" FontSize="18" FontWeight="Bold" />
@@ -355,6 +363,7 @@
 
                             <ProgressBar Minimum="0" Maximum="1" Value="{Binding DownloadFraction, Mode=OneWay}"
                                          Margin="0,16,0,0"
+                                         AutomationProperties.Name="Latest active download progress"
                                          Visibility="{Binding IsDownloading, Converter={StaticResource BooleanToVisibilityConverter}}" />
 
                             <Grid Margin="0,16,0,0">
@@ -367,6 +376,7 @@
                                 </Grid.ColumnDefinitions>
                                 <StackPanel VerticalAlignment="Center">
                                     <TextBlock Text="{Binding StatusMessage}" FontSize="11" TextTrimming="CharacterEllipsis"
+                                               AutomationProperties.LiveSetting="Polite"
                                                Foreground="{StaticResource MutedTextBrush}" />
                                     <TextBlock Text="{Binding ProgressDetail}" Margin="0,3,0,0" FontSize="10"
                                                Foreground="{StaticResource MutedTextBrush}" />
@@ -383,16 +393,27 @@
 
                 <Border Grid.Row="8" Style="{StaticResource Card}"
                         Visibility="{Binding IsAnalyzing, Converter={StaticResource BooleanToVisibilityConverter}}">
-                    <StackPanel Orientation="Horizontal">
-                        <ProgressBar Width="100" IsIndeterminate="True" VerticalAlignment="Center" />
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <ProgressBar Width="100" IsIndeterminate="True" VerticalAlignment="Center"
+                                     AutomationProperties.Name="Analyzing media" />
                         <TextBlock Text="Analyzing YouTube delivery options…" Margin="16,0,0,0"
-                                   VerticalAlignment="Center" Foreground="{StaticResource MutedTextBrush}" />
-                    </StackPanel>
+                                   Grid.Column="1" VerticalAlignment="Center" Foreground="{StaticResource MutedTextBrush}"
+                                   AutomationProperties.LiveSetting="Polite" />
+                        <Button Grid.Column="2" Style="{StaticResource SecondaryButton}" Content="Cancel analysis"
+                                Command="{Binding CancelAnalysisCommand}" Padding="14,9"
+                                AutomationProperties.Name="Cancel video analysis" />
+                    </Grid>
                 </Border>
             </Grid>
         </ScrollViewer>
 
         <ScrollViewer Grid.Column="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
+                      IsEnabled="{Binding IsMainContentEnabled}"
                       Visibility="{Binding IsQueuePage, Converter={StaticResource BooleanToVisibilityConverter}}">
             <Grid Margin="38,30,38,40" MaxWidth="1020">
                 <Grid.RowDefinitions>
@@ -496,7 +517,8 @@
                                     </Grid>
 
                                     <ProgressBar Minimum="0" Maximum="1" Value="{Binding Progress}"
-                                                 Margin="0,16,0,0" Height="6" />
+                                                 Margin="0,16,0,0" Height="6"
+                                                 AutomationProperties.Name="Queued download progress" />
 
                                     <Grid Margin="0,12,0,0">
                                         <Grid.ColumnDefinitions>
@@ -541,6 +563,7 @@
         </ScrollViewer>
 
         <ScrollViewer Grid.Column="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
+                      IsEnabled="{Binding IsMainContentEnabled}"
                       Visibility="{Binding IsSettingsPage, Converter={StaticResource BooleanToVisibilityConverter}}">
             <Grid Margin="38,30,38,40" MaxWidth="1020">
                 <Grid.RowDefinitions>
@@ -625,6 +648,7 @@
         </ScrollViewer>
 
         <ScrollViewer Grid.Column="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
+                      IsEnabled="{Binding IsMainContentEnabled}"
                       Visibility="{Binding IsDiagnosticsPage, Converter={StaticResource BooleanToVisibilityConverter}}">
             <Grid Margin="38,30,38,40" MaxWidth="1020">
                 <Grid.RowDefinitions>
@@ -699,6 +723,8 @@
         </ScrollViewer>
 
         <Border Grid.ColumnSpan="2" Background="#E6080C14" Panel.ZIndex="100"
+                FocusManager.IsFocusScope="True" KeyboardNavigation.TabNavigation="Cycle"
+                AutomationProperties.Name="Responsible use acknowledgement"
                 Visibility="{Binding ShowResponsibleUseNotice, Converter={StaticResource BooleanToVisibilityConverter}}">
             <Border Style="{StaticResource Card}" Width="560" HorizontalAlignment="Center" VerticalAlignment="Center"
                     Padding="30" BorderBrush="#3A4770">
@@ -724,8 +750,9 @@
                     <TextBlock Text="{Binding ErrorMessage}" Margin="0,12,0,0" TextWrapping="Wrap"
                                Foreground="#FFC4CE"
                                Visibility="{Binding HasError, Converter={StaticResource BooleanToVisibilityConverter}}" />
-                    <Button Style="{StaticResource PrimaryButton}" Content="I understand — continue"
-                            Command="{Binding AcceptResponsibleUseCommand}" Margin="0,22,0,0" />
+                    <Button x:Name="ResponsibleUseAcceptButton" Style="{StaticResource PrimaryButton}"
+                            Content="I understand — continue" Command="{Binding AcceptResponsibleUseCommand}"
+                            AutomationProperties.Name="Accept responsible use and continue" Margin="0,22,0,0" />
                 </StackPanel>
             </Border>
         </Border>

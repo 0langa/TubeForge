@@ -1,6 +1,8 @@
 using System.Windows;
 using System.Windows.Input;
+using System.Windows.Interop;
 using System.IO;
+using System.Runtime.InteropServices;
 using Microsoft.Win32;
 using TubeForge.App.ViewModels;
 
@@ -18,8 +20,29 @@ public partial class MainWindow : Window
         Closed += (_, _) => _viewModel.Dispose();
     }
 
-    private async void MainWindow_OnLoaded(object sender, RoutedEventArgs e) =>
+    protected override void OnSourceInitialized(EventArgs e)
+    {
+        base.OnSourceInitialized(e);
+        var enabled = 1;
+        var handle = new WindowInteropHelper(this).Handle;
+        if (DwmSetWindowAttribute(handle, 20, ref enabled, sizeof(int)) != 0)
+        {
+            _ = DwmSetWindowAttribute(handle, 19, ref enabled, sizeof(int));
+        }
+    }
+
+    private async void MainWindow_OnLoaded(object sender, RoutedEventArgs e)
+    {
         await _viewModel.InitializeAsync();
+        if (_viewModel.ShowResponsibleUseNotice)
+        {
+            ResponsibleUseAcceptButton.Focus();
+        }
+        else
+        {
+            UrlTextBox.Focus();
+        }
+    }
 
     private void BrowseButton_OnClick(object sender, RoutedEventArgs e)
     {
@@ -44,4 +67,11 @@ public partial class MainWindow : Window
             e.Handled = true;
         }
     }
+
+    [DllImport("dwmapi.dll", PreserveSig = true)]
+    private static extern int DwmSetWindowAttribute(
+        IntPtr windowHandle,
+        int attribute,
+        ref int attributeValue,
+        int attributeSize);
 }

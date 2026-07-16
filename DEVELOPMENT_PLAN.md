@@ -317,7 +317,7 @@ Exit: dependency-free CLI/harness downloads a progressive MP4 reliably and resum
 - [x] Implement destination picker and automatic collision-safe naming.
 - [x] Implement queue cards and global concurrency control.
 - [x] Add settings, first-run responsible-use notice, and diagnostics view.
-- [ ] Complete keyboard, scaling, screen-reader, dark-mode, and cancellation review.
+- [x] Complete keyboard, scaling, screen-reader, dark-mode, and cancellation review.
 
 Exit: normal user can analyze and download a progressive MP4 entirely through the GUI.
 
@@ -449,6 +449,7 @@ Order for current work:
 - 2026-07-16: Prefer MP4 when video quality characteristics are equivalent, while keeping quality as the primary rank and retaining higher-quality WebM options.
 - 2026-07-16: Queue downloads through a tested global 1–4 transfer dispatcher. Persist only validated video/format identities and local destinations; re-resolve fresh media URLs when resuming recovered work.
 - 2026-07-16: Persist bounded local settings atomically. Gate first use on a locally stored responsible-use acknowledgement and keep diagnostics redacted to runtime, counts, stages, and local storage paths.
+- 2026-07-16: Keep first-run acknowledgement keyboard-modal, expose explicit analysis/download cancellation, label live status/progress for assistive technology, use DPI layout rounding, and request a dark DWM title bar with the Windows 10 fallback attribute.
 
 ## 15. Plan maintenance
 

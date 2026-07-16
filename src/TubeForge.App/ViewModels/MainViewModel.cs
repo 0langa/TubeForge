@@ -119,6 +119,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         DownloadCommand = new AsyncRelayCommand(
             DownloadAsync,
             () => !ShowResponsibleUseNotice && !IsAnalyzing && SelectedFormat is not null && HasVideo);
+        CancelAnalysisCommand = new RelayCommand(CancelAnalysis, () => IsAnalyzing);
         CancelCommand = new RelayCommand(PauseAll, () => IsDownloading);
         ShowDownloadCommand = new RelayCommand(() => ShowPage(AppPage.Download));
         ShowQueueCommand = new RelayCommand(() => ShowPage(AppPage.Queue));
@@ -144,6 +145,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     public AsyncRelayCommand DownloadCommand { get; }
 
     public RelayCommand CancelCommand { get; }
+
+    public RelayCommand CancelAnalysisCommand { get; }
 
     public RelayCommand ShowDownloadCommand { get; }
 
@@ -246,10 +249,13 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         {
             if (Set(ref _showResponsibleUseNotice, value))
             {
+                OnPropertyChanged(nameof(IsMainContentEnabled));
                 RefreshCommands();
             }
         }
     }
+
+    public bool IsMainContentEnabled => !ShowResponsibleUseNotice;
 
     public string SettingsStatus
     {
@@ -1685,6 +1691,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     {
         AnalyzeCommand.RaiseCanExecuteChanged();
         DownloadCommand.RaiseCanExecuteChanged();
+        CancelAnalysisCommand.RaiseCanExecuteChanged();
         CancelCommand.RaiseCanExecuteChanged();
     }
 
