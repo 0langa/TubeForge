@@ -35,8 +35,30 @@
                 </StackPanel>
 
                 <StackPanel Grid.Row="2">
-                    <Button Style="{StaticResource NavButton}" Background="#1A2240" Foreground="White" Content="↓   Download" />
-                    <Button Style="{StaticResource NavButton}" Content="≡   Queue" IsEnabled="False" ToolTip="Planned" />
+                    <Button Content="↓   Download" Command="{Binding ShowDownloadCommand}">
+                        <Button.Style>
+                            <Style TargetType="Button" BasedOn="{StaticResource NavButton}">
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding IsDownloadPage}" Value="True">
+                                        <Setter Property="Background" Value="#1A2240" />
+                                        <Setter Property="Foreground" Value="White" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Button.Style>
+                    </Button>
+                    <Button Content="≡   Queue" Command="{Binding ShowQueueCommand}">
+                        <Button.Style>
+                            <Style TargetType="Button" BasedOn="{StaticResource NavButton}">
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding IsQueuePage}" Value="True">
+                                        <Setter Property="Background" Value="#1A2240" />
+                                        <Setter Property="Foreground" Value="White" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Button.Style>
+                    </Button>
                     <Button Style="{StaticResource NavButton}" Content="□   Library" IsEnabled="False" ToolTip="Planned" />
                     <Button Style="{StaticResource NavButton}" Content="⚙   Settings" IsEnabled="False" ToolTip="Planned" />
                 </StackPanel>
@@ -54,7 +76,8 @@
             </Grid>
         </Border>
 
-        <ScrollViewer Grid.Column="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+        <ScrollViewer Grid.Column="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
+                      Visibility="{Binding IsDownloadPage, Converter={StaticResource BooleanToVisibilityConverter}}">
             <Grid Margin="38,30,38,40" MaxWidth="1020">
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto" />
@@ -325,9 +348,9 @@
                                     <TextBlock Text="{Binding ProgressDetail}" Margin="0,3,0,0" FontSize="10"
                                                Foreground="{StaticResource MutedTextBrush}" />
                                 </StackPanel>
-                                <Button Grid.Column="2" Style="{StaticResource SecondaryButton}" Content="Pause"
+                                <Button Grid.Column="2" Style="{StaticResource SecondaryButton}" Content="Pause all"
                                         Command="{Binding CancelCommand}" Padding="14,10"
-                                        Visibility="{Binding IsBusy, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                                        Visibility="{Binding IsDownloading, Converter={StaticResource BooleanToVisibilityConverter}}" />
                                 <Button Grid.Column="4" Style="{StaticResource PrimaryButton}" Content="{Binding DownloadActionLabel}"
                                         Command="{Binding DownloadCommand}" AutomationProperties.Name="Start download" />
                             </Grid>
@@ -343,6 +366,154 @@
                                    VerticalAlignment="Center" Foreground="{StaticResource MutedTextBrush}" />
                     </StackPanel>
                 </Border>
+            </Grid>
+        </ScrollViewer>
+
+        <ScrollViewer Grid.Column="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
+                      Visibility="{Binding IsQueuePage, Converter={StaticResource BooleanToVisibilityConverter}}">
+            <Grid Margin="38,30,38,40" MaxWidth="1020">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="24" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="14" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="14" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="14" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+
+                <Grid Grid.Row="0">
+                    <StackPanel>
+                        <TextBlock Text="Download queue" FontSize="29" FontWeight="SemiBold" />
+                        <TextBlock Text="Concurrent transfers, recovery, and per-item controls."
+                                   Margin="0,7,0,0" FontSize="14" Foreground="{StaticResource MutedTextBrush}" />
+                    </StackPanel>
+                    <TextBlock Text="{Binding QueueSummary}" HorizontalAlignment="Right" VerticalAlignment="Bottom"
+                               Foreground="{StaticResource MutedTextBrush}" FontSize="11" />
+                </Grid>
+
+                <Border Grid.Row="2" Style="{StaticResource Card}">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="12" />
+                            <ColumnDefinition Width="110" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="10" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <StackPanel VerticalAlignment="Center">
+                            <TextBlock Text="GLOBAL CONCURRENCY" Style="{StaticResource FieldLabel}" />
+                            <TextBlock Text="New transfers start when a slot opens" Margin="0,4,0,0" FontSize="10"
+                                       Foreground="{StaticResource MutedTextBrush}" />
+                        </StackPanel>
+                        <ComboBox Grid.Column="2" ItemsSource="{Binding MaxConcurrentDownloadOptions}"
+                                  SelectedItem="{Binding SelectedMaxConcurrentDownloads}" VerticalAlignment="Center"
+                                  AutomationProperties.Name="Maximum concurrent downloads" />
+                        <Button Grid.Column="4" Style="{StaticResource SecondaryButton}" Content="Pause all"
+                                Command="{Binding CancelCommand}" Padding="14,10" VerticalAlignment="Center"
+                                Visibility="{Binding IsDownloading, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                        <Button Grid.Column="6" Style="{StaticResource SecondaryButton}" Content="Clear completed"
+                                Command="{Binding ClearCompletedCommand}" Padding="14,10" VerticalAlignment="Center" />
+                    </Grid>
+                </Border>
+
+                <Border Grid.Row="4" Style="{StaticResource Card}" BorderBrush="#613143"
+                        Visibility="{Binding HasError, Converter={StaticResource BooleanToVisibilityConverter}}">
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="!" Foreground="{StaticResource ErrorBrush}" FontSize="18" FontWeight="Bold" />
+                        <TextBlock Text="{Binding ErrorMessage}" Margin="12,1,0,0" TextWrapping="Wrap"
+                                   Foreground="#FFC4CE" />
+                    </StackPanel>
+                </Border>
+
+                <Border Grid.Row="6">
+                    <Border.Style>
+                        <Style TargetType="Border" BasedOn="{StaticResource Card}">
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding HasQueueItems}" Value="True">
+                                    <Setter Property="Visibility" Value="Collapsed" />
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </Border.Style>
+                    <StackPanel HorizontalAlignment="Center" Margin="20">
+                        <TextBlock Text="Queue empty" FontSize="17" FontWeight="SemiBold" HorizontalAlignment="Center" />
+                        <TextBlock Text="Analyze media, choose output, then use Add to queue."
+                                   Margin="0,7,0,0" Foreground="{StaticResource MutedTextBrush}" />
+                        <Button Style="{StaticResource PrimaryButton}" Content="Add a download" Margin="0,18,0,0"
+                                Command="{Binding ShowDownloadCommand}" HorizontalAlignment="Center" />
+                    </StackPanel>
+                </Border>
+
+                <ItemsControl Grid.Row="8" ItemsSource="{Binding QueueItems}">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <Border Style="{StaticResource Card}" Margin="0,0,0,12">
+                                <StackPanel>
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel>
+                                            <TextBlock Text="{Binding Title}" FontSize="15" FontWeight="SemiBold"
+                                                       TextTrimming="CharacterEllipsis" />
+                                            <TextBlock Text="{Binding FileName}" Margin="0,5,0,0" FontSize="11"
+                                                       Foreground="{StaticResource MutedTextBrush}" TextTrimming="CharacterEllipsis" />
+                                        </StackPanel>
+                                        <Border Grid.Column="1" Background="{Binding StatusBackground}" BorderBrush="{Binding StatusBorder}"
+                                                BorderThickness="1" CornerRadius="8" Padding="9,5" VerticalAlignment="Top">
+                                            <TextBlock Text="{Binding StatusLabel}" FontSize="9" FontWeight="Bold"
+                                                       Foreground="{Binding StatusForeground}" />
+                                        </Border>
+                                    </Grid>
+
+                                    <ProgressBar Minimum="0" Maximum="1" Value="{Binding Progress}"
+                                                 Margin="0,16,0,0" Height="6" />
+
+                                    <Grid Margin="0,12,0,0">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="8" />
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="8" />
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="8" />
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="8" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel VerticalAlignment="Center">
+                                            <TextBlock Text="{Binding ProgressDetail}" FontSize="10"
+                                                       Foreground="{StaticResource MutedTextBrush}" />
+                                            <TextBlock Text="{Binding DestinationDirectory}" Margin="0,3,0,0" FontSize="9"
+                                                       Foreground="{StaticResource MutedTextBrush}" TextTrimming="CharacterEllipsis" />
+                                        </StackPanel>
+                                        <Button Grid.Column="1" Style="{StaticResource SecondaryButton}" Content="{Binding ResumeLabel}"
+                                                Command="{Binding ResumeCommand}" Padding="12,8"
+                                                Visibility="{Binding CanResume, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                                        <Button Grid.Column="3" Style="{StaticResource SecondaryButton}" Content="Pause"
+                                                Command="{Binding PauseCommand}" Padding="12,8"
+                                                Visibility="{Binding CanPause, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                                        <Button Grid.Column="5" Style="{StaticResource SecondaryButton}" Content="Cancel"
+                                                Command="{Binding CancelCommand}" Padding="12,8"
+                                                Visibility="{Binding CanCancel, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                                        <Button Grid.Column="7" Style="{StaticResource SecondaryButton}" Content="Open folder"
+                                                Command="{Binding RevealCommand}" Padding="12,8" />
+                                        <Button Grid.Column="9" Style="{StaticResource SecondaryButton}" Content="Remove"
+                                                Command="{Binding RemoveCommand}" Padding="12,8"
+                                                Visibility="{Binding CanRemove, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                                    </Grid>
+                                </StackPanel>
+                            </Border>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
             </Grid>
         </ScrollViewer>
     </Grid>

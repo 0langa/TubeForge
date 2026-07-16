@@ -18,10 +18,11 @@ Working now:
 - highest-quality audio + video selection with separate resumable track downloads and in-house MP4/WebM muxing, preferring MP4 on equivalent-quality choices;
 - caption-track metadata, truthful format labels, and collision-safe filenames;
 - resumable `.part` transfers, bounded container validation, retries, progress, cancellation, and atomic finalization;
-- privacy-safe schema-versioned queue state with interrupted-download startup recovery;
+- queue screen with 1–4 transfer global concurrency, per-item progress/speed/ETA, pause/resume/cancel/retry/remove/reveal controls, and interrupted-download recovery;
+- privacy-safe schema-versioned queue state that stores source identities instead of expiring media URLs;
 - dependency-free fixture/transfer test runner and sanitized live metadata smoke tool.
 
-Not finished: queue management UI/scheduling, hostile-container fuzzing, audio transcoding/MP3, current ES6 player decipher, throttling-parameter transforms, settings, packaging, and releases. See [DEVELOPMENT_PLAN.md](DEVELOPMENT_PLAN.md) for exact checklist state.
+Not finished: playlist/bulk scheduling, hostile-container fuzzing, audio transcoding/MP3, current ES6 player decipher, throttling-parameter transforms, settings/diagnostics, packaging, and releases. See [DEVELOPMENT_PLAN.md](DEVELOPMENT_PLAN.md) for exact checklist state.
 
 ## Baseline
 
@@ -30,7 +31,7 @@ Not finished: queue management UI/scheduling, hostile-container fuzzing, audio t
 - Public video metadata plus progressive and highest-compatible adaptive downloads
 - Native audio-only downloads
 - In-house regular/fragmented MP4 and WebM video/audio muxing without re-encoding
-- Resumable direct transfers and persisted queue recovery; queue UI remains planned
+- Resumable direct transfers, persisted queue recovery, and bounded concurrent queue processing
 - No ads, telemetry, accounts, or paid features
 
 ## Build

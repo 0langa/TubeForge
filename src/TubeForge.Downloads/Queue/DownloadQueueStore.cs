@@ -219,6 +219,9 @@ public sealed class DownloadQueueStore
                 !YouTubeVideoId.TryCreate(item.VideoId, out _) ||
                 item.FormatId <= 0 ||
                 !IsSafeText(item.SourceIdentity, 256) ||
+                !DownloadSourceIdentity.TryParse(item.SourceIdentity, out var sourceIdentity) ||
+                sourceIdentity.VideoId.Value != item.VideoId ||
+                sourceIdentity.PrimaryFormatId != item.FormatId ||
                 !IsSafeText(item.DisplayTitle, 512) ||
                 !IsSafeDestination(item.DestinationPath) ||
                 item.ExpectedLength is <= 0 ||

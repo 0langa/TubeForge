@@ -315,7 +315,7 @@ Exit: dependency-free CLI/harness downloads a progressive MP4 reliably and resum
 - [x] Implement recommended and detailed format list.
 - [x] Add advanced resolution/container/codec/FPS/HDR filters.
 - [x] Implement destination picker and automatic collision-safe naming.
-- [ ] Implement queue cards and global concurrency control.
+- [x] Implement queue cards and global concurrency control.
 - [ ] Add settings, first-run responsible-use notice, and diagnostics view.
 - [ ] Complete keyboard, scaling, screen-reader, dark-mode, and cancellation review.
 
@@ -447,6 +447,7 @@ Order for current work:
 - 2026-07-16: Highest-quality audio + video is an MVP release gate. Audio + video selects the highest compatible adaptive tracks, downloads both resumably, and muxes them internally; low-resolution progressive media is fallback only.
 - 2026-07-16: Support regular MP4 chunk-offset rewriting, fragmented MP4 track/fragment remapping and interleaving, and WebM cluster interleaving/cue generation. A live H.264/AAC fragmented MP4 mux passed structural validation and opened with both tracks in the Windows media stack; AV1 playback still depends on the system codec installation.
 - 2026-07-16: Prefer MP4 when video quality characteristics are equivalent, while keeping quality as the primary rank and retaining higher-quality WebM options.
+- 2026-07-16: Queue downloads through a tested global 1–4 transfer dispatcher. Persist only validated video/format identities and local destinations; re-resolve fresh media URLs when resuming recovered work.
 
 ## 15. Plan maintenance
 

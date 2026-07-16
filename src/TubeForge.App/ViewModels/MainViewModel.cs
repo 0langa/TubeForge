@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using System.ComponentModel;
+using System.Diagnostics;
 using System.Net;
 using System.Net.Http;
 using System.IO;
@@ -34,7 +35,12 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     private readonly DirectDownloadEngine _downloader;
     private readonly AdaptiveDownloadEngine _adaptiveDownloader;
     private readonly DownloadQueueStore _queueStore;
-    private CancellationTokenSource? _operationCancellation;
+    private readonly DownloadQueueDispatcher _queueDispatcher = new(2);
+    private readonly SemaphoreSlim _queueMutationLock = new(1, 1);
+    private readonly Dictionary<Guid, QueuedDownloadWork> _preparedQueueWork = [];
+    private readonly Dictionary<Guid, CancellationTokenSource> _downloadCancellations = [];
+    private readonly HashSet<Guid> _cancelledQueueItems = [];
+    private CancellationTokenSource? _analysisCancellation;
     private string _urlText = string.Empty;
     private string _downloadFolder;
     private string _videoTitle = string.Empty;
@@ -70,10 +76,11 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     private FilterOption<AudioCodec>? _selectedAudioCodec;
     private string _selectedAudioProcessing = AudioProcessingChoices[0];
     private DownloadQueueSnapshot _queueSnapshot = new();
-    private Guid? _activeQueueItemId;
     private bool _isInitialized;
     private bool _queueUnavailable;
-    private string _downloadActionLabel = "Download";
+    private string _downloadActionLabel = "Add to queue";
+    private bool _isDownloadPage = true;
+    private int _selectedMaxConcurrentDownloads = 2;
 
     public MainViewModel()
     {
@@ -97,14 +104,19 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
             "Downloads");
 
-        AnalyzeCommand = new AsyncRelayCommand(AnalyzeAsync, () => !IsBusy && !string.IsNullOrWhiteSpace(UrlText));
-        DownloadCommand = new AsyncRelayCommand(DownloadAsync, () => !IsBusy && SelectedFormat is not null && HasVideo);
-        CancelCommand = new RelayCommand(Cancel, () => IsBusy);
+        AnalyzeCommand = new AsyncRelayCommand(AnalyzeAsync, () => !IsAnalyzing && !string.IsNullOrWhiteSpace(UrlText));
+        DownloadCommand = new AsyncRelayCommand(DownloadAsync, () => !IsAnalyzing && SelectedFormat is not null && HasVideo);
+        CancelCommand = new RelayCommand(PauseAll, () => IsDownloading);
+        ShowDownloadCommand = new RelayCommand(() => IsDownloadPage = true);
+        ShowQueueCommand = new RelayCommand(() => IsDownloadPage = false);
+        ClearCompletedCommand = new AsyncRelayCommand(ClearCompletedAsync, () => QueueItems.Any(item => item.Status == DownloadQueueStatus.Completed));
     }
 
     public event PropertyChangedEventHandler? PropertyChanged;
 
     public ObservableCollection<FormatItemViewModel> Formats { get; } = [];
+
+    public ObservableCollection<QueueItemViewModel> QueueItems { get; } = [];
 
     public IReadOnlyList<DownloadModeOption> DownloadModes => _downloadModes;
 
@@ -115,6 +127,14 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     public AsyncRelayCommand DownloadCommand { get; }
 
     public RelayCommand CancelCommand { get; }
+
+    public RelayCommand ShowDownloadCommand { get; }
+
+    public RelayCommand ShowQueueCommand { get; }
+
+    public AsyncRelayCommand ClearCompletedCommand { get; }
+
+    public IReadOnlyList<int> MaxConcurrentDownloadOptions { get; } = [1, 2, 3, 4];
 
     public string UrlText
     {
@@ -185,6 +205,48 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     }
 
     public bool IsBusy => IsAnalyzing || IsDownloading;
+
+    public bool IsDownloadPage
+    {
+        get => _isDownloadPage;
+        set
+        {
+            if (Set(ref _isDownloadPage, value))
+            {
+                OnPropertyChanged(nameof(IsQueuePage));
+            }
+        }
+    }
+
+    public bool IsQueuePage => !IsDownloadPage;
+
+    public bool HasQueueItems => QueueItems.Count > 0;
+
+    public string QueueSummary
+    {
+        get
+        {
+            var active = QueueItems.Count(item => item.Status == DownloadQueueStatus.Downloading);
+            var waiting = QueueItems.Count(item => item.Status == DownloadQueueStatus.Queued);
+            var completed = QueueItems.Count(item => item.Status == DownloadQueueStatus.Completed);
+            return $"{active} active · {waiting} waiting · {completed} completed";
+        }
+    }
+
+    public int SelectedMaxConcurrentDownloads
+    {
+        get => _selectedMaxConcurrentDownloads;
+        set
+        {
+            if (!Set(ref _selectedMaxConcurrentDownloads, value))
+            {
+                return;
+            }
+
+            _queueDispatcher.MaximumConcurrency = value;
+            PumpQueue();
+        }
+    }
 
     public double DownloadFraction
     {
@@ -358,6 +420,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         }
 
         _queueSnapshot = result.Value;
+        RebuildQueueItems();
         var recoverableCount = _queueSnapshot.Items.Count(item =>
             item.Status is DownloadQueueStatus.Queued or DownloadQueueStatus.Paused);
         if (recoverableCount > 0)
@@ -366,11 +429,13 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                 ? "Recovered 1 interrupted download"
                 : $"Recovered {recoverableCount} interrupted downloads";
         }
+
+        PumpQueue();
     }
 
     public async Task AnalyzeAsync()
     {
-        CancelCurrentOperation();
+        CancelAnalysis();
         ClearAnalysis();
         var parsed = YouTubeUrlParser.ParseVideoId(UrlText);
         if (!parsed.IsSuccess)
@@ -380,12 +445,12 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             return;
         }
 
-        _operationCancellation = new CancellationTokenSource();
+        _analysisCancellation = new CancellationTokenSource();
         IsAnalyzing = true;
         StatusMessage = "Analyzing video…";
         try
         {
-            var result = await _resolver.ResolveAsync(parsed.Value, _operationCancellation.Token);
+            var result = await _resolver.ResolveAsync(parsed.Value, _analysisCancellation.Token);
             if (!result.IsSuccess)
             {
                 ErrorMessage = $"{result.Error!.Message} ({result.Error.Code})";
@@ -439,13 +504,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         }
 
         await InitializeAsync();
-
-        CancelCurrentOperation();
         ErrorMessage = string.Empty;
-        _operationCancellation = new CancellationTokenSource();
-        IsDownloading = true;
-        DownloadActionLabel = "Download";
-        DownloadFraction = 0;
         var selection = SelectedFormat;
         var format = selection.Format;
         try
@@ -455,115 +514,469 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                 _metadata.Title,
                 selection.RequiresMuxing
                     ? FormatDisplay.Extension(format.Container)
-                    : FormatDisplay.OutputExtension(format));
-            var queueItem = CreateOrResumeQueueItem(_metadata, selection, destination);
-            var queueError = await UpsertQueueItemAsync(queueItem, _operationCancellation.Token);
+                    : FormatDisplay.OutputExtension(format),
+                path => File.Exists(path) ||
+                        File.Exists(path + ".part") ||
+                        _queueSnapshot.Items.Any(item => item.DestinationPath.Equals(path, StringComparison.OrdinalIgnoreCase)));
+            var queueItem = CreateQueueItem(_metadata, selection, destination);
+            var queueError = await UpsertQueueItemAsync(queueItem);
             if (queueError is not null)
             {
                 ErrorMessage = $"{queueError.Message} ({queueError.Code})";
-                StatusMessage = "Download not started";
+                StatusMessage = "Download not queued";
                 return;
             }
 
-            _activeQueueItemId = queueItem.Id;
-            StatusMessage = selection.RequiresMuxing
-                ? "Downloading best video + audio, then muxing locally"
-                : "Downloading to " + Path.GetFileName(destination);
-            var progress = new Progress<DownloadProgress>(UpdateProgress);
-            TubeForgeError? downloadError;
-            string completedPath;
-            long completedBytes;
-            if (selection.AudioFormat is StreamFormat audioFormat)
-            {
-                var result = await _adaptiveDownloader.DownloadAsync(new AdaptiveDownloadRequest
-                {
-                    Video = TrackRequest(_metadata, format, IntermediateTrackPath(destination, "video", format)),
-                    Audio = TrackRequest(_metadata, audioFormat, IntermediateTrackPath(destination, "audio", audioFormat)),
-                    DestinationPath = destination,
-                    OutputContainer = format.Container
-                }, progress, _operationCancellation.Token);
-                downloadError = result.Error;
-                completedPath = result.IsSuccess ? result.Value.DestinationPath : destination;
-                completedBytes = result.IsSuccess ? result.Value.BytesWritten : 0;
-            }
-            else
-            {
-                var result = await _downloader.DownloadAsync(
-                    TrackRequest(_metadata, format, destination),
-                    progress,
-                    _operationCancellation.Token);
-                downloadError = result.Error;
-                completedPath = result.IsSuccess ? result.Value.DestinationPath : destination;
-                completedBytes = result.IsSuccess ? result.Value.BytesWritten : 0;
-            }
-
-            if (downloadError is not null)
-            {
-                var partialBytes = SelectionPartialLength(destination, selection);
-                await UpdateActiveQueueItemAsync(
-                    downloadError.Code == "Operation.Cancelled"
-                        ? DownloadQueueStatus.Paused
-                        : DownloadQueueStatus.Failed,
-                    destination,
-                    downloadError.Code,
-                    partialBytes);
-                DownloadActionLabel = downloadError.Code == "Operation.Cancelled" ? "Resume" :
-                    partialBytes > 0 ? "Retry" : "Download";
-                ErrorMessage = $"{downloadError.Message} ({downloadError.Code})";
-                StatusMessage = downloadError.Code == "Operation.Cancelled"
-                    ? "Download paused — press Resume to continue"
-                    : "Download failed";
-                return;
-            }
-
-            await UpdateActiveQueueItemAsync(
-                DownloadQueueStatus.Completed,
-                destination,
-                failureCode: null,
-                completedBytes);
-            DownloadFraction = 1;
-            ProgressDetail = FormatBytes(completedBytes) + " saved";
-            StatusMessage = "Completed: " + Path.GetFileName(completedPath);
+            _preparedQueueWork[queueItem.Id] = new QueuedDownloadWork(_metadata, selection, destination);
+            StatusMessage = $"Queued: {Path.GetFileName(destination)}";
+            ProgressDetail = $"Global concurrency: {SelectedMaxConcurrentDownloads}";
+            PumpQueue();
         }
         catch (ArgumentException exception)
         {
-            ErrorMessage = "The download folder or generated filename is invalid. (Download.InvalidDestination)";
+            ErrorMessage = "The download folder or generated filename is invalid. (Queue.InvalidDestination)";
             ProgressDetail = exception.GetType().Name;
-            StatusMessage = "Download failed";
+            StatusMessage = "Download not queued";
         }
         catch (IOException exception)
         {
-            ErrorMessage = "TubeForge could not prepare the destination file. (Download.WriteFailed)";
+            ErrorMessage = "TubeForge could not prepare the queued destination. (Queue.WriteFailed)";
             ProgressDetail = exception.GetType().Name;
-            StatusMessage = "Download failed";
-        }
-        finally
-        {
-            _activeQueueItemId = null;
-            IsDownloading = false;
+            StatusMessage = "Download not queued";
         }
     }
 
-    public void Cancel() => _operationCancellation?.Cancel();
+    public void Cancel() => PauseAll();
 
     public void Dispose()
     {
-        CancelCurrentOperation();
+        CancelAnalysis();
+        PauseAll();
         _httpClient.Dispose();
         GC.SuppressFinalize(this);
     }
 
-    private void UpdateProgress(DownloadProgress progress)
+    private void PumpQueue()
     {
-        DownloadFraction = progress.Fraction ?? 0;
-        var speed = progress.BytesPerSecond > 0 ? $" · {FormatBytes((long)progress.BytesPerSecond)}/s" : string.Empty;
-        var eta = progress.EstimatedRemaining is not null
-            ? $" · {FormatDuration(progress.EstimatedRemaining.Value)} left"
-            : string.Empty;
-        ProgressDetail = $"{FormatBytes(progress.BytesReceived)}{speed}{eta}";
+        while (_queueDispatcher.ActiveCount < _queueDispatcher.MaximumConcurrency)
+        {
+            var next = _queueSnapshot.Items.FirstOrDefault(item =>
+                item.Status == DownloadQueueStatus.Queued && !_queueDispatcher.IsActive(item.Id));
+            if (next is null || !_queueDispatcher.TryStart(next.Id))
+            {
+                break;
+            }
+
+            IsDownloading = true;
+            NotifyQueueProperties();
+            _ = RunQueueItemAsync(next.Id);
+        }
     }
 
-    private DownloadQueueItem CreateOrResumeQueueItem(
+    private async Task RunQueueItemAsync(Guid itemId)
+    {
+        var cancellation = new CancellationTokenSource();
+        _downloadCancellations[itemId] = cancellation;
+        try
+        {
+            var startError = await UpdateQueueItemAsync(
+                itemId,
+                DownloadQueueStatus.Downloading,
+                failureCode: null,
+                cancellationToken: cancellation.Token);
+            if (startError is not null)
+            {
+                ReportQueueError(startError);
+                return;
+            }
+
+            var prepared = await PrepareQueueWorkAsync(itemId, cancellation.Token);
+            if (prepared.Error is not null || prepared.Work is null)
+            {
+                var status = prepared.Error?.Code == "Operation.Cancelled"
+                    ? CancellationStatus(itemId)
+                    : DownloadQueueStatus.Failed;
+                await CompleteQueueRunAsync(itemId, status, prepared.Error, completedBytes: null);
+                return;
+            }
+
+            var work = prepared.Work;
+            var progress = new Progress<DownloadProgress>(value => UpdateQueueProgress(itemId, value));
+            TubeForgeError? downloadError;
+            long completedBytes;
+            if (work.Selection.AudioFormat is StreamFormat audioFormat)
+            {
+                var result = await _adaptiveDownloader.DownloadAsync(new AdaptiveDownloadRequest
+                {
+                    Video = TrackRequest(
+                        work.Metadata,
+                        work.Selection.Format,
+                        IntermediateTrackPath(work.Destination, "video", work.Selection.Format)),
+                    Audio = TrackRequest(
+                        work.Metadata,
+                        audioFormat,
+                        IntermediateTrackPath(work.Destination, "audio", audioFormat)),
+                    DestinationPath = work.Destination,
+                    OutputContainer = work.Selection.Format.Container
+                }, progress, cancellation.Token);
+                downloadError = result.Error;
+                completedBytes = result.IsSuccess ? result.Value.BytesWritten : SelectionPartialLength(work.Destination, work.Selection);
+            }
+            else
+            {
+                var result = await _downloader.DownloadAsync(
+                    TrackRequest(work.Metadata, work.Selection.Format, work.Destination),
+                    progress,
+                    cancellation.Token);
+                downloadError = result.Error;
+                completedBytes = result.IsSuccess ? result.Value.BytesWritten : SelectionPartialLength(work.Destination, work.Selection);
+            }
+
+            if (downloadError is not null)
+            {
+                var status = downloadError.Code == "Operation.Cancelled"
+                    ? CancellationStatus(itemId)
+                    : DownloadQueueStatus.Failed;
+                await CompleteQueueRunAsync(itemId, status, downloadError, completedBytes);
+                return;
+            }
+
+            await CompleteQueueRunAsync(
+                itemId,
+                DownloadQueueStatus.Completed,
+                error: null,
+                completedBytes);
+            StatusMessage = "Completed: " + Path.GetFileName(work.Destination);
+        }
+        catch (OperationCanceledException)
+        {
+            await CompleteQueueRunAsync(
+                itemId,
+                CancellationStatus(itemId),
+                new TubeForgeError("Operation.Cancelled", "The download was paused."),
+                QueuePartialLength(itemId));
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or HttpRequestException)
+        {
+            await CompleteQueueRunAsync(
+                itemId,
+                DownloadQueueStatus.Failed,
+                new TubeForgeError("Download.UnexpectedFailure", "The queued download failed.", exception.GetType().Name),
+                QueuePartialLength(itemId));
+        }
+        catch (Exception exception)
+        {
+            await CompleteQueueRunAsync(
+                itemId,
+                DownloadQueueStatus.Failed,
+                new TubeForgeError("Download.InternalFailure", "The queued download hit an internal failure.", exception.GetType().Name),
+                QueuePartialLength(itemId));
+        }
+        finally
+        {
+            _preparedQueueWork.Remove(itemId);
+            _cancelledQueueItems.Remove(itemId);
+            _downloadCancellations.Remove(itemId);
+            cancellation.Dispose();
+            _queueDispatcher.Complete(itemId);
+            IsDownloading = _queueDispatcher.ActiveCount > 0;
+            NotifyQueueProperties();
+            PumpQueue();
+        }
+    }
+
+    private async Task<(QueuedDownloadWork? Work, TubeForgeError? Error)> PrepareQueueWorkAsync(
+        Guid itemId,
+        CancellationToken cancellationToken)
+    {
+        if (_preparedQueueWork.TryGetValue(itemId, out var prepared))
+        {
+            return (prepared, null);
+        }
+
+        var item = _queueSnapshot.Items.FirstOrDefault(candidate => candidate.Id == itemId);
+        if (item is null)
+        {
+            return (null, new TubeForgeError("Queue.ItemMissing", "The queued download no longer exists."));
+        }
+
+        if (!YouTubeVideoId.TryCreate(item.VideoId, out var videoId))
+        {
+            return (null, new TubeForgeError("Queue.InvalidVideoId", "The queued video ID is invalid."));
+        }
+
+        var resolved = await _resolver.ResolveAsync(videoId, cancellationToken);
+        if (!resolved.IsSuccess)
+        {
+            return (null, resolved.Error);
+        }
+
+        var primary = resolved.Value.Metadata.Formats.FirstOrDefault(format => format.FormatId == item.FormatId);
+        if (primary is null)
+        {
+            return (null, new TubeForgeError(
+                "Queue.FormatUnavailable",
+                "The queued format is no longer available. Analyze the video again to choose another output."));
+        }
+
+        if (!DownloadSourceIdentity.TryParse(item.SourceIdentity, out var sourceIdentity) ||
+            sourceIdentity.VideoId != videoId || sourceIdentity.PrimaryFormatId != item.FormatId)
+        {
+            return (null, new TubeForgeError("Queue.InvalidSourceIdentity", "The queued source identity is invalid."));
+        }
+
+        StreamFormat? audio = null;
+        var audioFormatId = sourceIdentity.AudioFormatId;
+        if (audioFormatId is not null)
+        {
+            audio = resolved.Value.Metadata.Formats.FirstOrDefault(format =>
+                format.FormatId == audioFormatId && format.Kind == StreamKind.AudioOnly);
+            if (audio is null || !AdaptiveFormatSelector.AreMuxCompatible(primary, audio))
+            {
+                return (null, new TubeForgeError(
+                    "Queue.AudioFormatUnavailable",
+                    "The queued companion audio format is no longer available."));
+            }
+        }
+
+        var selection = new FormatItemViewModel(primary, audio);
+        var work = new QueuedDownloadWork(resolved.Value.Metadata, selection, item.DestinationPath);
+        _preparedQueueWork[itemId] = work;
+        return (work, null);
+    }
+
+    private async Task CompleteQueueRunAsync(
+        Guid itemId,
+        DownloadQueueStatus status,
+        TubeForgeError? error,
+        long? completedBytes)
+    {
+        var queueError = await UpdateQueueItemAsync(itemId, status, error?.Code, completedBytes);
+        if (queueError is not null)
+        {
+            ReportQueueError(queueError);
+            return;
+        }
+
+        if (error is not null && error.Code != "Operation.Cancelled")
+        {
+            ErrorMessage = $"{error.Message} ({error.Code})";
+        }
+    }
+
+    private void UpdateQueueProgress(Guid itemId, DownloadProgress progress)
+    {
+        var card = QueueItems.FirstOrDefault(item => item.Id == itemId);
+        card?.UpdateProgress(progress);
+        DownloadFraction = progress.Fraction ?? 0;
+        ProgressDetail = $"{_queueDispatcher.ActiveCount} active · global limit {SelectedMaxConcurrentDownloads}";
+    }
+
+    private long? QueuePartialLength(Guid itemId)
+    {
+        if (_preparedQueueWork.TryGetValue(itemId, out var work))
+        {
+            return SelectionPartialLength(work.Destination, work.Selection);
+        }
+
+        return _queueSnapshot.Items.FirstOrDefault(item => item.Id == itemId)?.BytesReceived;
+    }
+
+    private async Task ResumeQueueItemAsync(Guid itemId)
+    {
+        var item = _queueSnapshot.Items.FirstOrDefault(candidate => candidate.Id == itemId);
+        if (item is null || item.Status is not (DownloadQueueStatus.Paused or DownloadQueueStatus.Failed or DownloadQueueStatus.Cancelled))
+        {
+            return;
+        }
+
+        ErrorMessage = string.Empty;
+        var error = await UpdateQueueItemAsync(itemId, DownloadQueueStatus.Queued, failureCode: null);
+        if (error is not null)
+        {
+            ReportQueueError(error);
+            return;
+        }
+
+        PumpQueue();
+    }
+
+    private void PauseQueueItem(Guid itemId)
+    {
+        if (_downloadCancellations.TryGetValue(itemId, out var cancellation))
+        {
+            cancellation.Cancel();
+        }
+    }
+
+    private async Task CancelQueueItemAsync(Guid itemId)
+    {
+        var item = _queueSnapshot.Items.FirstOrDefault(candidate => candidate.Id == itemId);
+        if (item is null || item.Status is not (DownloadQueueStatus.Queued or DownloadQueueStatus.Downloading))
+        {
+            return;
+        }
+
+        _cancelledQueueItems.Add(itemId);
+        if (_downloadCancellations.TryGetValue(itemId, out var cancellation))
+        {
+            cancellation.Cancel();
+            return;
+        }
+
+        var error = await UpdateQueueItemAsync(itemId, DownloadQueueStatus.Cancelled, "Operation.Cancelled");
+        _cancelledQueueItems.Remove(itemId);
+        if (error is not null)
+        {
+            ReportQueueError(error);
+        }
+    }
+
+    private void PauseAll()
+    {
+        foreach (var cancellation in _downloadCancellations.Values.ToArray())
+        {
+            cancellation.Cancel();
+        }
+    }
+
+    private async Task RemoveQueueItemAsync(Guid itemId)
+    {
+        if (_queueDispatcher.IsActive(itemId))
+        {
+            return;
+        }
+
+        await RemoveQueueItemsAsync([itemId]);
+    }
+
+    private async Task ClearCompletedAsync()
+    {
+        var completedIds = _queueSnapshot.Items
+            .Where(item => item.Status == DownloadQueueStatus.Completed)
+            .Select(item => item.Id)
+            .ToArray();
+        await RemoveQueueItemsAsync(completedIds);
+    }
+
+    private async Task RemoveQueueItemsAsync(IReadOnlyCollection<Guid> itemIds)
+    {
+        if (itemIds.Count == 0 || _queueUnavailable)
+        {
+            return;
+        }
+
+        await _queueMutationLock.WaitAsync();
+        try
+        {
+            var ids = itemIds.ToHashSet();
+            var nextSnapshot = _queueSnapshot with
+            {
+                Items = _queueSnapshot.Items.Where(item => !ids.Contains(item.Id)).ToArray()
+            };
+            var result = await _queueStore.SaveAsync(nextSnapshot);
+            if (!result.IsSuccess)
+            {
+                ReportQueueError(result.Error!);
+                return;
+            }
+
+            _queueSnapshot = nextSnapshot;
+            foreach (var card in QueueItems.Where(item => ids.Contains(item.Id)).ToArray())
+            {
+                QueueItems.Remove(card);
+            }
+
+            foreach (var id in ids)
+            {
+                _preparedQueueWork.Remove(id);
+            }
+
+            NotifyQueueProperties();
+        }
+        finally
+        {
+            _queueMutationLock.Release();
+        }
+    }
+
+    private void RebuildQueueItems()
+    {
+        QueueItems.Clear();
+        foreach (var item in _queueSnapshot.Items.OrderBy(item => item.CreatedAtUtc))
+        {
+            QueueItems.Add(CreateQueueCard(item));
+        }
+
+        NotifyQueueProperties();
+    }
+
+    private void RefreshQueueItem(DownloadQueueItem item)
+    {
+        var existing = QueueItems.FirstOrDefault(candidate => candidate.Id == item.Id);
+        if (existing is null)
+        {
+            QueueItems.Add(CreateQueueCard(item));
+        }
+        else
+        {
+            existing.Update(item);
+        }
+
+        NotifyQueueProperties();
+    }
+
+    private QueueItemViewModel CreateQueueCard(DownloadQueueItem item) => new(
+        item,
+        ResumeQueueItemAsync,
+        PauseQueueItem,
+        CancelQueueItemAsync,
+        RemoveQueueItemAsync,
+        RevealDestination);
+
+    private DownloadQueueStatus CancellationStatus(Guid itemId) =>
+        _cancelledQueueItems.Contains(itemId)
+            ? DownloadQueueStatus.Cancelled
+            : DownloadQueueStatus.Paused;
+
+    private void NotifyQueueProperties()
+    {
+        OnPropertyChanged(nameof(HasQueueItems));
+        OnPropertyChanged(nameof(QueueSummary));
+        ClearCompletedCommand.RaiseCanExecuteChanged();
+        CancelCommand.RaiseCanExecuteChanged();
+    }
+
+    private void RevealDestination(string destination)
+    {
+        try
+        {
+            var directory = Path.GetDirectoryName(destination);
+            if (string.IsNullOrWhiteSpace(directory) || !Directory.Exists(directory))
+            {
+                ErrorMessage = "The destination folder no longer exists. (Queue.DirectoryMissing)";
+                return;
+            }
+
+            Process.Start(new ProcessStartInfo
+            {
+                FileName = directory,
+                UseShellExecute = true
+            });
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or System.ComponentModel.Win32Exception)
+        {
+            ErrorMessage = $"Windows could not open the destination folder. (Queue.RevealFailed: {exception.GetType().Name})";
+        }
+    }
+
+    private void ReportQueueError(TubeForgeError error)
+    {
+        ErrorMessage = $"{error.Message} ({error.Code})";
+        StatusMessage = "Queue state warning";
+    }
+
+    private static DownloadQueueItem CreateQueueItem(
         VideoMetadata metadata,
         FormatItemViewModel selection,
         string destination)
@@ -573,25 +986,6 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         var sourceIdentity = SelectionIdentity(metadata, selection);
         var expectedLength = CombinedLength(selection);
         var partialLength = SelectionPartialLength(destination, selection);
-        var existing = _queueSnapshot.Items
-            .Where(item =>
-                item.SourceIdentity.Equals(sourceIdentity, StringComparison.Ordinal) &&
-                item.DestinationPath.Equals(destination, StringComparison.OrdinalIgnoreCase) &&
-                item.Status is DownloadQueueStatus.Queued or DownloadQueueStatus.Paused or DownloadQueueStatus.Failed)
-            .OrderByDescending(item => item.UpdatedAtUtc)
-            .FirstOrDefault();
-
-        if (existing is not null)
-        {
-            return existing with
-            {
-                ExpectedLength = expectedLength ?? existing.ExpectedLength,
-                BytesReceived = partialLength,
-                Status = DownloadQueueStatus.Downloading,
-                UpdatedAtUtc = now,
-                FailureCode = null
-            };
-        }
 
         return new DownloadQueueItem
         {
@@ -603,7 +997,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             DestinationPath = destination,
             ExpectedLength = expectedLength,
             BytesReceived = partialLength,
-            Status = DownloadQueueStatus.Downloading,
+            Status = DownloadQueueStatus.Queued,
             CreatedAtUtc = now,
             UpdatedAtUtc = now
         };
@@ -628,9 +1022,10 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         destination + $".{role}-track" + FormatDisplay.OutputExtension(format);
 
     private static string SelectionIdentity(VideoMetadata metadata, FormatItemViewModel selection) =>
-        selection.AudioFormat is null
-            ? $"{metadata.Id.Value}:{selection.Format.FormatId}"
-            : $"{metadata.Id.Value}:{selection.Format.FormatId}+{selection.AudioFormat.FormatId}";
+        DownloadSourceIdentity.Create(
+            metadata.Id,
+            selection.Format.FormatId,
+            selection.AudioFormat?.FormatId);
 
     private static long? CombinedLength(FormatItemViewModel selection) =>
         selection.Format.ContentLength is not null && selection.AudioFormat?.ContentLength is not null
@@ -677,52 +1072,53 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                 "The saved queue must be repaired before starting another download.");
         }
 
-        var nextSnapshot = _queueSnapshot with
+        await _queueMutationLock.WaitAsync(cancellationToken);
+        try
         {
-            Items = _queueSnapshot.Items
-                .Where(existing => existing.Id != item.Id)
-                .Append(item)
-                .OrderBy(existing => existing.CreatedAtUtc)
-                .ToArray()
-        };
-        var result = await _queueStore.SaveAsync(nextSnapshot, cancellationToken);
-        if (!result.IsSuccess)
-        {
-            return result.Error;
-        }
+            var nextSnapshot = _queueSnapshot with
+            {
+                Items = _queueSnapshot.Items
+                    .Where(existing => existing.Id != item.Id)
+                    .Append(item)
+                    .OrderBy(existing => existing.CreatedAtUtc)
+                    .ToArray()
+            };
+            var result = await _queueStore.SaveAsync(nextSnapshot, cancellationToken);
+            if (!result.IsSuccess)
+            {
+                return result.Error;
+            }
 
-        _queueSnapshot = nextSnapshot;
-        return null;
+            _queueSnapshot = nextSnapshot;
+            RefreshQueueItem(item);
+            return null;
+        }
+        finally
+        {
+            _queueMutationLock.Release();
+        }
     }
 
-    private async Task UpdateActiveQueueItemAsync(
+    private async Task<TubeForgeError?> UpdateQueueItemAsync(
+        Guid itemId,
         DownloadQueueStatus status,
-        string destination,
         string? failureCode,
-        long? completedBytes = null)
+        long? completedBytes = null,
+        CancellationToken cancellationToken = default)
     {
-        if (_activeQueueItemId is not Guid activeId)
-        {
-            return;
-        }
-
-        var item = _queueSnapshot.Items.FirstOrDefault(candidate => candidate.Id == activeId);
+        var item = _queueSnapshot.Items.FirstOrDefault(candidate => candidate.Id == itemId);
         if (item is null)
         {
-            return;
+            return new TubeForgeError("Queue.ItemMissing", "The queued download no longer exists.");
         }
 
-        var queueError = await UpsertQueueItemAsync(item with
+        return await UpsertQueueItemAsync(item with
         {
-            BytesReceived = completedBytes ?? PartialLength(destination),
+            BytesReceived = completedBytes ?? item.BytesReceived,
             Status = status,
             UpdatedAtUtc = DateTimeOffset.UtcNow,
             FailureCode = failureCode
-        });
-        if (queueError is not null)
-        {
-            ProgressDetail = $"Queue state warning: {queueError.Code}";
-        }
+        }, cancellationToken);
     }
 
     private static long PartialLength(string destination)
@@ -754,7 +1150,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         ProgressDetail = string.Empty;
         Formats.Clear();
         SelectedFormat = null;
-        DownloadActionLabel = "Download";
+        DownloadActionLabel = "Add to queue";
         RebuildFormatFilters(resetSelections: true);
         NotifyVideoProperties();
     }
@@ -1123,11 +1519,11 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         CancelCommand.RaiseCanExecuteChanged();
     }
 
-    private void CancelCurrentOperation()
+    private void CancelAnalysis()
     {
-        _operationCancellation?.Cancel();
-        _operationCancellation?.Dispose();
-        _operationCancellation = null;
+        _analysisCancellation?.Cancel();
+        _analysisCancellation?.Dispose();
+        _analysisCancellation = null;
     }
 
     private bool Set<T>(ref T field, T value, [CallerMemberName] string? propertyName = null)
@@ -1264,4 +1660,9 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         AudioCodec.Vorbis => 2,
         _ => 3
     };
+
+    private sealed record QueuedDownloadWork(
+        VideoMetadata Metadata,
+        FormatItemViewModel Selection,
+        string Destination);
 }

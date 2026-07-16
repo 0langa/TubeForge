@@ -94,6 +94,23 @@ public static class DownloadQueueStoreTests
         Assert.Equal("Operation.Cancelled", saveResult.Error?.Code);
     }
 
+    [Test]
+    public static async Task RejectsSourceIdentityThatDoesNotMatchPersistedSelection()
+    {
+        using var directory = new TestDirectory();
+        var store = new DownloadQueueStore(Path.Combine(directory.Path, "queue.json"));
+        var now = DateTimeOffset.UtcNow;
+        var mismatched = Item(Guid.NewGuid(), DownloadQueueStatus.Queued, now) with
+        {
+            SourceIdentity = "Fixture123_:401+140"
+        };
+
+        var result = await store.SaveAsync(new DownloadQueueSnapshot { Items = [mismatched] });
+
+        Assert.False(result.IsSuccess);
+        Assert.Equal("Queue.InvalidState", result.Error?.Code);
+    }
+
     private static DownloadQueueItem Item(
         Guid id,
         DownloadQueueStatus status,
