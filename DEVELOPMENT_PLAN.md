@@ -403,7 +403,7 @@ Exit: release-candidate reliability targets met on supported Windows versions.
 - [x] Add upgrade/uninstall behavior and data-retention documentation.
 - [x] Add versioned extraction compatibility notes.
 - [x] Complete privacy, security, responsible-use, accessibility, and threat-model reviews.
-- [ ] Publish v1.0 with limitations and support policy.
+- [x] Publish v1.0 with limitations and support policy.
 
 Exit: clean-machine installation, download smoke test, uninstall, checksum verification, and rollback pass.
 
