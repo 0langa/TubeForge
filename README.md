@@ -14,11 +14,12 @@ Working now:
 - modern WPF analyze/download screen;
 - strict YouTube URL parsing and live public-video metadata resolution;
 - versioned Android player fallback for direct progressive, native-audio, and video-only streams;
-- truthful format/container/codec labels and collision-safe filenames;
+- type-first stream selection with resolution, container, codec, FPS/HDR, bitrate, and exact-stream filters;
+- caption-track metadata, truthful format labels, and collision-safe filenames;
 - resumable `.part` transfers, validators, bounded retries, progress, cancellation, and atomic finalization;
 - dependency-free fixture/transfer test runner and sanitized live metadata smoke tool.
 
-Not finished: persistent multi-item queue, adaptive audio/video muxing, current ES6 player decipher, throttling-parameter transforms, container validation, settings, packaging, and releases. See [DEVELOPMENT_PLAN.md](DEVELOPMENT_PLAN.md) for exact checklist state.
+Not finished: persistent multi-item queue, adaptive audio/video muxing, audio transcoding/MP3, current ES6 player decipher, throttling-parameter transforms, container validation, settings, packaging, and releases. See [DEVELOPMENT_PLAN.md](DEVELOPMENT_PLAN.md) for exact checklist state.
 
 ## Baseline
 

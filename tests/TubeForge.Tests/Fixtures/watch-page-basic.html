@@ -16,6 +16,29 @@ var ytInitialPlayerResponse = {
       {"url":"https://i.ytimg.com/vi/Fixture123_/hqdefault.jpg","width":480,"height":360}
     ]}
   },
+  "captions":{"playerCaptionsTracklistRenderer":{"captionTracks":[
+    {
+      "baseUrl":"https://www.youtube.com/api/timedtext?v=Fixture123_&lang=en",
+      "name":{"simpleText":"English"},
+      "vssId":".en",
+      "languageCode":"en",
+      "isTranslatable":true
+    },
+    {
+      "baseUrl":"https://www.youtube.com/api/timedtext?v=Fixture123_&lang=de&kind=asr",
+      "name":{"runs":[{"text":"German"},{"text":" (auto-generated)"}]},
+      "vssId":"a.de",
+      "languageCode":"de",
+      "kind":"asr",
+      "isTranslatable":false
+    },
+    {
+      "baseUrl":"https://attacker.example/api/timedtext?v=Fixture123_&lang=xx",
+      "name":{"simpleText":"Untrusted"},
+      "vssId":".xx",
+      "languageCode":"xx"
+    }
+  ]}},
   "streamingData":{
     "formats":[{
       "itag":22,

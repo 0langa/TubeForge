@@ -45,12 +45,24 @@ var data = result.Value;
 var progressive = data.Metadata.Formats.Count(format => format.Kind == StreamKind.Progressive);
 var audioOnly = data.Metadata.Formats.Count(format => format.Kind == StreamKind.AudioOnly);
 var videoOnly = data.Metadata.Formats.Count(format => format.Kind == StreamKind.VideoOnly);
+var maximumCombinedHeight = data.Metadata.Formats
+    .Where(format => format.Kind == StreamKind.Progressive)
+    .Select(format => format.Height ?? 0)
+    .DefaultIfEmpty(0)
+    .Max();
+var maximumVideoOnlyHeight = data.Metadata.Formats
+    .Where(format => format.Kind == StreamKind.VideoOnly)
+    .Select(format => format.Height ?? 0)
+    .DefaultIfEmpty(0)
+    .Max();
 
 Console.WriteLine($"Video ID: {data.Metadata.Id}");
 Console.WriteLine($"Title: {data.Metadata.Title}");
 Console.WriteLine($"Channel: {data.Metadata.Channel}");
 Console.WriteLine($"Duration: {data.Metadata.Duration}");
 Console.WriteLine($"Direct formats: {data.Metadata.Formats.Count} ({progressive} progressive, {audioOnly} audio-only, {videoOnly} video-only)");
+Console.WriteLine($"Maximum heights: {maximumCombinedHeight}p combined, {maximumVideoOnlyHeight}p video-only");
+Console.WriteLine($"Caption tracks: {data.Metadata.CaptionTracks.Count} ({string.Join(", ", data.Metadata.CaptionTracks.Select(track => track.LanguageCode).Distinct(StringComparer.OrdinalIgnoreCase))})");
 Console.WriteLine($"Ciphered formats: {data.CipheredFormatCount}");
 Console.WriteLine($"Player script detected: {data.PlayerScriptUrl is not null}");
 if (data.Diagnostics is not null)

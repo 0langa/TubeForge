@@ -180,6 +180,12 @@ public sealed class YouTubeMetadataResolver(HttpClient httpClient)
 
             return parsed.Value with
             {
+                Metadata = parsed.Value.Metadata with
+                {
+                    CaptionTracks = parsed.Value.Metadata.CaptionTracks.Count > 0
+                        ? parsed.Value.Metadata.CaptionTracks
+                        : fallback.Metadata.CaptionTracks
+                },
                 PlayerScriptUrl = fallback.PlayerScriptUrl,
                 Diagnostics = new ExtractionDiagnostics("AndroidClientResolved")
             };

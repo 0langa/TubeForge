@@ -285,7 +285,7 @@ Exit: URL-to-video-ID and domain decisions pass exhaustive local tests.
 - [x] Fetch watch page with timeouts, cancellation, compression, and bounded redirects.
 - [x] Extract embedded player response and player-script URL using balanced structural scanning.
 - [x] Map metadata, thumbnails, duration, playability, and streaming formats.
-- [ ] Map caption tracks and language metadata.
+- [x] Map caption tracks and language metadata.
 - [x] Implement internal Android player request using page-derived public configuration.
 - [x] Add fallback strategy orchestration and typed failure classification.
 - [x] Add sanitized fixture tests and opt-in live smoke command.
@@ -312,7 +312,7 @@ Exit: dependency-free CLI/harness downloads a progressive MP4 reliably and resum
 - [x] Create styled WPF shell, theme resources, typography, and icons drawn as vectors.
 - [x] Implement paste/analyze workflow and metadata card.
 - [x] Implement recommended and detailed format list.
-- [ ] Add advanced resolution/container/codec/FPS/HDR filters.
+- [x] Add advanced resolution/container/codec/FPS/HDR filters.
 - [x] Implement destination picker and automatic collision-safe naming.
 - [ ] Implement queue cards and global concurrency control.
 - [ ] Add settings, first-run responsible-use notice, and diagnostics view.
@@ -442,6 +442,7 @@ Order for current work:
 - 2026-07-16: RECALL state is local development context and must remain outside Git.
 - 2026-07-16: Use a versioned Android player profile as the primary direct-format fallback when the watch page exposes only ciphered media. Current WEB/MWEB/TV profiles returned no usable streams during live verification; the tested Android profile returned progressive, audio-only, and video-only URLs.
 - 2026-07-16: Keep the constrained classic signature planner as a guarded fallback. The current ES6 player no longer exposes the traditional split/reverse/splice shape, so current-player decipher and `n` transformation remain unfinished M5 work.
+- 2026-07-16: Use type-first stream selection. Combined audio/video, native audio, and video-only modes expose only relevant filters and report per-mode limits. Do not imply that a 360p progressive limit is the video's maximum quality; adaptive high-resolution video remains video-only until in-house muxing exists.
 
 ## 15. Plan maintenance
 

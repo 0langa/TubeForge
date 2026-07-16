@@ -23,6 +23,10 @@ public sealed record FormatItemViewModel(StreamFormat Format)
         ? FormatSize(Format.ContentLength.Value)
         : "size unknown";
 
+    public string AutomationName => $"{Label}; {TechnicalLabel}; {SizeLabel}";
+
+    public override string ToString() => AutomationName;
+
     private string VideoCodecLabel() => Format.VideoCodec switch
     {
         VideoCodec.H264 => "H.264",

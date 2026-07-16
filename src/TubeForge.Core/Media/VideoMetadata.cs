@@ -17,4 +17,6 @@ public sealed record VideoMetadata
     public VideoAvailability Availability { get; init; } = VideoAvailability.Available;
 
     public IReadOnlyList<StreamFormat> Formats { get; init; } = [];
+
+    public IReadOnlyList<CaptionTrack> CaptionTracks { get; init; } = [];
 }

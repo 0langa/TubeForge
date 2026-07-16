@@ -155,30 +155,119 @@
                     </StackPanel>
 
                     <Border Grid.Column="2" Style="{StaticResource Card}">
-                        <Grid>
-                            <Grid.RowDefinitions>
-                                <RowDefinition Height="Auto" />
-                                <RowDefinition Height="12" />
-                                <RowDefinition Height="260" />
-                                <RowDefinition Height="14" />
-                                <RowDefinition Height="Auto" />
-                                <RowDefinition Height="12" />
-                                <RowDefinition Height="Auto" />
-                            </Grid.RowDefinitions>
-
-                            <Grid Grid.Row="0">
+                        <StackPanel>
+                            <Grid>
                                 <StackPanel>
-                                    <TextBlock Text="Available streams" FontSize="16" FontWeight="SemiBold" />
-                                    <TextBlock Text="Native formats; no conversion or quality loss"
+                                    <TextBlock Text="Build your download" FontSize="17" FontWeight="SemiBold" />
+                                    <TextBlock Text="Choose a use case first; only relevant controls stay visible."
                                                Margin="0,4,0,0" FontSize="11" Foreground="{StaticResource MutedTextBrush}" />
                                 </StackPanel>
                                 <TextBlock Text="{Binding FormatCountLabel}" HorizontalAlignment="Right" VerticalAlignment="Center"
                                            Foreground="{StaticResource MutedTextBrush}" FontSize="11" />
                             </Grid>
 
-                            <ListBox Grid.Row="2" ItemsSource="{Binding Formats}" SelectedItem="{Binding SelectedFormat}"
-                                     AutomationProperties.Name="Available media streams">
-                                <ListBox.ItemTemplate>
+                            <TextBlock Text="DOWNLOAD TYPE" Style="{StaticResource FieldLabel}" Margin="0,18,0,6" />
+                            <ComboBox ItemsSource="{Binding DownloadModes}" SelectedItem="{Binding SelectedDownloadMode}"
+                                      AutomationProperties.Name="Download type">
+                                <ComboBox.ItemTemplate>
+                                    <DataTemplate>
+                                        <StackPanel>
+                                            <TextBlock Text="{Binding Label}" FontWeight="SemiBold" FontSize="13" />
+                                            <TextBlock Text="{Binding Description}" Margin="0,3,0,0" FontSize="10"
+                                                       Foreground="{StaticResource MutedTextBrush}" />
+                                        </StackPanel>
+                                    </DataTemplate>
+                                </ComboBox.ItemTemplate>
+                            </ComboBox>
+
+                            <Border Background="#0E1A2B" BorderBrush="#29405F" BorderThickness="1"
+                                    CornerRadius="8" Padding="11,9" Margin="0,10,0,0">
+                                <TextBlock Text="{Binding ModeNotice}" TextWrapping="Wrap" FontSize="10"
+                                           LineHeight="15" Foreground="#A8B7CE" />
+                            </Border>
+
+                            <Grid Margin="0,16,0,0"
+                                  Visibility="{Binding HasVideoFilters, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="12" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="12" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="12" />
+                                    <RowDefinition Height="Auto" />
+                                </Grid.RowDefinitions>
+
+                                <StackPanel Grid.Row="0" Grid.Column="0">
+                                    <TextBlock Text="QUALITY" Style="{StaticResource FieldLabel}" />
+                                    <ComboBox ItemsSource="{Binding ResolutionOptions}" SelectedItem="{Binding SelectedResolution}"
+                                              DisplayMemberPath="Label" AutomationProperties.Name="Video quality" />
+                                </StackPanel>
+                                <StackPanel Grid.Row="0" Grid.Column="2">
+                                    <TextBlock Text="CONTAINER" Style="{StaticResource FieldLabel}" />
+                                    <ComboBox ItemsSource="{Binding ContainerOptions}" SelectedItem="{Binding SelectedContainer}"
+                                              DisplayMemberPath="Label" AutomationProperties.Name="Video container" />
+                                </StackPanel>
+                                <StackPanel Grid.Row="2" Grid.Column="0">
+                                    <TextBlock Text="VIDEO CODEC" Style="{StaticResource FieldLabel}" />
+                                    <ComboBox ItemsSource="{Binding VideoCodecOptions}" SelectedItem="{Binding SelectedVideoCodec}"
+                                              DisplayMemberPath="Label" AutomationProperties.Name="Video codec" />
+                                </StackPanel>
+                                <StackPanel Grid.Row="2" Grid.Column="2">
+                                    <TextBlock Text="FRAME RATE" Style="{StaticResource FieldLabel}" />
+                                    <ComboBox ItemsSource="{Binding FrameRateOptions}" SelectedItem="{Binding SelectedFrameRate}"
+                                              DisplayMemberPath="Label" AutomationProperties.Name="Frame rate" />
+                                </StackPanel>
+                                <StackPanel Grid.Row="4" Grid.Column="0">
+                                    <TextBlock Text="DYNAMIC RANGE" Style="{StaticResource FieldLabel}" />
+                                    <ComboBox ItemsSource="{Binding DynamicRangeOptions}" SelectedItem="{Binding SelectedDynamicRange}"
+                                              DisplayMemberPath="Label" AutomationProperties.Name="Dynamic range" />
+                                </StackPanel>
+                            </Grid>
+
+                            <Grid Margin="0,16,0,0"
+                                  Visibility="{Binding IsAudioOnly, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="12" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="12" />
+                                    <RowDefinition Height="Auto" />
+                                </Grid.RowDefinitions>
+
+                                <StackPanel Grid.Row="0" Grid.Column="0">
+                                    <TextBlock Text="BITRATE" Style="{StaticResource FieldLabel}" />
+                                    <ComboBox ItemsSource="{Binding BitrateOptions}" SelectedItem="{Binding SelectedBitrate}"
+                                              DisplayMemberPath="Label" AutomationProperties.Name="Audio bitrate" />
+                                </StackPanel>
+                                <StackPanel Grid.Row="0" Grid.Column="2">
+                                    <TextBlock Text="FILE FORMAT" Style="{StaticResource FieldLabel}" />
+                                    <ComboBox ItemsSource="{Binding ContainerOptions}" SelectedItem="{Binding SelectedContainer}"
+                                              DisplayMemberPath="Label" AutomationProperties.Name="Audio file format" />
+                                </StackPanel>
+                                <StackPanel Grid.Row="2" Grid.Column="0">
+                                    <TextBlock Text="AUDIO CODEC" Style="{StaticResource FieldLabel}" />
+                                    <ComboBox ItemsSource="{Binding AudioCodecOptions}" SelectedItem="{Binding SelectedAudioCodec}"
+                                              DisplayMemberPath="Label" AutomationProperties.Name="Audio codec" />
+                                </StackPanel>
+                                <StackPanel Grid.Row="2" Grid.Column="2">
+                                    <TextBlock Text="PROCESSING" Style="{StaticResource FieldLabel}" />
+                                    <ComboBox ItemsSource="{Binding AudioProcessingOptions}"
+                                              SelectedItem="{Binding SelectedAudioProcessing}"
+                                              AutomationProperties.Name="Audio processing" />
+                                </StackPanel>
+                            </Grid>
+
+                            <TextBlock Text="EXACT STREAM" Style="{StaticResource FieldLabel}" Margin="0,16,0,6" />
+                            <ComboBox ItemsSource="{Binding Formats}" SelectedItem="{Binding SelectedFormat}"
+                                      AutomationProperties.Name="Exact matching stream" MinHeight="54">
+                                <ComboBox.ItemTemplate>
                                     <DataTemplate>
                                         <Grid>
                                             <Grid.ColumnDefinitions>
@@ -186,21 +275,23 @@
                                                 <ColumnDefinition Width="Auto" />
                                             </Grid.ColumnDefinitions>
                                             <StackPanel>
-                                                <TextBlock Text="{Binding Label}" FontWeight="SemiBold" FontSize="13" />
-                                                <TextBlock Text="{Binding TechnicalLabel}" Margin="0,4,0,0" FontSize="10"
+                                                <TextBlock Text="{Binding Label}" FontWeight="SemiBold" FontSize="12" />
+                                                <TextBlock Text="{Binding TechnicalLabel}" Margin="0,3,0,0" FontSize="10"
                                                            Foreground="{StaticResource MutedTextBrush}" />
                                             </StackPanel>
-                                            <TextBlock Grid.Column="1" Text="{Binding SizeLabel}" Margin="16,0,0,0"
-                                                       VerticalAlignment="Center" Foreground="{StaticResource MutedTextBrush}" />
+                                            <TextBlock Grid.Column="1" Text="{Binding SizeLabel}" Margin="14,0,0,0"
+                                                       VerticalAlignment="Center" FontSize="10"
+                                                       Foreground="{StaticResource MutedTextBrush}" />
                                         </Grid>
                                     </DataTemplate>
-                                </ListBox.ItemTemplate>
-                            </ListBox>
+                                </ComboBox.ItemTemplate>
+                            </ComboBox>
 
-                            <ProgressBar Grid.Row="4" Minimum="0" Maximum="1" Value="{Binding DownloadFraction, Mode=OneWay}"
+                            <ProgressBar Minimum="0" Maximum="1" Value="{Binding DownloadFraction, Mode=OneWay}"
+                                         Margin="0,16,0,0"
                                          Visibility="{Binding IsDownloading, Converter={StaticResource BooleanToVisibilityConverter}}" />
 
-                            <Grid Grid.Row="6">
+                            <Grid Margin="0,16,0,0">
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="*" />
                                     <ColumnDefinition Width="12" />
@@ -220,7 +311,7 @@
                                 <Button Grid.Column="4" Style="{StaticResource PrimaryButton}" Content="Download"
                                         Command="{Binding DownloadCommand}" AutomationProperties.Name="Start download" />
                             </Grid>
-                        </Grid>
+                        </StackPanel>
                     </Border>
                 </Grid>
 

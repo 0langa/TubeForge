@@ -15,6 +15,18 @@ namespace TubeForge.App.ViewModels;
 
 public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
 {
+    private static readonly IReadOnlyList<DownloadModeOption> BaseModeChoices =
+    [
+        new(DownloadMode.AudioVideo, "Audio + video", "Ready-to-play file with both tracks"),
+        new(DownloadMode.AudioOnly, "Audio only", "Native M4A/AAC or WebM/Opus audio"),
+        new(DownloadMode.VideoOnly, "Video only", "Maximum video quality; audio not included")
+    ];
+
+    private static readonly IReadOnlyList<string> AudioProcessingChoices =
+    [
+        "Native stream · no conversion · no quality loss"
+    ];
+
     private readonly HttpClient _httpClient;
     private readonly YouTubeMetadataResolver _resolver;
     private readonly DirectDownloadEngine _downloader;
@@ -34,6 +46,25 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     private FormatItemViewModel? _selectedFormat;
     private VideoMetadata? _metadata;
     private string _extractionStatus = string.Empty;
+    private IReadOnlyList<StreamFormat> _allFormats = [];
+    private bool _updatingFormatFilters;
+    private IReadOnlyList<DownloadModeOption> _downloadModes = BaseModeChoices;
+    private DownloadModeOption _selectedDownloadMode = BaseModeChoices[0];
+    private IReadOnlyList<FilterOption<int>> _resolutionOptions = [];
+    private FilterOption<int>? _selectedResolution;
+    private IReadOnlyList<FilterOption<MediaContainer>> _containerOptions = [];
+    private FilterOption<MediaContainer>? _selectedContainer;
+    private IReadOnlyList<FilterOption<VideoCodec>> _videoCodecOptions = [];
+    private FilterOption<VideoCodec>? _selectedVideoCodec;
+    private IReadOnlyList<FilterOption<int>> _frameRateOptions = [];
+    private FilterOption<int>? _selectedFrameRate;
+    private IReadOnlyList<FilterOption<bool>> _dynamicRangeOptions = [];
+    private FilterOption<bool>? _selectedDynamicRange;
+    private IReadOnlyList<FilterOption<long>> _bitrateOptions = [];
+    private FilterOption<long>? _selectedBitrate;
+    private IReadOnlyList<FilterOption<AudioCodec>> _audioCodecOptions = [];
+    private FilterOption<AudioCodec>? _selectedAudioCodec;
+    private string _selectedAudioProcessing = AudioProcessingChoices[0];
 
     public MainViewModel()
     {
@@ -60,6 +91,10 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     public event PropertyChangedEventHandler? PropertyChanged;
 
     public ObservableCollection<FormatItemViewModel> Formats { get; } = [];
+
+    public IReadOnlyList<DownloadModeOption> DownloadModes => _downloadModes;
+
+    public IReadOnlyList<string> AudioProcessingOptions => AudioProcessingChoices;
 
     public AsyncRelayCommand AnalyzeCommand { get; }
 
@@ -152,7 +187,129 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         }
     }
 
-    public string FormatCountLabel => $"{Formats.Count} formats";
+    public DownloadModeOption SelectedDownloadMode
+    {
+        get => _selectedDownloadMode;
+        set
+        {
+            if (value is null || !Set(ref _selectedDownloadMode, value))
+            {
+                return;
+            }
+
+            OnPropertyChanged(nameof(HasVideoFilters));
+            OnPropertyChanged(nameof(IsAudioOnly));
+            OnPropertyChanged(nameof(ModeNotice));
+            RebuildFormatFilters(resetSelections: true);
+        }
+    }
+
+    public IReadOnlyList<FilterOption<int>> ResolutionOptions
+    {
+        get => _resolutionOptions;
+        private set => Set(ref _resolutionOptions, value);
+    }
+
+    public FilterOption<int>? SelectedResolution
+    {
+        get => _selectedResolution;
+        set => SetFilterSelection(ref _selectedResolution, value);
+    }
+
+    public IReadOnlyList<FilterOption<MediaContainer>> ContainerOptions
+    {
+        get => _containerOptions;
+        private set => Set(ref _containerOptions, value);
+    }
+
+    public FilterOption<MediaContainer>? SelectedContainer
+    {
+        get => _selectedContainer;
+        set => SetFilterSelection(ref _selectedContainer, value);
+    }
+
+    public IReadOnlyList<FilterOption<VideoCodec>> VideoCodecOptions
+    {
+        get => _videoCodecOptions;
+        private set => Set(ref _videoCodecOptions, value);
+    }
+
+    public FilterOption<VideoCodec>? SelectedVideoCodec
+    {
+        get => _selectedVideoCodec;
+        set => SetFilterSelection(ref _selectedVideoCodec, value);
+    }
+
+    public IReadOnlyList<FilterOption<int>> FrameRateOptions
+    {
+        get => _frameRateOptions;
+        private set => Set(ref _frameRateOptions, value);
+    }
+
+    public FilterOption<int>? SelectedFrameRate
+    {
+        get => _selectedFrameRate;
+        set => SetFilterSelection(ref _selectedFrameRate, value);
+    }
+
+    public IReadOnlyList<FilterOption<bool>> DynamicRangeOptions
+    {
+        get => _dynamicRangeOptions;
+        private set => Set(ref _dynamicRangeOptions, value);
+    }
+
+    public FilterOption<bool>? SelectedDynamicRange
+    {
+        get => _selectedDynamicRange;
+        set => SetFilterSelection(ref _selectedDynamicRange, value);
+    }
+
+    public IReadOnlyList<FilterOption<long>> BitrateOptions
+    {
+        get => _bitrateOptions;
+        private set => Set(ref _bitrateOptions, value);
+    }
+
+    public FilterOption<long>? SelectedBitrate
+    {
+        get => _selectedBitrate;
+        set => SetFilterSelection(ref _selectedBitrate, value);
+    }
+
+    public IReadOnlyList<FilterOption<AudioCodec>> AudioCodecOptions
+    {
+        get => _audioCodecOptions;
+        private set => Set(ref _audioCodecOptions, value);
+    }
+
+    public FilterOption<AudioCodec>? SelectedAudioCodec
+    {
+        get => _selectedAudioCodec;
+        set => SetFilterSelection(ref _selectedAudioCodec, value);
+    }
+
+    public string SelectedAudioProcessing
+    {
+        get => _selectedAudioProcessing;
+        set => Set(ref _selectedAudioProcessing, value);
+    }
+
+    public bool HasVideoFilters => SelectedDownloadMode.Value is not DownloadMode.AudioOnly;
+
+    public bool IsAudioOnly => SelectedDownloadMode.Value is DownloadMode.AudioOnly;
+
+    public string ModeNotice => SelectedDownloadMode.Value switch
+    {
+        DownloadMode.AudioVideo =>
+            CombinedModeNotice(),
+        DownloadMode.AudioOnly =>
+            "Native AAC/Opus save: fast and lossless. MP3 conversion stays unavailable until TubeForge has its own encoder.",
+        DownloadMode.VideoOnly =>
+            VideoOnlyModeNotice(),
+        _ => string.Empty
+    };
+
+    public string FormatCountLabel => $"{Formats.Count} matching · {_allFormats.Count} total";
 
     public string ExtractionStatus
     {
@@ -190,15 +347,20 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             _videoChannel = _metadata.Channel;
             _videoDuration = _metadata.Duration;
             _thumbnailUrl = _metadata.ThumbnailUrl;
-            foreach (var format in FormatRanker.RankForDownload(_metadata.Formats))
+            _allFormats = _metadata.Formats;
+            RefreshDownloadModes();
+            var defaultMode = DownloadModes.FirstOrDefault(choice =>
+                FormatFilter.Apply(_allFormats, new FormatSelectionCriteria { Mode = choice.Value }).Count > 0) ??
+                DownloadModes[0];
+            if (SelectedDownloadMode != defaultMode)
             {
-                Formats.Add(new FormatItemViewModel(format));
+                SelectedDownloadMode = defaultMode;
+            }
+            else
+            {
+                RebuildFormatFilters(resetSelections: true);
             }
 
-            var recommended = FormatRanker.RecommendedProgressive(_metadata.Formats) ??
-                              FormatRanker.RecommendedAudio(_metadata.Formats) ??
-                              _metadata.Formats.FirstOrDefault();
-            SelectedFormat = Formats.FirstOrDefault(item => item.Format == recommended) ?? Formats.FirstOrDefault();
             ExtractionStatus = result.Value.Diagnostics?.Stage == "AndroidClientResolved"
                 ? "DIRECT STREAMS VERIFIED"
                 : "WATCH PAGE RESOLVED";
@@ -302,12 +464,253 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         _videoChannel = string.Empty;
         _videoDuration = null;
         _thumbnailUrl = null;
+        _allFormats = [];
+        _downloadModes = BaseModeChoices;
+        OnPropertyChanged(nameof(DownloadModes));
+        SelectedDownloadMode = BaseModeChoices[0];
         ExtractionStatus = string.Empty;
         ErrorMessage = string.Empty;
         ProgressDetail = string.Empty;
         Formats.Clear();
         SelectedFormat = null;
+        RebuildFormatFilters(resetSelections: true);
         NotifyVideoProperties();
+    }
+
+    private void RebuildFormatFilters(bool resetSelections)
+    {
+        if (_updatingFormatFilters)
+        {
+            return;
+        }
+
+        _updatingFormatFilters = true;
+        try
+        {
+            var modeFormats = FormatFilter.Apply(_allFormats, new FormatSelectionCriteria
+            {
+                Mode = SelectedDownloadMode.Value
+            });
+
+            if (IsAudioOnly)
+            {
+                ResolutionOptions = [];
+                SelectedResolution = null;
+                VideoCodecOptions = [];
+                SelectedVideoCodec = null;
+                FrameRateOptions = [];
+                SelectedFrameRate = null;
+                DynamicRangeOptions = [];
+                SelectedDynamicRange = null;
+
+                BitrateOptions = WithAny(
+                    "Best available",
+                    modeFormats
+                        .Where(format => format.Bitrate is > 0)
+                        .Select(format => format.Bitrate!.Value)
+                        .Distinct()
+                        .OrderByDescending(value => value)
+                        .Select(value => new FilterOption<long>($"{Math.Round(value / 1000d):0} kbps", value)));
+                SelectedBitrate = Choose(
+                    BitrateOptions,
+                    resetSelections ? null : SelectedBitrate?.Value);
+
+                var bitrateFormats = FilterBy(modeFormats, bitrate: SelectedBitrate?.Value);
+                ContainerOptions = WithAny(
+                    "Any native format",
+                    bitrateFormats
+                        .Select(format => format.Container)
+                        .Distinct()
+                        .OrderBy(ContainerOrder)
+                        .Select(value => new FilterOption<MediaContainer>(AudioContainerLabel(value), value)));
+                SelectedContainer = Choose(
+                    ContainerOptions,
+                    resetSelections ? null : SelectedContainer?.Value);
+
+                var containerFormats = FilterBy(
+                    bitrateFormats,
+                    container: SelectedContainer?.Value);
+                AudioCodecOptions = WithAny(
+                    "Any audio codec",
+                    containerFormats
+                        .Select(format => format.AudioCodec)
+                        .Distinct()
+                        .OrderBy(AudioCodecOrder)
+                        .Select(value => new FilterOption<AudioCodec>(AudioCodecLabel(value), value)));
+                SelectedAudioCodec = Choose(
+                    AudioCodecOptions,
+                    resetSelections ? null : SelectedAudioCodec?.Value);
+            }
+            else
+            {
+                BitrateOptions = [];
+                SelectedBitrate = null;
+                AudioCodecOptions = [];
+                SelectedAudioCodec = null;
+
+                ResolutionOptions = WithAny(
+                    "Best available",
+                    modeFormats
+                        .Where(format => format.Height is > 0)
+                        .Select(format => format.Height!.Value)
+                        .Distinct()
+                        .OrderByDescending(value => value)
+                        .Select(value => new FilterOption<int>(ResolutionLabel(value), value)));
+                SelectedResolution = Choose(
+                    ResolutionOptions,
+                    resetSelections ? null : SelectedResolution?.Value);
+
+                var resolutionFormats = FilterBy(modeFormats, height: SelectedResolution?.Value);
+                ContainerOptions = WithAny(
+                    "Any container",
+                    resolutionFormats
+                        .Select(format => format.Container)
+                        .Distinct()
+                        .OrderBy(ContainerOrder)
+                        .Select(value => new FilterOption<MediaContainer>(ContainerLabel(value), value)));
+                SelectedContainer = Choose(
+                    ContainerOptions,
+                    resetSelections ? null : SelectedContainer?.Value);
+
+                var containerFormats = FilterBy(
+                    resolutionFormats,
+                    container: SelectedContainer?.Value);
+                VideoCodecOptions = WithAny(
+                    "Any video codec",
+                    containerFormats
+                        .Select(format => format.VideoCodec)
+                        .Distinct()
+                        .OrderBy(VideoCodecOrder)
+                        .Select(value => new FilterOption<VideoCodec>(VideoCodecLabel(value), value)));
+                SelectedVideoCodec = Choose(
+                    VideoCodecOptions,
+                    resetSelections ? null : SelectedVideoCodec?.Value);
+
+                var codecFormats = FilterBy(
+                    containerFormats,
+                    videoCodec: SelectedVideoCodec?.Value);
+                FrameRateOptions = WithAny(
+                    "Any frame rate",
+                    codecFormats
+                        .Where(format => format.FramesPerSecond is > 0)
+                        .Select(format => format.FramesPerSecond!.Value)
+                        .Distinct()
+                        .OrderByDescending(value => value)
+                        .Select(value => new FilterOption<int>($"{value} FPS", value)));
+                SelectedFrameRate = Choose(
+                    FrameRateOptions,
+                    resetSelections ? null : SelectedFrameRate?.Value);
+
+                var frameRateFormats = FilterBy(
+                    codecFormats,
+                    framesPerSecond: SelectedFrameRate?.Value);
+                DynamicRangeOptions = WithAny(
+                    "Any dynamic range",
+                    frameRateFormats
+                        .Select(format => format.IsHdr)
+                        .Distinct()
+                        .OrderByDescending(value => value)
+                        .Select(value => new FilterOption<bool>(value ? "HDR" : "SDR", value)));
+                SelectedDynamicRange = Choose(
+                    DynamicRangeOptions,
+                    resetSelections ? null : SelectedDynamicRange?.Value);
+            }
+        }
+        finally
+        {
+            _updatingFormatFilters = false;
+        }
+
+        RefreshMatchingFormats();
+    }
+
+    private void RefreshDownloadModes()
+    {
+        var combined = FormatsForMode(DownloadMode.AudioVideo);
+        var audio = FormatsForMode(DownloadMode.AudioOnly);
+        var video = FormatsForMode(DownloadMode.VideoOnly);
+
+        _downloadModes =
+        [
+            new DownloadModeOption(
+                DownloadMode.AudioVideo,
+                "Audio + video",
+                $"{OptionCount(combined.Count)} · up to {MaximumVideoQuality(combined)} · includes audio"),
+            new DownloadModeOption(
+                DownloadMode.AudioOnly,
+                "Audio only",
+                $"{OptionCount(audio.Count)} · up to {MaximumAudioBitrate(audio)} · M4A/WebM"),
+            new DownloadModeOption(
+                DownloadMode.VideoOnly,
+                "Video only",
+                $"{OptionCount(video.Count)} · up to {MaximumVideoQuality(video)} · no audio")
+        ];
+        OnPropertyChanged(nameof(DownloadModes));
+    }
+
+    private IReadOnlyList<StreamFormat> FormatsForMode(DownloadMode mode) =>
+        FormatFilter.Apply(_allFormats, new FormatSelectionCriteria { Mode = mode });
+
+    private string CombinedModeNotice()
+    {
+        var combined = FormatsForMode(DownloadMode.AudioVideo);
+        var video = FormatsForMode(DownloadMode.VideoOnly);
+        var combinedMaximum = combined.Select(format => format.Height ?? 0).DefaultIfEmpty(0).Max();
+        var videoMaximum = video.Select(format => format.Height ?? 0).DefaultIfEmpty(0).Max();
+        if (videoMaximum > combinedMaximum)
+        {
+            return $"Includes audio; combined quality stops at {MaximumVideoQuality(combined)}. " +
+                   $"Choose Video only for {MaximumVideoQuality(video)}. High-quality video + audio needs TubeForge's internal muxer.";
+        }
+
+        return "Ready-to-play file with audio included. No conversion or quality loss.";
+    }
+
+    private string VideoOnlyModeNotice() =>
+        $"Up to {MaximumVideoQuality(FormatsForMode(DownloadMode.VideoOnly))}. " +
+        "Video track only: no audio. High-quality video + audio needs TubeForge's internal muxer.";
+
+    private void RefreshMatchingFormats()
+    {
+        var criteria = new FormatSelectionCriteria
+        {
+            Mode = SelectedDownloadMode.Value,
+            Height = HasVideoFilters ? SelectedResolution?.Value : null,
+            Container = SelectedContainer?.Value,
+            VideoCodec = HasVideoFilters ? SelectedVideoCodec?.Value : null,
+            AudioCodec = IsAudioOnly ? SelectedAudioCodec?.Value : null,
+            FramesPerSecond = HasVideoFilters ? SelectedFrameRate?.Value : null,
+            Bitrate = IsAudioOnly ? SelectedBitrate?.Value : null,
+            IsHdr = HasVideoFilters ? SelectedDynamicRange?.Value : null
+        };
+
+        Formats.Clear();
+        foreach (var format in FormatFilter.Apply(_allFormats, criteria))
+        {
+            Formats.Add(new FormatItemViewModel(format));
+        }
+
+        SelectedFormat = Formats.FirstOrDefault();
+        OnPropertyChanged(nameof(FormatCountLabel));
+        if (_metadata is not null && !IsBusy)
+        {
+            StatusMessage = Formats.Count > 0
+                ? "Choose exact stream, then download"
+                : "No stream matches these filters";
+        }
+    }
+
+    private void SetFilterSelection<T>(
+        ref FilterOption<T>? field,
+        FilterOption<T>? value,
+        [CallerMemberName] string? propertyName = null) where T : struct
+    {
+        if (!Set(ref field, value, propertyName) || _updatingFormatFilters)
+        {
+            return;
+        }
+
+        RebuildFormatFilters(resetSelections: false);
     }
 
     private void NotifyVideoProperties()
@@ -364,4 +767,114 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         var megabytes = bytes / 1024d / 1024d;
         return megabytes >= 1024 ? $"{megabytes / 1024:0.00} GB" : $"{megabytes:0.0} MB";
     }
+
+    private static string OptionCount(int count) => count == 1 ? "1 option" : $"{count} options";
+
+    private static string MaximumVideoQuality(IEnumerable<StreamFormat> formats)
+    {
+        var height = formats.Select(format => format.Height ?? 0).DefaultIfEmpty(0).Max();
+        return height > 0 ? ResolutionLabel(height) : "unavailable";
+    }
+
+    private static string MaximumAudioBitrate(IEnumerable<StreamFormat> formats)
+    {
+        var bitrate = formats.Select(format => format.Bitrate ?? 0).DefaultIfEmpty(0).Max();
+        return bitrate > 0 ? $"{Math.Round(bitrate / 1000d):0} kbps" : "unknown bitrate";
+    }
+
+    private static IReadOnlyList<FilterOption<T>> WithAny<T>(
+        string label,
+        IEnumerable<FilterOption<T>> options) where T : struct =>
+        [new FilterOption<T>(label, null), .. options];
+
+    private static FilterOption<T>? Choose<T>(
+        IReadOnlyList<FilterOption<T>> options,
+        T? desired) where T : struct =>
+        desired is null
+            ? options.FirstOrDefault()
+            : options.FirstOrDefault(option => EqualityComparer<T?>.Default.Equals(option.Value, desired)) ??
+              options.FirstOrDefault();
+
+    private static IReadOnlyList<StreamFormat> FilterBy(
+        IEnumerable<StreamFormat> formats,
+        int? height = null,
+        MediaContainer? container = null,
+        VideoCodec? videoCodec = null,
+        int? framesPerSecond = null,
+        long? bitrate = null) =>
+        formats.Where(format =>
+            (height is null || format.Height == height) &&
+            (container is null || format.Container == container) &&
+            (videoCodec is null || format.VideoCodec == videoCodec) &&
+            (framesPerSecond is null || format.FramesPerSecond == framesPerSecond) &&
+            (bitrate is null || format.Bitrate == bitrate))
+        .ToArray();
+
+    private static string ResolutionLabel(int height) => height switch
+    {
+        >= 4320 => $"{height}p · 8K",
+        >= 2160 => $"{height}p · 4K",
+        >= 1440 => $"{height}p · 2K",
+        >= 1080 => $"{height}p · Full HD",
+        >= 720 => $"{height}p · HD",
+        _ => $"{height}p"
+    };
+
+    private static string ContainerLabel(MediaContainer container) => container switch
+    {
+        MediaContainer.Mp4 => "MP4",
+        MediaContainer.WebM => "WebM",
+        MediaContainer.ThreeGp => "3GP",
+        _ => "Unknown container"
+    };
+
+    private static string AudioContainerLabel(MediaContainer container) => container switch
+    {
+        MediaContainer.Mp4 => "M4A / MP4",
+        MediaContainer.WebM => "WebM",
+        MediaContainer.ThreeGp => "3GP",
+        _ => "Unknown format"
+    };
+
+    private static string VideoCodecLabel(VideoCodec codec) => codec switch
+    {
+        VideoCodec.H264 => "H.264 · broad compatibility",
+        VideoCodec.Vp9 => "VP9 · efficient",
+        VideoCodec.Av1 => "AV1 · most efficient",
+        VideoCodec.Unknown => "Unknown codec",
+        _ => "No video codec"
+    };
+
+    private static string AudioCodecLabel(AudioCodec codec) => codec switch
+    {
+        AudioCodec.Aac => "AAC · broad compatibility",
+        AudioCodec.Opus => "Opus · efficient",
+        AudioCodec.Vorbis => "Vorbis",
+        AudioCodec.Unknown => "Unknown codec",
+        _ => "No audio codec"
+    };
+
+    private static int ContainerOrder(MediaContainer container) => container switch
+    {
+        MediaContainer.Mp4 => 0,
+        MediaContainer.WebM => 1,
+        MediaContainer.ThreeGp => 2,
+        _ => 3
+    };
+
+    private static int VideoCodecOrder(VideoCodec codec) => codec switch
+    {
+        VideoCodec.H264 => 0,
+        VideoCodec.Vp9 => 1,
+        VideoCodec.Av1 => 2,
+        _ => 3
+    };
+
+    private static int AudioCodecOrder(AudioCodec codec) => codec switch
+    {
+        AudioCodec.Aac => 0,
+        AudioCodec.Opus => 1,
+        AudioCodec.Vorbis => 2,
+        _ => 3
+    };
 }

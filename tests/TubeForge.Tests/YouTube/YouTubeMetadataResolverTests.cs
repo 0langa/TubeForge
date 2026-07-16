@@ -115,6 +115,11 @@ public static class YouTubeMetadataResolverTests
             var ytInitialPlayerResponse={
               "playabilityStatus":{"status":"OK"},
               "videoDetails":{"videoId":"Fixture123_","title":"Watch metadata","lengthSeconds":"10"},
+              "captions":{"playerCaptionsTracklistRenderer":{"captionTracks":[{
+                "baseUrl":"https://www.youtube.com/api/timedtext?v=Fixture123_&lang=en",
+                "name":{"simpleText":"English"},
+                "vssId":".en","languageCode":"en","isTranslatable":true
+              }]}},
               "streamingData":{"formats":[{
                 "itag":22,
                 "signatureCipher":"url=https%3A%2F%2Ffixture.googlevideo.com%2Fvideoplayback%3Fitag%3D22&s=abcdef&sp=sig",
@@ -164,6 +169,8 @@ public static class YouTubeMetadataResolverTests
 
         Assert.True(result.IsSuccess, result.Error?.Message);
         Assert.Equal(1, result.Value.Metadata.Formats.Count);
+        Assert.Equal(1, result.Value.Metadata.CaptionTracks.Count);
+        Assert.Equal("en", result.Value.Metadata.CaptionTracks[0].LanguageCode);
         Assert.Equal("Android metadata", result.Value.Metadata.Title);
         Assert.Equal("AndroidClientResolved", result.Value.Diagnostics?.Stage);
         Assert.Equal(2, requestCount);
