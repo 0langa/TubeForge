@@ -7,7 +7,7 @@ TubeForge is an experimental, ad-free Windows desktop downloader built from scra
 
 ## Status
 
-Early functional MVP; no stable release yet.
+Release candidate; no stable GitHub release published yet.
 
 Working now:
 
@@ -31,8 +31,10 @@ Working now:
 - keyboard-focused navigation, screen-reader labels/live regions, DPI-aware layout rounding, and dark Windows title-bar integration;
 - dependency-free fixture/transfer test runner with deterministic hostile-container mutation coverage, plus sanitized live smoke tools.
 - isolated performance budgets for analysis latency, startup, CPU, memory, and UI frame pacing, with the deterministic core gate enforced in CI.
+- bounded structural classic/ES6 signature and `n` throttling transforms without executing player JavaScript;
+- reproducible portable framework-dependent and self-contained Windows x64 packaging with SHA-256 manifests.
 
-Not finished: active-live capture, audio transcoding/MP3, current ES6 player decipher, throttling-parameter transforms, packaging, and releases. See [DEVELOPMENT_PLAN.md](DEVELOPMENT_PLAN.md) for exact checklist state.
+Not included: active-live capture, audio transcoding/MP3, authenticated/access-controlled media, automatic updates, or an installer. The public v1.0 release and license decision are still pending. See [DEVELOPMENT_PLAN.md](DEVELOPMENT_PLAN.md) for exact checklist state.
 
 ## Baseline
 
@@ -89,6 +91,17 @@ Run the desktop application:
 ```powershell
 dotnet run --project src/TubeForge.App --configuration Release
 ```
+
+## Release packaging
+
+Create framework-dependent and self-contained Windows x64 archives, a manifest, and SHA-256 checksums:
+
+```powershell
+.\scripts\Publish-Release.ps1 -Version 1.0.0
+.\scripts\Test-Release.ps1 -Version 1.0.0
+```
+
+Authenticode signing is optional and fails closed when a requested certificate cannot produce a valid signature. See [installation and data retention](docs/INSTALLATION.md), [extraction compatibility](docs/EXTRACTION_COMPATIBILITY.md), and the [v1 support policy](docs/SUPPORT_POLICY.md).
 
 ## Security
 

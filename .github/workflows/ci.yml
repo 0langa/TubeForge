@@ -29,3 +29,18 @@ jobs:
 
       - name: Core performance budget
         run: dotnet run --project tools/TubeForge.Performance --configuration Release --no-build -- --core-only
+
+      - name: Validate release PowerShell
+        shell: pwsh
+        run: |
+          $failed = $false
+          foreach ($file in Get-ChildItem -LiteralPath scripts -Filter '*.ps1') {
+            $tokens = $null
+            $errors = $null
+            [Management.Automation.Language.Parser]::ParseFile($file.FullName, [ref]$tokens, [ref]$errors) | Out-Null
+            foreach ($error in $errors) {
+              Write-Error "$($file.Name):$($error.Extent.StartLineNumber): $($error.Message)"
+              $failed = $true
+            }
+          }
+          if ($failed) { exit 1 }
