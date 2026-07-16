@@ -43,6 +43,14 @@ public static class MetadataSidecarWriterTests
                     LanguageCode = "en",
                     Name = "English"
                 }
+            ],
+            Chapters =
+            [
+                new VideoChapter
+                {
+                    Title = "Introduction",
+                    StartTime = TimeSpan.Zero
+                }
             ]
         };
         var destination = Path.Combine(directory.Path, "fixture.info.json");
@@ -60,6 +68,8 @@ public static class MetadataSidecarWriterTests
         Assert.Equal("https://www.youtube.com/watch?v=Fixture123_", root.GetProperty("sourceUrl").GetString());
         Assert.Equal(137, root.GetProperty("formats")[0].GetProperty("formatId").GetInt32());
         Assert.Equal("en", root.GetProperty("captions")[0].GetProperty("languageCode").GetString());
+        Assert.Equal("Introduction", root.GetProperty("chapters")[0].GetProperty("title").GetString());
+        Assert.Equal(0d, root.GetProperty("chapters")[0].GetProperty("startSeconds").GetDouble());
         Assert.False(File.Exists(destination + ".part"));
     }
 

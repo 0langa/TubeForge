@@ -234,7 +234,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     public string VideoMetaLine => string.Join("  ·  ", new[]
     {
         _videoChannel,
-        _videoDuration is null ? string.Empty : FormatDuration(_videoDuration.Value)
+        _videoDuration is null ? string.Empty : FormatDuration(_videoDuration.Value),
+        _metadata?.Chapters.Count > 0 ? $"{_metadata.Chapters.Count} chapters" : string.Empty
     }.Where(value => !string.IsNullOrWhiteSpace(value)));
 
     public Uri? ThumbnailUrl => _thumbnailUrl;

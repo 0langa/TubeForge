@@ -19,4 +19,6 @@ public sealed record VideoMetadata
     public IReadOnlyList<StreamFormat> Formats { get; init; } = [];
 
     public IReadOnlyList<CaptionTrack> CaptionTracks { get; init; } = [];
+
+    public IReadOnlyList<VideoChapter> Chapters { get; init; } = [];
 }

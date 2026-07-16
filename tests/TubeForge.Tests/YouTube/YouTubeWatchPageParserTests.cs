@@ -22,6 +22,11 @@ public static class YouTubeWatchPageParserTests
             result.Value.Metadata.ThumbnailUrl?.AbsoluteUri);
         Assert.Equal(2, result.Value.Metadata.Formats.Count);
         Assert.Equal(2, result.Value.Metadata.CaptionTracks.Count);
+        Assert.Equal(2, result.Value.Metadata.Chapters.Count);
+        Assert.Equal("Introduction", result.Value.Metadata.Chapters[0].Title);
+        Assert.Equal(TimeSpan.Zero, result.Value.Metadata.Chapters[0].StartTime);
+        Assert.Equal("Main section", result.Value.Metadata.Chapters[1].Title);
+        Assert.Equal(TimeSpan.FromMinutes(1), result.Value.Metadata.Chapters[1].StartTime);
         Assert.Equal(1, result.Value.CipheredFormatCount);
         Assert.Equal(
             "https://www.youtube.com/s/player/fixture/player_ias.vflset/en_US/base.js",

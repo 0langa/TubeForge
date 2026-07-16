@@ -365,7 +365,8 @@ Exit: compatible adaptive MP4 video and audio combine into a seekable file witho
 - [ ] Per-item selection, naming templates, archive/history, and duplicate detection.
 - [x] Captions: language selection, manual/automatic distinction, SRT/VTT conversion.
 - [x] Thumbnails and optional metadata sidecars.
-- [ ] Chapters and playlist indexing.
+- [x] Chapters: bounded watch-page extraction and metadata sidecar export.
+- [ ] Playlist indexing and ordering metadata.
 - [ ] Shorts/live metadata; completed live streams before active-live capture.
 - [ ] Rate-limit-aware bulk scheduling and per-host concurrency.
 
@@ -460,6 +461,7 @@ Order for current work:
 - 2026-07-16: Enforce deterministic fixture-analysis latency in CI and measure desktop startup, isolated idle CPU, working set, and WPF frame cadence with a local-only probe. Keep 2 s startup and 34 ms frames as targets; use 4 s and 50 ms as hard cold/30 Hz environment ceilings.
 - 2026-07-16: Caption downloads are bounded to the trusted YouTube timed-text endpoint, requested as WebVTT, validated before publication, and atomically saved as normalized VTT or safely converted SRT. Manual and auto-generated tracks remain explicit in the UI and filename.
 - 2026-07-16: Thumbnail sidecars accept only bounded JPEG, PNG, or WebP bytes from trusted YouTube image hosts and publish atomically. JSON sidecars contain stable metadata and format summaries while excluding ephemeral signed media and caption URLs.
+- 2026-07-16: Chapter metadata comes only from bounded description-chapter marker structures, is sorted and deduplicated by start time, and appears in stable JSON sidecars without affecting download eligibility.
 
 ## 15. Plan maintenance
 
