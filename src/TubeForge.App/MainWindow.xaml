@@ -823,6 +823,8 @@
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="14" />
                     <RowDefinition Height="Auto" />
+                    <RowDefinition Height="14" />
+                    <RowDefinition Height="Auto" />
                 </Grid.RowDefinitions>
 
                 <StackPanel Grid.Row="0">
@@ -905,6 +907,40 @@
                 </Border>
 
                 <Border Grid.Row="6" Style="{StaticResource Card}">
+                    <StackPanel>
+                        <TextBlock Text="Updates" FontSize="17" FontWeight="SemiBold" />
+                        <TextBlock Text="Stable releases are downloaded from the official GitHub repository and verified with two matching SHA-256 records before they can run."
+                                   Margin="0,7,0,0" TextWrapping="Wrap" Foreground="{StaticResource MutedTextBrush}" />
+
+                        <CheckBox IsChecked="{Binding EnableAutomaticUpdateChecks}" Margin="0,18,0,0"
+                                  AutomationProperties.Name="Automatically check for TubeForge updates">
+                            <StackPanel>
+                                <TextBlock Text="Automatically check at startup" FontWeight="SemiBold" />
+                                <TextBlock Text="Checks release metadata only. Installation always requires your confirmation."
+                                           Margin="0,4,0,0" FontSize="11" TextWrapping="Wrap"
+                                           Foreground="{StaticResource MutedTextBrush}" />
+                            </StackPanel>
+                        </CheckBox>
+
+                        <ProgressBar Height="5" Margin="0,16,0,0" Maximum="1"
+                                     Value="{Binding UpdateDownloadFraction, Mode=OneWay}"
+                                     Visibility="{Binding IsDownloadingUpdate, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                        <TextBlock Text="{Binding UpdateStatus}" Margin="0,14,0,0" TextWrapping="Wrap"
+                                   Foreground="{StaticResource MutedTextBrush}" />
+                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,16,0,0">
+                            <Button Style="{StaticResource SecondaryButton}" Content="Check now"
+                                    Command="{Binding CheckForUpdatesCommand}" Padding="14,9" />
+                            <Button Style="{StaticResource PrimaryButton}" Content="Download update" Margin="10,0,0,0"
+                                    Command="{Binding DownloadUpdateCommand}" Padding="14,9"
+                                    Visibility="{Binding HasUpdateAvailable, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                            <Button Style="{StaticResource PrimaryButton}" Content="Install and restart" Margin="10,0,0,0"
+                                    Click="InstallUpdateButton_OnClick" Padding="14,9"
+                                    Visibility="{Binding IsUpdateReady, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                        </StackPanel>
+                    </StackPanel>
+                </Border>
+
+                <Border Grid.Row="8" Style="{StaticResource Card}">
                     <StackPanel>
                         <TextBlock Text="Privacy and responsibility" FontSize="17" FontWeight="SemiBold" />
                         <TextBlock Text="Settings, queue state, and completed-output history stay in local application data. Media URLs, cookies, signatures, visitor data, and telemetry are not persisted."

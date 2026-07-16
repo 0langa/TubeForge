@@ -3,8 +3,11 @@
     <Project Path="src/TubeForge.App/TubeForge.App.csproj" />
     <Project Path="src/TubeForge.Core/TubeForge.Core.csproj" />
     <Project Path="src/TubeForge.Downloads/TubeForge.Downloads.csproj" />
+    <Project Path="src/TubeForge.Installation/TubeForge.Installation.csproj" />
+    <Project Path="src/TubeForge.Installer/TubeForge.Installer.csproj" />
     <Project Path="src/TubeForge.Media/TubeForge.Media.csproj" />
     <Project Path="src/TubeForge.Transcoding/TubeForge.Transcoding.csproj" />
+    <Project Path="src/TubeForge.Updates/TubeForge.Updates.csproj" />
     <Project Path="src/TubeForge.YouTube/TubeForge.YouTube.csproj" />
   </Folder>
   <Folder Name="/tests/">

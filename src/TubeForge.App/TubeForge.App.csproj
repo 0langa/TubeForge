@@ -16,6 +16,7 @@
     <ProjectReference Include="../TubeForge.Downloads/TubeForge.Downloads.csproj" />
     <ProjectReference Include="../TubeForge.Media/TubeForge.Media.csproj" />
     <ProjectReference Include="../TubeForge.Transcoding/TubeForge.Transcoding.csproj" />
+    <ProjectReference Include="../TubeForge.Updates/TubeForge.Updates.csproj" />
     <ProjectReference Include="../TubeForge.YouTube/TubeForge.YouTube.csproj" />
   </ItemGroup>
 </Project>

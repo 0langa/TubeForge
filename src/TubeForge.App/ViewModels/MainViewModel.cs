@@ -5,6 +5,7 @@ using System.Net;
 using System.Net.Http;
 using System.IO;
 using System.Reflection;
+using System.Security.Cryptography;
 using System.Runtime.InteropServices;
 using System.Runtime.CompilerServices;
 using TubeForge.App.Commands;
@@ -20,6 +21,7 @@ using TubeForge.Downloads.History;
 using TubeForge.Downloads.Queue;
 using TubeForge.Media;
 using TubeForge.Transcoding;
+using TubeForge.Updates;
 using TubeForge.YouTube;
 using TubeForge.YouTube.Captions;
 using TubeForge.YouTube.Collections;
@@ -56,6 +58,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
 
     private readonly HttpClient _httpClient;
     private readonly HttpClient _sidecarHttpClient;
+    private readonly HttpClient _updateHttpClient;
     private readonly YouTubeMetadataResolver _resolver;
     private readonly DirectDownloadEngine _downloader;
     private readonly AdaptiveDownloadEngine _adaptiveDownloader;
@@ -66,6 +69,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     private readonly DownloadQueueStore _queueStore;
     private readonly DownloadHistoryStore _historyStore;
     private readonly TubeForgeSettingsStore _settingsStore;
+    private readonly GitHubUpdateClient _updateClient;
+    private readonly string _updateDirectory;
     private readonly DownloadQueueDispatcher _queueDispatcher = new(2);
     private readonly HostRequestGate _hostRequestGate;
     private readonly RateLimitedRequestExecutor _rateLimitedRequests;
@@ -118,10 +123,17 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     private AppPage _activePage = AppPage.Download;
     private int _selectedMaxConcurrentDownloads = 2;
     private bool _enableSegmentedTransfers;
+    private bool _enableAutomaticUpdateChecks = true;
     private string _fileNameTemplate = FileNameTemplate.Default;
     private TubeForgeSettings _settings;
     private bool _showResponsibleUseNotice = true;
     private string _settingsStatus = "Settings stay on this device.";
+    private string _updateStatus = "TubeForge can check GitHub for verified stable releases.";
+    private bool _isCheckingForUpdate;
+    private bool _isDownloadingUpdate;
+    private double _updateDownloadFraction;
+    private UpdateRelease? _availableUpdate;
+    private UpdateDownloadReceipt? _readyUpdate;
     private string _diagnosticsStatus = "Export contains whitelisted technical state only.";
     private string _diagnosticsExtractionStage = "NotRun";
     private IReadOnlyList<CaptionTrackOption> _captionTracks = [];
@@ -162,6 +174,15 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         };
         _sidecarHttpClient = new HttpClient(sidecarHandler) { Timeout = TimeSpan.FromSeconds(60) };
         _thumbnailDownloader = new ThumbnailDownloadEngine(_sidecarHttpClient);
+        var updateHandler = new SocketsHttpHandler
+        {
+            AutomaticDecompression = DecompressionMethods.All,
+            AllowAutoRedirect = false,
+            ConnectTimeout = TimeSpan.FromSeconds(10),
+            PooledConnectionLifetime = TimeSpan.FromMinutes(5)
+        };
+        _updateHttpClient = new HttpClient(updateHandler) { Timeout = TimeSpan.FromSeconds(60) };
+        _updateClient = new GitHubUpdateClient(_updateHttpClient);
         applicationDataDirectory ??= Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
             "TubeForge");
@@ -169,6 +190,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         _queueStore = new DownloadQueueStore(Path.Combine(applicationDataDirectory, "queue.json"));
         _historyStore = new DownloadHistoryStore(Path.Combine(applicationDataDirectory, "history.json"));
         _settingsStore = new TubeForgeSettingsStore(Path.Combine(applicationDataDirectory, "settings.json"));
+        _updateDirectory = Path.Combine(applicationDataDirectory, "updates");
         _downloadFolder = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
             "Downloads");
@@ -207,6 +229,12 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         ShowDiagnosticsCommand = new RelayCommand(() => ShowPage(AppPage.Diagnostics));
         SaveSettingsCommand = new AsyncRelayCommand(SaveSettingsAsync);
         AcceptResponsibleUseCommand = new AsyncRelayCommand(AcceptResponsibleUseAsync);
+        CheckForUpdatesCommand = new AsyncRelayCommand(
+            () => CheckForUpdatesAsync(isAutomatic: false),
+            () => !ShowResponsibleUseNotice && !IsCheckingForUpdate && !IsDownloadingUpdate);
+        DownloadUpdateCommand = new AsyncRelayCommand(
+            DownloadUpdateAsync,
+            () => _availableUpdate is not null && !IsCheckingForUpdate && !IsDownloadingUpdate);
         ClearCompletedCommand = new AsyncRelayCommand(ClearCompletedAsync, () => QueueItems.Any(item => item.Status == DownloadQueueStatus.Completed));
         ClearHistoryCommand = new AsyncRelayCommand(ClearHistoryAsync, () => HistoryItems.Count > 0 || _historyUnavailable);
     }
@@ -258,6 +286,10 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     public AsyncRelayCommand SaveSettingsCommand { get; }
 
     public AsyncRelayCommand AcceptResponsibleUseCommand { get; }
+
+    public AsyncRelayCommand CheckForUpdatesCommand { get; }
+
+    public AsyncRelayCommand DownloadUpdateCommand { get; }
 
     public AsyncRelayCommand ClearCompletedCommand { get; }
 
@@ -449,6 +481,42 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         private set => Set(ref _settingsStatus, value);
     }
 
+    public string UpdateStatus
+    {
+        get => _updateStatus;
+        private set => Set(ref _updateStatus, value);
+    }
+
+    public bool IsCheckingForUpdate
+    {
+        get => _isCheckingForUpdate;
+        private set
+        {
+            if (Set(ref _isCheckingForUpdate, value)) RefreshCommands();
+        }
+    }
+
+    public bool IsDownloadingUpdate
+    {
+        get => _isDownloadingUpdate;
+        private set
+        {
+            if (Set(ref _isDownloadingUpdate, value)) RefreshCommands();
+        }
+    }
+
+    public double UpdateDownloadFraction
+    {
+        get => _updateDownloadFraction;
+        private set => Set(ref _updateDownloadFraction, value);
+    }
+
+    public bool HasUpdateAvailable => _availableUpdate is not null && _readyUpdate is null;
+
+    public bool IsUpdateReady => _readyUpdate is not null;
+
+    public string AvailableUpdateVersion => _availableUpdate?.Version.ToString(3) ?? string.Empty;
+
     public string DiagnosticsStatus
     {
         get => _diagnosticsStatus;
@@ -514,6 +582,12 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     {
         get => _enableSegmentedTransfers;
         set => Set(ref _enableSegmentedTransfers, value);
+    }
+
+    public bool EnableAutomaticUpdateChecks
+    {
+        get => _enableAutomaticUpdateChecks;
+        set => Set(ref _enableAutomaticUpdateChecks, value);
     }
 
     public string FileNameTemplateText
@@ -709,6 +783,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             OnPropertyChanged(nameof(SelectedMaxConcurrentDownloads));
             _enableSegmentedTransfers = _settings.EnableSegmentedTransfers;
             OnPropertyChanged(nameof(EnableSegmentedTransfers));
+            _enableAutomaticUpdateChecks = _settings.EnableAutomaticUpdateChecks;
+            OnPropertyChanged(nameof(EnableAutomaticUpdateChecks));
             _fileNameTemplate = _settings.FileNameTemplate;
             OnPropertyChanged(nameof(FileNameTemplateText));
             ShowResponsibleUseNotice = !_settings.ResponsibleUseAccepted;
@@ -758,6 +834,11 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         {
             PumpQueue();
         }
+
+        if (!ShowResponsibleUseNotice && EnableAutomaticUpdateChecks)
+        {
+            _ = CheckForUpdatesAsync(isAutomatic: true);
+        }
     }
 
     private async Task SaveSettingsAsync()
@@ -782,7 +863,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                 DownloadFolder = Path.GetFullPath(DownloadFolder),
                 MaximumConcurrentDownloads = SelectedMaxConcurrentDownloads,
                 FileNameTemplate = FileNameTemplateText,
-                EnableSegmentedTransfers = EnableSegmentedTransfers
+                EnableSegmentedTransfers = EnableSegmentedTransfers,
+                EnableAutomaticUpdateChecks = EnableAutomaticUpdateChecks
             };
         }
         catch (Exception exception) when (exception is ArgumentException or NotSupportedException or PathTooLongException)
@@ -827,6 +909,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                 MaximumConcurrentDownloads = SelectedMaxConcurrentDownloads,
                 FileNameTemplate = FileNameTemplateText,
                 EnableSegmentedTransfers = EnableSegmentedTransfers,
+                EnableAutomaticUpdateChecks = EnableAutomaticUpdateChecks,
                 ResponsibleUseAccepted = true
             };
         }
@@ -847,6 +930,10 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         _settings = accepted;
         ShowResponsibleUseNotice = false;
         SettingsStatus = "Responsible-use acknowledgement saved locally.";
+        if (EnableAutomaticUpdateChecks)
+        {
+            _ = CheckForUpdatesAsync(isAutomatic: true);
+        }
     }
 
     private void ShowPage(AppPage page)
@@ -1413,10 +1500,141 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
 
     public void SetDiagnosticsStatus(string status) => DiagnosticsStatus = status;
 
+    public async Task<bool> StartReadyUpdateAsync()
+    {
+        var ready = _readyUpdate;
+        if (ready is null)
+        {
+            UpdateStatus = "Download and verify an update before installing it.";
+            return false;
+        }
+
+        try
+        {
+            var installerPath = Path.GetFullPath(ready.InstallerPath);
+            var expectedDirectory = Path.GetFullPath(_updateDirectory);
+            if (!string.Equals(
+                    Path.GetDirectoryName(installerPath),
+                    expectedDirectory,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                throw new IOException("Update installer escaped its staging directory.");
+            }
+
+            var info = new FileInfo(installerPath);
+            if (!info.Exists || info.Length != ready.BytesWritten)
+            {
+                throw new IOException("Update installer size changed after verification.");
+            }
+
+            await using var stream = new FileStream(
+                installerPath,
+                FileMode.Open,
+                FileAccess.Read,
+                FileShare.Read,
+                128 * 1024,
+                FileOptions.Asynchronous | FileOptions.SequentialScan);
+            var hash = Convert.ToHexString(await SHA256.HashDataAsync(stream)).ToLowerInvariant();
+            if (!hash.Equals(ready.Sha256, StringComparison.OrdinalIgnoreCase))
+            {
+                throw new IOException("Update installer hash changed after verification.");
+            }
+
+            var start = new ProcessStartInfo
+            {
+                FileName = installerPath,
+                UseShellExecute = false
+            };
+            start.ArgumentList.Add("/update");
+            start.ArgumentList.Add("/wait-pid");
+            start.ArgumentList.Add(Environment.ProcessId.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            start.ArgumentList.Add("/launch");
+            _ = Process.Start(start) ?? throw new IOException("The verified update installer did not start.");
+            UpdateStatus = $"Installing TubeForge {ready.Version.ToString(3)}…";
+            return true;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException)
+        {
+            UpdateStatus = $"Update install failed safely ({exception.GetType().Name}).";
+            return false;
+        }
+    }
+
+    private async Task CheckForUpdatesAsync(bool isAutomatic)
+    {
+        IsCheckingForUpdate = true;
+        UpdateStatus = "Checking GitHub for a verified stable release…";
+        try
+        {
+            var current = Assembly.GetExecutingAssembly().GetName().Version ?? new Version(1, 0, 0);
+            current = new Version(current.Major, current.Minor, Math.Max(0, current.Build));
+            var result = await _updateClient.CheckForUpdateAsync(current);
+            if (!result.IsSuccess)
+            {
+                UpdateStatus = isAutomatic
+                    ? "Automatic update check unavailable; use Check now to retry."
+                    : $"Update check failed safely ({result.Error!.Code}).";
+                return;
+            }
+
+            _availableUpdate = result.Value;
+            _readyUpdate = null;
+            UpdateDownloadFraction = 0;
+            UpdateStatus = _availableUpdate is null
+                ? $"TubeForge {current.ToString(3)} is up to date."
+                : $"TubeForge {_availableUpdate.Version.ToString(3)} is available and ready to download.";
+            NotifyUpdateProperties();
+        }
+        finally
+        {
+            IsCheckingForUpdate = false;
+        }
+    }
+
+    private async Task DownloadUpdateAsync()
+    {
+        var release = _availableUpdate;
+        if (release is null)
+        {
+            return;
+        }
+
+        IsDownloadingUpdate = true;
+        UpdateDownloadFraction = 0;
+        UpdateStatus = $"Downloading and verifying TubeForge {release.Version.ToString(3)}…";
+        try
+        {
+            var progress = new Progress<double>(value => UpdateDownloadFraction = value);
+            var result = await _updateClient.DownloadInstallerAsync(release, _updateDirectory, progress);
+            if (!result.IsSuccess)
+            {
+                UpdateStatus = $"Update download rejected safely ({result.Error!.Code}).";
+                return;
+            }
+
+            _readyUpdate = result.Value;
+            UpdateStatus = $"TubeForge {release.Version.ToString(3)} verified. Install when ready.";
+            NotifyUpdateProperties();
+        }
+        finally
+        {
+            IsDownloadingUpdate = false;
+        }
+    }
+
+    private void NotifyUpdateProperties()
+    {
+        OnPropertyChanged(nameof(HasUpdateAvailable));
+        OnPropertyChanged(nameof(IsUpdateReady));
+        OnPropertyChanged(nameof(AvailableUpdateVersion));
+        RefreshCommands();
+    }
+
     public void Dispose()
     {
         CancelAnalysis();
         PauseAll();
+        _updateHttpClient.Dispose();
         _sidecarHttpClient.Dispose();
         _httpClient.Dispose();
         GC.SuppressFinalize(this);
@@ -1975,6 +2193,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         OnPropertyChanged(nameof(QueueSummary));
         ClearCompletedCommand.RaiseCanExecuteChanged();
         CancelCommand.RaiseCanExecuteChanged();
+        CheckForUpdatesCommand.RaiseCanExecuteChanged();
+        DownloadUpdateCommand.RaiseCanExecuteChanged();
     }
 
     private void NotifyHistoryProperties()

@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <AssemblyName>TubeForge.Setup</AssemblyName>
+    <RootNamespace>TubeForge.Installer</RootNamespace>
+    <ApplicationIcon>../TubeForge.App/Assets/TubeForge.ico</ApplicationIcon>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../TubeForge.Installation/TubeForge.Installation.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <Resource Include="../TubeForge.App/Assets/TubeForge.ico" Link="Assets/TubeForge.ico" />
+    <Resource Include="../TubeForge.App/Assets/TubeForge.png" Link="Assets/TubeForge.png" />
+    <EmbeddedResource Include="$(TubeForgePayload)"
+                      LogicalName="TubeForge.Payload.zip"
+                      Condition="'$(TubeForgePayload)' != '' and Exists('$(TubeForgePayload)')" />
+  </ItemGroup>
+</Project>

@@ -126,6 +126,19 @@ public partial class MainWindow : Window
         }
     }
 
+    private async void InstallUpdateButton_OnClick(object sender, RoutedEventArgs e)
+    {
+        var answer = MessageBox.Show(
+            "Install the verified TubeForge update and restart the app?\n\nYour settings, queue, Library history, and downloaded media remain unchanged.",
+            "Update TubeForge",
+            MessageBoxButton.YesNo,
+            MessageBoxImage.Question);
+        if (answer == MessageBoxResult.Yes && await _viewModel.StartReadyUpdateAsync())
+        {
+            Application.Current.Shutdown();
+        }
+    }
+
     [DllImport("dwmapi.dll", PreserveSig = true)]
     private static extern int DwmSetWindowAttribute(
         IntPtr windowHandle,
