@@ -1,0 +1,31 @@
+# Build output
+bin/
+obj/
+artifacts/
+TestResults/
+
+# User and IDE state
+.vs/
+.vscode/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# Local RECALL project memory
+.recall/
+.codex_memory/
+
+# Download/test artifacts
+*.part
+*.part.json
+downloads/
+fixtures/private/
+
+# Logs and crash dumps
+*.log
+*.dmp
+
+# OS files
+.DS_Store
+Thumbs.db

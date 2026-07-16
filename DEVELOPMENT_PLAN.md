@@ -1,0 +1,443 @@
+# TubeForge Development Plan
+
+## 1. Product vision
+
+TubeForge is a free, ad-free, local-first Windows desktop application for downloading YouTube media that the user has the right to save. It must provide a polished interface, resilient downloads, clear format choices, and useful diagnostics without invoking `yt-dlp`, FFmpeg, browser extensions, hosted conversion services, or third-party application libraries.
+
+The application is built from source in this repository. Network access is limited to fetching YouTube pages, API responses, player scripts, thumbnails, captions, and media selected by the user. No analytics, ads, account system, telemetry, or remote control plane.
+
+## 2. Scope and hard constraints
+
+### Supported baseline
+
+- Windows 10/11 x64 desktop.
+- C# and .NET 10.
+- WPF UI using the Windows Desktop runtime shipped with .NET.
+- Standard-library and Windows APIs only at runtime.
+- Public YouTube videos first.
+- Progressive MP4 downloads first: streams already containing audio and video need no muxer.
+- Audio-only downloads in the stream's native container (`m4a`/MP4 or WebM) before transcoding support.
+- Adaptive video plus audio after in-house ISO BMFF/MP4 muxing is proven.
+- Resumable, bounded-concurrency downloads with atomic finalization.
+
+### Forbidden dependencies
+
+- No `yt-dlp`, `youtube-dl`, FFmpeg, aria2, VLC, browser automation, or hosted downloader API.
+- No third-party NuGet or npm packages.
+- No copied extractor, decipher, muxer, codec, or downloader implementation.
+- No silent installation or execution of external binaries.
+
+### Explicit non-goals for early releases
+
+- DRM-protected, paid, members-only, or rental content.
+- Circumventing access controls.
+- MP3/AAC/Opus transcoding before an independently implemented and legally reviewed codec path exists.
+- Mobile, macOS, or Linux UI before the Windows release is stable.
+- Guaranteed support for every YouTube experiment at all times.
+
+### Responsible-use boundary
+
+TubeForge must display a first-run notice: users are responsible for YouTube's terms, copyright, privacy, and local law. The product should download only user-owned, public-domain, permissively licensed, or otherwise authorized content. It must not market itself as an access-control bypass.
+
+## 3. Definition of success
+
+### User experience
+
+- Paste a supported URL, inspect title/thumbnail/duration, select a format, choose a destination, and start in under 15 seconds.
+- Useful labels such as `1080p · MP4 · video only · 124 MB`, not raw format IDs.
+- Queue remains responsive during parsing, downloading, pausing, canceling, and retrying.
+- Interrupted downloads resume when the remote stream permits byte ranges.
+- Completed files never appear with partial/corrupt contents.
+- Errors explain next action and expose redacted diagnostic details.
+
+### Reliability targets
+
+- At least 95% successful metadata resolution across a maintained public-video fixture set.
+- At least 98% byte-correct completion for resolved direct streams under normal network conditions.
+- No UI-thread network or disk I/O.
+- Bounded memory use independent of media size.
+- Zero unhandled exceptions in a 24-hour queue soak test.
+
+### Privacy and security
+
+- No telemetry or background network requests unrelated to explicit user actions.
+- URLs and titles stay local unless required in requests to YouTube.
+- Logs redact query-string tokens, cookies, signatures, and visitor data.
+- Filenames are sanitized; output paths cannot escape the chosen directory.
+- Media is written to a sibling temporary file and atomically renamed only after validation.
+
+## 4. Architecture
+
+```text
+TubeForge.App (WPF, composition root)
+    |
+    +-- TubeForge.Core
+    |     URLs, result types, models, policies, diagnostics contracts
+    |
+    +-- TubeForge.YouTube
+    |     HTTP session, page/API clients, response parsing, player decipher
+    |
+    +-- TubeForge.Downloads
+    |     queue, range transfer, resume state, retries, integrity, filenames
+    |
+    +-- TubeForge.Media
+          stream probing, MP4/WebM metadata, muxing, tagging
+
+TubeForge.Tests (dependency-free console test runner)
+    references all production projects except UI where avoidable
+```
+
+### Project boundaries
+
+- `TubeForge.Core`: no WPF and no YouTube-specific HTTP behavior.
+- `TubeForge.YouTube`: converts YouTube inputs into stable domain models. Player changes stay here.
+- `TubeForge.Downloads`: accepts resolved stream URLs; does not know how extraction works.
+- `TubeForge.Media`: pure binary/container work with streaming I/O and strict bounds checks.
+- `TubeForge.App`: view models, UI state, settings, composition. Minimal code-behind.
+- `TubeForge.Tests`: custom attributes/assertions/runner; no external test framework.
+
+### Core patterns
+
+- `CancellationToken` on every network, disk, parsing, and queue operation.
+- Immutable records at boundaries.
+- Typed failure codes plus human-readable messages.
+- Dependency injection through explicit constructors, without a DI container.
+- `HttpClient` instances owned by long-lived services.
+- Stream data to disk; never buffer complete media.
+- Defensive JSON parsing with `System.Text.Json`.
+- Small interfaces only at volatile or I/O boundaries.
+
+## 5. Extraction strategy
+
+YouTube delivery changes frequently. Extraction must be a replaceable subsystem with captured, sanitized fixtures and deterministic tests.
+
+### Resolution pipeline
+
+1. Normalize and validate supported URL forms.
+2. Extract the 11-character video ID.
+3. Fetch the watch page using a coherent browser-like HTTP session.
+4. Parse embedded player response and player JavaScript URL.
+5. If needed, call a documented internal client profile through YouTube's own player endpoint using keys/config found in the fetched page, not hard-coded secrets.
+6. Convert streaming formats into domain models.
+7. Resolve direct URLs:
+   - use an existing URL when already signed;
+   - parse `signatureCipher`/`cipher` query data;
+   - locate signature transform operations in the current player script;
+   - apply the operations in a constrained interpreter;
+   - transform throttling parameter `n` when required.
+8. Validate candidates with a range probe before presenting them as downloadable.
+
+### Decipher design
+
+- Do not execute arbitrary JavaScript.
+- Tokenize only the required JavaScript subset.
+- Build a small syntax tree for function declarations, calls, arrays, property access, arithmetic, assignment, and control flow actually observed in player scripts.
+- Extract the called transform function and its helper object.
+- Evaluate with instruction, recursion, allocation, and wall-clock limits.
+- Cache compiled transform plans by player-script hash.
+- Retain only hashes and sanitized failure structure in normal logs.
+
+### Fallback profiles
+
+- Start with WEB and ANDROID-style public client profiles derived from current page configuration.
+- Treat client profiles as versioned data with health metrics, not scattered constants.
+- Try fallbacks only for classified failures.
+- Avoid retry storms by capping attempts and honoring server responses.
+
+## 6. Download and media strategy
+
+### Transfer engine
+
+- Probe content length, content type, ETag, Last-Modified, and range support.
+- Store resumable state beside a `.part` file using a versioned JSON schema.
+- Resume only when URL identity and remote validators are compatible.
+- Use sequential transfer first; add segmented ranges only after correctness benchmarks.
+- Exponential backoff with jitter for transient failures; no retry for clear permanent failures.
+- Periodic progress using monotonic byte counts and smoothed throughput.
+- Flush state at bounded intervals and on pause/shutdown.
+- Validate final byte length and optional container structure before atomic rename.
+
+### Container support
+
+- Phase 1: preserve progressive MP4 exactly as served.
+- Phase 2: preserve standalone audio in M4A/MP4 or WebM.
+- Phase 3: parse ISO BMFF boxes with size/overflow/depth limits.
+- Phase 4: mux compatible fragmented MP4 audio/video without re-encoding.
+- Phase 5: parse and mux compatible WebM/Matroska tracks.
+- Phase 6: metadata tagging, chapters, thumbnails, and captions where the container permits.
+
+Muxing means combining existing encoded tracks. Transcoding means decoding and re-encoding, and is a separate, much larger codec project. UI must never label native audio extraction as MP3 conversion.
+
+## 7. Persistence and settings
+
+- `%LocalAppData%/TubeForge/settings.json`: user preferences.
+- `%LocalAppData%/TubeForge/queue.json`: non-sensitive queue state.
+- `%LocalAppData%/TubeForge/logs/`: bounded rolling diagnostic logs.
+- Downloads remain in user-selected folders.
+- Writes use temporary files plus replace/rename.
+- Schemas carry a version and migration path.
+- No authentication cookies in the first public release.
+- If cookie support is later approved, use Windows DPAPI and explicit import/clear controls; never log cookie contents.
+
+## 8. UI plan
+
+### Main shell
+
+- Left navigation: Download, Queue, Library, Settings, Diagnostics.
+- Top paste field with clipboard detection and Analyze action.
+- Video card with thumbnail, title, channel, duration, availability, and warning state.
+- Format filters: Recommended, Video, Audio, Resolution, Container, codec, FPS, HDR.
+- Queue cards with progress, speed, ETA, pause/resume/cancel/retry/reveal actions.
+- Bottom status region for network/extractor health.
+
+### Accessibility and polish
+
+- Keyboard-first navigation and visible focus.
+- UI Automation names for actionable controls.
+- Minimum 4.5:1 text contrast.
+- 100–200% scaling support.
+- Light, dark, and system themes.
+- Reduced-motion option.
+- Never encode state with color alone.
+- Localizable strings from the first UI milestone.
+
+## 9. Observability and failure taxonomy
+
+Failure codes:
+
+- `Input.InvalidUrl`
+- `Input.UnsupportedUrl`
+- `Video.Unavailable`
+- `Video.LoginRequired`
+- `Video.AgeRestricted`
+- `Extractor.PageChanged`
+- `Extractor.PlayerChanged`
+- `Extractor.NoStreams`
+- `Network.Timeout`
+- `Network.RateLimited`
+- `Network.Forbidden`
+- `Download.RemoteChanged`
+- `Download.DiskFull`
+- `Download.WriteFailed`
+- `Media.UnsupportedContainer`
+- `Media.InvalidStructure`
+- `Operation.Cancelled`
+
+Diagnostic bundles must include app/build version, OS/runtime version, failure codes, sanitized event trail, extractor strategy IDs, and player-script hash. Exclude media URLs, query tokens, cookies, local usernames, and full output paths by default.
+
+## 10. Verification strategy
+
+### Test layers
+
+- Unit: URL parsing, filename safety, format ranking, retry policy, progress math, JSON mapping, binary primitives.
+- Fixture: sanitized watch pages, player responses, player scripts, MP4/WebM headers.
+- Contract: local HTTP server for redirects, ranges, disconnects, malformed lengths, retry codes, and resume validators.
+- Integration: opt-in live public videos with stable, permissive fixtures; never run on every commit.
+- UI: view-model state tests first; manual accessibility and scaling checklist until a dependency-free automation harness exists.
+- Soak/fault: large sparse files, low disk, dropped connections, process restart, cancellation races, 24-hour queue.
+
+### Required gates
+
+- `dotnet build TubeForge.slnx -warnaserror`
+- `dotnet run --project tests/TubeForge.Tests -- --all`
+- `dotnet format --verify-no-changes` when available without adding packages.
+- Release build and self-contained publish smoke test.
+- Zero known critical/high security findings from manual review and platform analyzers.
+
+### Fixture policy
+
+- Store minimal, sanitized excerpts needed by each test.
+- Remove titles, channel names, visitor data, signatures, cookies, tracking values, and full media URLs.
+- Record source date, expected parser behavior, and reason fixture is legally safe to retain.
+- No downloaded copyrighted media in Git.
+
+## 11. Delivery roadmap
+
+Checkboxes track repository state. Each milestone ends with passing gates, updated docs, and a runnable artifact.
+
+### M0 — Foundation and public project
+
+- [x] Define product boundaries, architecture, risks, and milestones.
+- [ ] Initialize Git repository with `main` branch.
+- [ ] Create public GitHub repository and push initial commit.
+- [ ] Initialize local RECALL project memory; keep `.recall/` untracked.
+- [ ] Add README, responsible-use notice, contribution rules, and security policy.
+- [ ] Scaffold solution and dependency-free test runner.
+- [ ] Add deterministic build properties and warning policy.
+- [ ] Add GitHub Actions build/test workflow using only official actions.
+
+Exit: fresh clone builds and tests on Windows with the documented .NET SDK.
+
+### M1 — Input and domain foundation
+
+- [ ] Parse `youtube.com/watch`, `youtu.be`, `/shorts/`, `/live/`, and `/embed/` URLs.
+- [ ] Validate video IDs without accepting arbitrary hostnames.
+- [ ] Define video, format, codec, container, availability, and failure models.
+- [ ] Implement filename sanitization and collision policy.
+- [ ] Implement format classification, display labels, and deterministic ranking.
+- [ ] Cover edge cases and malicious inputs in unit tests.
+
+Exit: URL-to-video-ID and domain decisions pass exhaustive local tests.
+
+### M2 — Metadata resolver
+
+- [ ] Build coherent YouTube HTTP session and request headers.
+- [ ] Fetch watch page with timeouts, cancellation, compression, and redirect checks.
+- [ ] Extract embedded player response and player-script URL without regex-only parsing.
+- [ ] Map metadata, thumbnails, duration, captions, playability, and streaming formats.
+- [ ] Implement internal player request using page-derived configuration.
+- [ ] Add fallback strategy orchestration and failure classification.
+- [ ] Add sanitized fixture tests and opt-in live smoke command.
+
+Exit: metadata and unsigned stream URLs resolve for maintained public fixtures and live smoke set.
+
+### M3 — Direct-stream downloader MVP
+
+- [ ] Implement remote probe and safe target-name creation.
+- [ ] Stream a direct URL to `.part` with cancellation and progress.
+- [ ] Validate length/type and atomically finalize.
+- [ ] Implement retry classification and bounded backoff.
+- [ ] Persist queue/resume state with schema versioning.
+- [ ] Implement pause, resume, cancel, retry, and shutdown recovery.
+- [ ] Add local HTTP fault server and transfer contract tests.
+
+Exit: dependency-free CLI/harness downloads a progressive MP4 reliably and resumes after forced interruption.
+
+### M4 — Modern desktop MVP
+
+- [ ] Create styled WPF shell, theme resources, typography, and icons drawn as vectors.
+- [ ] Implement paste/analyze workflow and metadata card.
+- [ ] Implement recommended format list and advanced format table.
+- [ ] Implement destination picker and collision choices.
+- [ ] Implement queue cards and global concurrency control.
+- [ ] Add settings, first-run responsible-use notice, and diagnostics view.
+- [ ] Complete keyboard, scaling, screen-reader, dark-mode, and cancellation review.
+
+Exit: normal user can analyze and download a progressive MP4 entirely through the GUI.
+
+### M5 — Signature and throttling decipher
+
+- [ ] Capture sanitized player-script shapes and expected transform plans.
+- [ ] Build tokenizer for the required JavaScript subset.
+- [ ] Build constrained parser and evaluator with strict resource limits.
+- [ ] Locate signature and throttling functions structurally.
+- [ ] Cache transform plans by script hash.
+- [ ] Resolve `signatureCipher` and `n` transformations.
+- [ ] Add mutation/fuzz tests for malformed scripts and unsupported syntax.
+- [ ] Add health reporting and fast fallback when player code changes.
+
+Exit: signed public formats resolve without executing arbitrary JavaScript.
+
+### M6 — Native audio downloads
+
+- [ ] Identify audio-only streams, codec, bitrate, sample rate, and container.
+- [ ] Download M4A/MP4 and WebM audio without re-encoding.
+- [ ] Use correct extension and MIME/container validation.
+- [ ] Add metadata display and recommended-audio ranking.
+- [ ] Document why MP3 conversion is unavailable without transcoding.
+
+Exit: user can save best/native audio stream with truthful format labeling.
+
+### M7 — In-house MP4 muxer
+
+- [ ] Implement bounded ISO BMFF box reader/writer.
+- [ ] Parse init segments and fragmented media metadata.
+- [ ] Validate codec/container compatibility.
+- [ ] Build new movie/track/sample tables or a safe fragmented output path.
+- [ ] Interleave/copy samples using bounded buffers.
+- [ ] Preserve timestamps, sync samples, rotation, color, and audio parameters.
+- [ ] Validate output structure and playback against Windows media stack.
+- [ ] Fuzz box sizes, nesting, integer overflow, truncation, and hostile input.
+
+Exit: compatible adaptive MP4 video and audio combine into a seekable file without re-encoding.
+
+### M8 — Advanced content features
+
+- [ ] Playlist/channel URL parsing and paged enumeration.
+- [ ] Per-item selection, naming templates, archive/history, and duplicate detection.
+- [ ] Captions: language selection, manual/automatic distinction, SRT/VTT conversion.
+- [ ] Thumbnails and optional metadata sidecars.
+- [ ] Chapters and playlist indexing.
+- [ ] Shorts/live metadata; completed live streams before active-live capture.
+- [ ] Rate-limit-aware bulk scheduling and per-host concurrency.
+
+Exit: robust batch workflow with user-controlled content selection and bounded load.
+
+### M9 — WebM muxing and extended media
+
+- [ ] Implement bounded EBML reader/writer.
+- [ ] Parse WebM tracks, clusters, cues, timecodes, and lacing.
+- [ ] Mux compatible Opus/Vorbis audio and VP9/AV1 video without re-encoding.
+- [ ] Generate cues for seeking and validate duration/timestamps.
+- [ ] Add hostile-container fixtures and fuzz coverage.
+
+Exit: best compatible WebM adaptive formats combine into seekable files.
+
+### M10 — Reliability hardening
+
+- [ ] Maintain extraction canary set and documented update playbook.
+- [ ] Add segmented transfer behind a feature flag and prove integrity/performance.
+- [ ] Add network-change, sleep/resume, proxy, IPv4/IPv6, and slow-disk tests.
+- [ ] Add disk-space forecasting and low-space recovery.
+- [ ] Add queue soak tests and crash-consistent persistence.
+- [ ] Add redacted diagnostic export and issue template.
+- [ ] Performance budget: startup, analysis latency, CPU, memory, UI frame time.
+
+Exit: release-candidate reliability targets met on supported Windows versions.
+
+### M11 — Packaging and v1.0
+
+- [ ] Choose project license before accepting outside contributions.
+- [ ] Produce framework-dependent and self-contained x64 builds.
+- [ ] Add reproducible release script, checksums, and signed artifacts when certificate exists.
+- [ ] Add upgrade/uninstall behavior and data-retention documentation.
+- [ ] Add versioned extraction compatibility notes.
+- [ ] Complete privacy, security, responsible-use, accessibility, and threat-model reviews.
+- [ ] Publish v1.0 with limitations and support policy.
+
+Exit: clean-machine installation, download smoke test, uninstall, checksum verification, and rollback pass.
+
+## 12. Immediate implementation backlog
+
+Order for current work:
+
+1. Repository, GitHub, RECALL, policies, solution scaffold, CI.
+2. URL parser and tests.
+3. Domain media models and format ranking.
+4. Filename/path safety.
+5. Direct-stream transfer engine plus local fault server.
+6. Watch-page HTTP client and embedded JSON extraction.
+7. Metadata/format mapping fixtures.
+8. Minimal WPF analyze/download vertical slice.
+9. Player decipher research and constrained interpreter.
+10. Native audio and MP4 muxing.
+
+## 13. Risk register
+
+| Risk | Impact | Mitigation | Trigger/action |
+|---|---|---|---|
+| YouTube page/player changes | Core resolution breaks | Isolate extractor, fixtures, structural parsing, canaries | Classified extractor errors spike; capture sanitized new shape and patch adapter |
+| No external muxer/codecs | Advanced formats arrive later | Progressive/native formats first; implement containers separately | Never mislabel muxing/transcoding; keep UI capability-driven |
+| Arbitrary player JavaScript | Security and reliability risk | Constrained subset interpreter with hard limits | Unsupported syntax fails closed and records sanitized structure |
+| Signed URL expiry | Resume fails | Store source identity; re-resolve and compare format/validators | Refresh URL, then resume only if remote identity matches |
+| Rate limiting | Temporary failures/bans | Bounded concurrency, jitter, Retry-After, no aggressive probing | Pause host queue and show retry time |
+| Malformed remote binary data | Crash, memory blowup, file corruption | Checked arithmetic, size/depth limits, streaming parsers, fuzzing | Reject with `Media.InvalidStructure` |
+| Public repository misuse expectations | Legal/reputation risk | Responsible-use language, no bypass claims/features | Reject access-control circumvention scope |
+| Trademark/project naming | Distribution risk | Use TubeForge product name; describe YouTube compatibility factually | Review branding before v1.0 |
+| One-maintainer extractor burden | Slow recovery | Small modules, update playbook, diagnostics, fixtures | Publish compatibility status and prioritize resolver fixes |
+
+## 14. Decision log
+
+- 2026-07-16: Greenfield repository targets Windows using .NET 10 and WPF because the active development environment contains the full Windows Desktop runtime and this avoids third-party UI dependencies.
+- 2026-07-16: `TubeForge` is the working product/namespace name; repository may retain the descriptive `youtube-downloader` name.
+- 2026-07-16: Zero third-party application dependencies is an architectural invariant, not merely a packaging goal.
+- 2026-07-16: Progressive and native-container output precede muxing; transcoding is not conflated with downloading.
+- 2026-07-16: RECALL state is local development context and must remain outside Git.
+
+## 15. Plan maintenance
+
+- Update checkboxes only with code/docs evidence in the repository.
+- Add material architecture choices to the decision log with dates.
+- Split milestones when an exit criterion becomes too broad; do not weaken it silently.
+- Move deferred work explicitly; do not let TODOs disappear during refactors.
+- Every release notes known extractor limitations and last successful live-smoke date.
