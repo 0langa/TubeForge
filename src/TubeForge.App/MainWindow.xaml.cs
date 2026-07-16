@@ -14,8 +14,12 @@ public partial class MainWindow : Window
     {
         InitializeComponent();
         DataContext = _viewModel;
+        Loaded += MainWindow_OnLoaded;
         Closed += (_, _) => _viewModel.Dispose();
     }
+
+    private async void MainWindow_OnLoaded(object sender, RoutedEventArgs e) =>
+        await _viewModel.InitializeAsync();
 
     private void BrowseButton_OnClick(object sender, RoutedEventArgs e)
     {

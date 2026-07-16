@@ -19,8 +19,8 @@ TestResults/
 # Download/test artifacts
 *.part
 *.part.json
-downloads/
-fixtures/private/
+/downloads/
+/fixtures/private/
 
 # Logs and crash dumps
 *.log

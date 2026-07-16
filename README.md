@@ -17,9 +17,10 @@ Working now:
 - type-first stream selection with resolution, container, codec, FPS/HDR, bitrate, and exact-stream filters;
 - caption-track metadata, truthful format labels, and collision-safe filenames;
 - resumable `.part` transfers, validators, bounded retries, progress, cancellation, and atomic finalization;
+- privacy-safe schema-versioned queue state with interrupted-download startup recovery;
 - dependency-free fixture/transfer test runner and sanitized live metadata smoke tool.
 
-Not finished: persistent multi-item queue, adaptive audio/video muxing, audio transcoding/MP3, current ES6 player decipher, throttling-parameter transforms, container validation, settings, packaging, and releases. See [DEVELOPMENT_PLAN.md](DEVELOPMENT_PLAN.md) for exact checklist state.
+Not finished: queue management UI/pause controls, adaptive audio/video muxing, audio transcoding/MP3, current ES6 player decipher, throttling-parameter transforms, container validation, settings, packaging, and releases. See [DEVELOPMENT_PLAN.md](DEVELOPMENT_PLAN.md) for exact checklist state.
 
 ## Baseline
 
@@ -27,7 +28,7 @@ Not finished: persistent multi-item queue, adaptive audio/video muxing, audio tr
 - .NET 10 WPF desktop application
 - Public video metadata and direct progressive MP4 downloads
 - Native audio-only downloads
-- Resumable direct transfers; persistent queue and in-house media muxers remain planned
+- Resumable direct transfers and persisted queue recovery; queue UI and in-house media muxers remain planned
 - No ads, telemetry, accounts, or paid features
 
 ## Build

@@ -299,9 +299,10 @@ Exit: metadata and unsigned stream URLs resolve for maintained public fixtures a
 - [x] Validate remote/final length and atomically finalize.
 - [x] Implement retry classification and bounded backoff.
 - [x] Persist privacy-safe resume state with schema versioning.
-- [ ] Persist the multi-item queue with schema versioning.
+- [x] Persist the multi-item queue with schema versioning.
 - [x] Implement byte-range resume, cancel, and retry in the transfer engine.
-- [ ] Implement pause controls and application-shutdown queue recovery.
+- [x] Implement active-download pause/resume controls.
+- [x] Implement application-shutdown queue recovery.
 - [x] Add deterministic HTTP handler contract tests for ranges, validators, truncation, retries, and cancellation.
 - [ ] Add a loopback HTTP fault server for socket-level integration tests.
 

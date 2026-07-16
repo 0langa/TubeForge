@@ -305,10 +305,10 @@
                                     <TextBlock Text="{Binding ProgressDetail}" Margin="0,3,0,0" FontSize="10"
                                                Foreground="{StaticResource MutedTextBrush}" />
                                 </StackPanel>
-                                <Button Grid.Column="2" Style="{StaticResource SecondaryButton}" Content="Cancel"
+                                <Button Grid.Column="2" Style="{StaticResource SecondaryButton}" Content="Pause"
                                         Command="{Binding CancelCommand}" Padding="14,10"
                                         Visibility="{Binding IsBusy, Converter={StaticResource BooleanToVisibilityConverter}}" />
-                                <Button Grid.Column="4" Style="{StaticResource PrimaryButton}" Content="Download"
+                                <Button Grid.Column="4" Style="{StaticResource PrimaryButton}" Content="{Binding DownloadActionLabel}"
                                         Command="{Binding DownloadCommand}" AutomationProperties.Name="Start download" />
                             </Grid>
                         </StackPanel>
