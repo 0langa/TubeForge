@@ -2,9 +2,11 @@ using TubeForge.Core.Media;
 
 namespace TubeForge.App.ViewModels;
 
-public sealed record FormatItemViewModel(StreamFormat Format)
+public sealed record FormatItemViewModel(StreamFormat Format, StreamFormat? AudioFormat = null)
 {
-    public string Label => FormatDisplay.Label(Format);
+    public bool RequiresMuxing => AudioFormat is not null;
+
+    public string Label => FormatDisplay.Label(DisplayFormat());
 
     public string TechnicalLabel => string.Join(" · ", new[]
     {
@@ -12,15 +14,19 @@ public sealed record FormatItemViewModel(StreamFormat Format)
         {
             StreamKind.Progressive => "ready to play",
             StreamKind.AudioOnly => "native audio",
+            StreamKind.VideoOnly when RequiresMuxing => "muxed locally; no re-encoding",
             StreamKind.VideoOnly => "video track only",
             _ => "stream"
         },
         VideoCodecLabel(),
-        AudioCodecLabel()
+        AudioCodecLabel(),
+        RequiresMuxing && AudioFormat?.Bitrate is > 0
+            ? $"{Math.Round(AudioFormat.Bitrate.Value / 1000d):0} kbps audio"
+            : string.Empty
     }.Where(value => !string.IsNullOrEmpty(value)));
 
-    public string SizeLabel => Format.ContentLength is > 0
-        ? FormatSize(Format.ContentLength.Value)
+    public string SizeLabel => CombinedLength() is > 0
+        ? FormatSize(CombinedLength()!.Value)
         : "size unknown";
 
     public string AutomationName => $"{Label}; {TechnicalLabel}; {SizeLabel}";
@@ -36,7 +42,7 @@ public sealed record FormatItemViewModel(StreamFormat Format)
         _ => string.Empty
     };
 
-    private string AudioCodecLabel() => Format.AudioCodec switch
+    private string AudioCodecLabel() => (AudioFormat?.AudioCodec ?? Format.AudioCodec) switch
     {
         AudioCodec.Aac => "AAC",
         AudioCodec.Opus => "Opus",
@@ -44,6 +50,19 @@ public sealed record FormatItemViewModel(StreamFormat Format)
         AudioCodec.Unknown => "audio codec unknown",
         _ => string.Empty
     };
+
+    private StreamFormat DisplayFormat() => RequiresMuxing
+        ? Format with
+        {
+            Kind = StreamKind.Progressive,
+            AudioCodec = AudioFormat!.AudioCodec,
+            ContentLength = CombinedLength()
+        }
+        : Format;
+
+    private long? CombinedLength() => Format.ContentLength is not null && AudioFormat?.ContentLength is not null
+        ? Format.ContentLength.Value + AudioFormat.ContentLength.Value
+        : Format.ContentLength;
 
     private static string FormatSize(long bytes)
     {

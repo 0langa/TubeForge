@@ -15,20 +15,22 @@ Working now:
 - strict YouTube URL parsing and live public-video metadata resolution;
 - versioned Android player fallback for direct progressive, native-audio, and video-only streams;
 - type-first stream selection with resolution, container, codec, FPS/HDR, bitrate, and exact-stream filters;
+- highest-quality audio + video selection with separate resumable track downloads and in-house MP4/WebM muxing, preferring MP4 on equivalent-quality choices;
 - caption-track metadata, truthful format labels, and collision-safe filenames;
-- resumable `.part` transfers, validators, bounded retries, progress, cancellation, and atomic finalization;
+- resumable `.part` transfers, bounded container validation, retries, progress, cancellation, and atomic finalization;
 - privacy-safe schema-versioned queue state with interrupted-download startup recovery;
 - dependency-free fixture/transfer test runner and sanitized live metadata smoke tool.
 
-Not finished: queue management UI/pause controls, adaptive audio/video muxing, audio transcoding/MP3, current ES6 player decipher, throttling-parameter transforms, container validation, settings, packaging, and releases. See [DEVELOPMENT_PLAN.md](DEVELOPMENT_PLAN.md) for exact checklist state.
+Not finished: queue management UI/scheduling, hostile-container fuzzing, audio transcoding/MP3, current ES6 player decipher, throttling-parameter transforms, settings, packaging, and releases. See [DEVELOPMENT_PLAN.md](DEVELOPMENT_PLAN.md) for exact checklist state.
 
 ## Baseline
 
 - Windows 10/11 x64
 - .NET 10 WPF desktop application
-- Public video metadata and direct progressive MP4 downloads
+- Public video metadata plus progressive and highest-compatible adaptive downloads
 - Native audio-only downloads
-- Resumable direct transfers and persisted queue recovery; queue UI and in-house media muxers remain planned
+- In-house regular/fragmented MP4 and WebM video/audio muxing without re-encoding
+- Resumable direct transfers and persisted queue recovery; queue UI remains planned
 - No ads, telemetry, accounts, or paid features
 
 ## Build
@@ -44,6 +46,12 @@ Opt-in live metadata smoke test (prints no media URLs):
 
 ```powershell
 dotnet run --project tools/TubeForge.Smoke -- analyze "https://www.youtube.com/watch?v=VIDEO_ID"
+```
+
+Opt-in live MP4 mux smoke test (downloads the smallest compatible H.264/AAC pair to a temporary directory, validates it with the Windows media stack, then deletes it):
+
+```powershell
+dotnet run --project tools/TubeForge.LiveMuxSmoke -- "https://www.youtube.com/watch?v=VIDEO_ID"
 ```
 
 Run the desktop application:

@@ -229,6 +229,26 @@
                             </Grid>
 
                             <Grid Margin="0,16,0,0"
+                                  Visibility="{Binding IsAudioVideo, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="12" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+
+                                <StackPanel Grid.Column="0">
+                                    <TextBlock Text="AUDIO QUALITY" Style="{StaticResource FieldLabel}" />
+                                    <ComboBox ItemsSource="{Binding BitrateOptions}" SelectedItem="{Binding SelectedBitrate}"
+                                              DisplayMemberPath="Label" AutomationProperties.Name="Muxed audio quality" />
+                                </StackPanel>
+                                <StackPanel Grid.Column="2">
+                                    <TextBlock Text="AUDIO CODEC" Style="{StaticResource FieldLabel}" />
+                                    <ComboBox ItemsSource="{Binding AudioCodecOptions}" SelectedItem="{Binding SelectedAudioCodec}"
+                                              DisplayMemberPath="Label" AutomationProperties.Name="Muxed audio codec" />
+                                </StackPanel>
+                            </Grid>
+
+                            <Grid Margin="0,16,0,0"
                                   Visibility="{Binding IsAudioOnly, Converter={StaticResource BooleanToVisibilityConverter}}">
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="*" />
@@ -264,7 +284,7 @@
                                 </StackPanel>
                             </Grid>
 
-                            <TextBlock Text="EXACT STREAM" Style="{StaticResource FieldLabel}" Margin="0,16,0,6" />
+                            <TextBlock Text="EXACT OUTPUT" Style="{StaticResource FieldLabel}" Margin="0,16,0,6" />
                             <ComboBox ItemsSource="{Binding Formats}" SelectedItem="{Binding SelectedFormat}"
                                       AutomationProperties.Name="Exact matching stream" MinHeight="54">
                                 <ComboBox.ItemTemplate>

@@ -19,7 +19,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
 {
     private static readonly IReadOnlyList<DownloadModeOption> BaseModeChoices =
     [
-        new(DownloadMode.AudioVideo, "Audio + video", "Ready-to-play file with both tracks"),
+        new(DownloadMode.AudioVideo, "Audio + video", "Best video + best audio, muxed locally"),
         new(DownloadMode.AudioOnly, "Audio only", "Native M4A/AAC or WebM/Opus audio"),
         new(DownloadMode.VideoOnly, "Video only", "Maximum video quality; audio not included")
     ];
@@ -32,6 +32,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     private readonly HttpClient _httpClient;
     private readonly YouTubeMetadataResolver _resolver;
     private readonly DirectDownloadEngine _downloader;
+    private readonly AdaptiveDownloadEngine _adaptiveDownloader;
     private readonly DownloadQueueStore _queueStore;
     private CancellationTokenSource? _operationCancellation;
     private string _urlText = string.Empty;
@@ -87,6 +88,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         _httpClient = new HttpClient(handler) { Timeout = Timeout.InfiniteTimeSpan };
         _resolver = new YouTubeMetadataResolver(_httpClient);
         _downloader = new DirectDownloadEngine(_httpClient);
+        _adaptiveDownloader = new AdaptiveDownloadEngine(_downloader);
         _queueStore = new DownloadQueueStore(Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
             "TubeForge",
@@ -211,6 +213,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
 
             OnPropertyChanged(nameof(HasVideoFilters));
             OnPropertyChanged(nameof(IsAudioOnly));
+            OnPropertyChanged(nameof(IsAudioVideo));
             OnPropertyChanged(nameof(ModeNotice));
             RebuildFormatFilters(resetSelections: true);
         }
@@ -310,6 +313,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
 
     public bool IsAudioOnly => SelectedDownloadMode.Value is DownloadMode.AudioOnly;
 
+    public bool IsAudioVideo => SelectedDownloadMode.Value is DownloadMode.AudioVideo;
+
     public string ModeNotice => SelectedDownloadMode.Value switch
     {
         DownloadMode.AudioVideo =>
@@ -396,7 +401,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             _allFormats = _metadata.Formats;
             RefreshDownloadModes();
             var defaultMode = DownloadModes.FirstOrDefault(choice =>
-                FormatFilter.Apply(_allFormats, new FormatSelectionCriteria { Mode = choice.Value }).Count > 0) ??
+                HasFormatsForMode(choice.Value)) ??
                 DownloadModes[0];
             if (SelectedDownloadMode != defaultMode)
             {
@@ -441,14 +446,17 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         IsDownloading = true;
         DownloadActionLabel = "Download";
         DownloadFraction = 0;
-        var format = SelectedFormat.Format;
+        var selection = SelectedFormat;
+        var format = selection.Format;
         try
         {
             var destination = FileNamePolicy.AvailablePath(
                 DownloadFolder,
                 _metadata.Title,
-                FormatDisplay.OutputExtension(format));
-            var queueItem = CreateOrResumeQueueItem(_metadata, format, destination);
+                selection.RequiresMuxing
+                    ? FormatDisplay.Extension(format.Container)
+                    : FormatDisplay.OutputExtension(format));
+            var queueItem = CreateOrResumeQueueItem(_metadata, selection, destination);
             var queueError = await UpsertQueueItemAsync(queueItem, _operationCancellation.Token);
             if (queueError is not null)
             {
@@ -458,28 +466,51 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             }
 
             _activeQueueItemId = queueItem.Id;
-            StatusMessage = "Downloading to " + Path.GetFileName(destination);
+            StatusMessage = selection.RequiresMuxing
+                ? "Downloading best video + audio, then muxing locally"
+                : "Downloading to " + Path.GetFileName(destination);
             var progress = new Progress<DownloadProgress>(UpdateProgress);
-            var result = await _downloader.DownloadAsync(new DownloadRequest
+            TubeForgeError? downloadError;
+            string completedPath;
+            long completedBytes;
+            if (selection.AudioFormat is StreamFormat audioFormat)
             {
-                SourceUrl = format.Url,
-                SourceIdentity = $"{_metadata.Id.Value}:{format.FormatId}",
-                DestinationPath = destination,
-                ExpectedLength = format.ContentLength
-            }, progress, _operationCancellation.Token);
+                var result = await _adaptiveDownloader.DownloadAsync(new AdaptiveDownloadRequest
+                {
+                    Video = TrackRequest(_metadata, format, IntermediateTrackPath(destination, "video", format)),
+                    Audio = TrackRequest(_metadata, audioFormat, IntermediateTrackPath(destination, "audio", audioFormat)),
+                    DestinationPath = destination,
+                    OutputContainer = format.Container
+                }, progress, _operationCancellation.Token);
+                downloadError = result.Error;
+                completedPath = result.IsSuccess ? result.Value.DestinationPath : destination;
+                completedBytes = result.IsSuccess ? result.Value.BytesWritten : 0;
+            }
+            else
+            {
+                var result = await _downloader.DownloadAsync(
+                    TrackRequest(_metadata, format, destination),
+                    progress,
+                    _operationCancellation.Token);
+                downloadError = result.Error;
+                completedPath = result.IsSuccess ? result.Value.DestinationPath : destination;
+                completedBytes = result.IsSuccess ? result.Value.BytesWritten : 0;
+            }
 
-            if (!result.IsSuccess)
+            if (downloadError is not null)
             {
+                var partialBytes = SelectionPartialLength(destination, selection);
                 await UpdateActiveQueueItemAsync(
-                    result.Error!.Code == "Operation.Cancelled"
+                    downloadError.Code == "Operation.Cancelled"
                         ? DownloadQueueStatus.Paused
                         : DownloadQueueStatus.Failed,
                     destination,
-                    result.Error.Code);
-                DownloadActionLabel = result.Error.Code == "Operation.Cancelled" ? "Resume" :
-                    PartialLength(destination) > 0 ? "Retry" : "Download";
-                ErrorMessage = $"{result.Error!.Message} ({result.Error.Code})";
-                StatusMessage = result.Error.Code == "Operation.Cancelled"
+                    downloadError.Code,
+                    partialBytes);
+                DownloadActionLabel = downloadError.Code == "Operation.Cancelled" ? "Resume" :
+                    partialBytes > 0 ? "Retry" : "Download";
+                ErrorMessage = $"{downloadError.Message} ({downloadError.Code})";
+                StatusMessage = downloadError.Code == "Operation.Cancelled"
                     ? "Download paused — press Resume to continue"
                     : "Download failed";
                 return;
@@ -489,10 +520,10 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                 DownloadQueueStatus.Completed,
                 destination,
                 failureCode: null,
-                result.Value.BytesWritten);
+                completedBytes);
             DownloadFraction = 1;
-            ProgressDetail = FormatBytes(result.Value.BytesWritten) + " saved";
-            StatusMessage = "Completed: " + Path.GetFileName(result.Value.DestinationPath);
+            ProgressDetail = FormatBytes(completedBytes) + " saved";
+            StatusMessage = "Completed: " + Path.GetFileName(completedPath);
         }
         catch (ArgumentException exception)
         {
@@ -534,11 +565,14 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
 
     private DownloadQueueItem CreateOrResumeQueueItem(
         VideoMetadata metadata,
-        StreamFormat format,
+        FormatItemViewModel selection,
         string destination)
     {
         var now = DateTimeOffset.UtcNow;
-        var sourceIdentity = $"{metadata.Id.Value}:{format.FormatId}";
+        var format = selection.Format;
+        var sourceIdentity = SelectionIdentity(metadata, selection);
+        var expectedLength = CombinedLength(selection);
+        var partialLength = SelectionPartialLength(destination, selection);
         var existing = _queueSnapshot.Items
             .Where(item =>
                 item.SourceIdentity.Equals(sourceIdentity, StringComparison.Ordinal) &&
@@ -551,8 +585,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         {
             return existing with
             {
-                ExpectedLength = format.ContentLength ?? existing.ExpectedLength,
-                BytesReceived = PartialLength(destination),
+                ExpectedLength = expectedLength ?? existing.ExpectedLength,
+                BytesReceived = partialLength,
                 Status = DownloadQueueStatus.Downloading,
                 UpdatedAtUtc = now,
                 FailureCode = null
@@ -567,12 +601,69 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             SourceIdentity = sourceIdentity,
             DisplayTitle = metadata.Title,
             DestinationPath = destination,
-            ExpectedLength = format.ContentLength,
-            BytesReceived = PartialLength(destination),
+            ExpectedLength = expectedLength,
+            BytesReceived = partialLength,
             Status = DownloadQueueStatus.Downloading,
             CreatedAtUtc = now,
             UpdatedAtUtc = now
         };
+    }
+
+    private static DownloadRequest TrackRequest(
+        VideoMetadata metadata,
+        StreamFormat format,
+        string destination) => new()
+        {
+            SourceUrl = format.Url,
+            SourceIdentity = $"{metadata.Id.Value}:{format.FormatId}",
+            DestinationPath = destination,
+            ExpectedLength = format.ContentLength,
+            ExpectedContainer = format.Container
+        };
+
+    private static string IntermediateTrackPath(
+        string destination,
+        string role,
+        StreamFormat format) =>
+        destination + $".{role}-track" + FormatDisplay.OutputExtension(format);
+
+    private static string SelectionIdentity(VideoMetadata metadata, FormatItemViewModel selection) =>
+        selection.AudioFormat is null
+            ? $"{metadata.Id.Value}:{selection.Format.FormatId}"
+            : $"{metadata.Id.Value}:{selection.Format.FormatId}+{selection.AudioFormat.FormatId}";
+
+    private static long? CombinedLength(FormatItemViewModel selection) =>
+        selection.Format.ContentLength is not null && selection.AudioFormat?.ContentLength is not null
+            ? checked(selection.Format.ContentLength.Value + selection.AudioFormat.ContentLength.Value)
+            : selection.AudioFormat is null ? selection.Format.ContentLength : null;
+
+    private static long SelectionPartialLength(string destination, FormatItemViewModel selection)
+    {
+        if (selection.AudioFormat is null)
+        {
+            return PartialLength(destination);
+        }
+
+        var videoPath = IntermediateTrackPath(destination, "video", selection.Format);
+        var audioPath = IntermediateTrackPath(destination, "audio", selection.AudioFormat);
+        return checked(CompletedOrPartialLength(videoPath) + CompletedOrPartialLength(audioPath));
+    }
+
+    private static long CompletedOrPartialLength(string destination)
+    {
+        try
+        {
+            if (File.Exists(destination))
+            {
+                return new FileInfo(destination).Length;
+            }
+
+            return PartialLength(destination);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return 0;
+        }
     }
 
     private async Task<TubeForgeError?> UpsertQueueItemAsync(
@@ -678,10 +769,12 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         _updatingFormatFilters = true;
         try
         {
-            var modeFormats = FormatFilter.Apply(_allFormats, new FormatSelectionCriteria
-            {
-                Mode = SelectedDownloadMode.Value
-            });
+            var modeFormats = IsAudioVideo
+                ? AudioVideoVideoFormats()
+                : FormatFilter.Apply(_allFormats, new FormatSelectionCriteria
+                {
+                    Mode = SelectedDownloadMode.Value
+                });
 
             if (IsAudioOnly)
             {
@@ -734,11 +827,6 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             }
             else
             {
-                BitrateOptions = [];
-                SelectedBitrate = null;
-                AudioCodecOptions = [];
-                SelectedAudioCodec = null;
-
                 ResolutionOptions = WithAny(
                     "Best available",
                     modeFormats
@@ -753,7 +841,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
 
                 var resolutionFormats = FilterBy(modeFormats, height: SelectedResolution?.Value);
                 ContainerOptions = WithAny(
-                    "Any container",
+                    "Any container · MP4 preferred",
                     resolutionFormats
                         .Select(format => format.Container)
                         .Distinct()
@@ -805,6 +893,45 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                 SelectedDynamicRange = Choose(
                     DynamicRangeOptions,
                     resetSelections ? null : SelectedDynamicRange?.Value);
+
+                if (IsAudioVideo)
+                {
+                    var selectedVideoFormats = frameRateFormats
+                        .Where(format => SelectedDynamicRange?.Value is null ||
+                                         format.IsHdr == SelectedDynamicRange.Value.Value)
+                        .ToArray();
+                    var audioCandidates = CompatibleAudioFormats(selectedVideoFormats);
+                    BitrateOptions = WithAny(
+                        "Best available",
+                        audioCandidates
+                            .Where(format => format.Bitrate is > 0)
+                            .Select(format => format.Bitrate!.Value)
+                            .Distinct()
+                            .OrderByDescending(value => value)
+                            .Select(value => new FilterOption<long>($"{Math.Round(value / 1000d):0} kbps", value)));
+                    SelectedBitrate = Choose(
+                        BitrateOptions,
+                        resetSelections ? null : SelectedBitrate?.Value);
+
+                    var bitrateFormats = FilterBy(audioCandidates, bitrate: SelectedBitrate?.Value);
+                    AudioCodecOptions = WithAny(
+                        "Best compatible codec",
+                        bitrateFormats
+                            .Select(format => format.AudioCodec)
+                            .Distinct()
+                            .OrderBy(AudioCodecOrder)
+                            .Select(value => new FilterOption<AudioCodec>(AudioCodecLabel(value), value)));
+                    SelectedAudioCodec = Choose(
+                        AudioCodecOptions,
+                        resetSelections ? null : SelectedAudioCodec?.Value);
+                }
+                else
+                {
+                    BitrateOptions = [];
+                    SelectedBitrate = null;
+                    AudioCodecOptions = [];
+                    SelectedAudioCodec = null;
+                }
             }
         }
         finally
@@ -817,7 +944,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
 
     private void RefreshDownloadModes()
     {
-        var combined = FormatsForMode(DownloadMode.AudioVideo);
+        var combined = AudioVideoVideoFormats();
         var audio = FormatsForMode(DownloadMode.AudioOnly);
         var video = FormatsForMode(DownloadMode.VideoOnly);
 
@@ -826,7 +953,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             new DownloadModeOption(
                 DownloadMode.AudioVideo,
                 "Audio + video",
-                $"{OptionCount(combined.Count)} · up to {MaximumVideoQuality(combined)} · includes audio"),
+                $"{OptionCount(combined.Count)} · up to {MaximumVideoQuality(combined)} · best compatible audio"),
             new DownloadModeOption(
                 DownloadMode.AudioOnly,
                 "Audio only",
@@ -842,27 +969,91 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     private IReadOnlyList<StreamFormat> FormatsForMode(DownloadMode mode) =>
         FormatFilter.Apply(_allFormats, new FormatSelectionCriteria { Mode = mode });
 
+    private bool HasFormatsForMode(DownloadMode mode) => mode == DownloadMode.AudioVideo
+        ? AudioVideoVideoFormats().Count > 0
+        : FormatsForMode(mode).Count > 0;
+
+    private IReadOnlyList<StreamFormat> AudioVideoVideoFormats()
+    {
+        var audio = _allFormats.Where(format => format.Kind == StreamKind.AudioOnly).ToArray();
+        return _allFormats
+            .Where(format => format.Kind == StreamKind.Progressive ||
+                             format.Kind == StreamKind.VideoOnly &&
+                             audio.Any(candidate => AdaptiveFormatSelector.AreMuxCompatible(format, candidate)))
+            .OrderByDescending(format => format.Kind == StreamKind.VideoOnly)
+            .ThenByDescending(format => format.Height ?? 0)
+            .ThenByDescending(format => format.FramesPerSecond ?? 0)
+            .ThenByDescending(format => format.IsHdr)
+            .ThenByDescending(format => format.Container == MediaContainer.Mp4)
+            .ThenByDescending(format => format.Bitrate ?? 0)
+            .ThenBy(format => format.FormatId)
+            .ToArray();
+    }
+
+    private IReadOnlyList<StreamFormat> CompatibleAudioFormats(IEnumerable<StreamFormat> videos)
+    {
+        var materializedVideos = videos.Where(format => format.Kind == StreamKind.VideoOnly).ToArray();
+        return _allFormats
+            .Where(audio => audio.Kind == StreamKind.AudioOnly &&
+                            materializedVideos.Any(video => AdaptiveFormatSelector.AreMuxCompatible(video, audio)))
+            .OrderByDescending(audio => audio.Bitrate ?? 0)
+            .ThenByDescending(audio => audio.AudioSampleRate ?? 0)
+            .ThenBy(audio => audio.FormatId)
+            .ToArray();
+    }
+
     private string CombinedModeNotice()
     {
-        var combined = FormatsForMode(DownloadMode.AudioVideo);
-        var video = FormatsForMode(DownloadMode.VideoOnly);
-        var combinedMaximum = combined.Select(format => format.Height ?? 0).DefaultIfEmpty(0).Max();
-        var videoMaximum = video.Select(format => format.Height ?? 0).DefaultIfEmpty(0).Max();
-        if (videoMaximum > combinedMaximum)
-        {
-            return $"Includes audio; combined quality stops at {MaximumVideoQuality(combined)}. " +
-                   $"Choose Video only for {MaximumVideoQuality(video)}. High-quality video + audio needs TubeForge's internal muxer.";
-        }
-
-        return "Ready-to-play file with audio included. No conversion or quality loss.";
+        var combined = AudioVideoVideoFormats();
+        return $"Up to {MaximumVideoQuality(combined)} with audio. TubeForge downloads the selected video and best compatible audio separately, then muxes both locally without re-encoding.";
     }
 
     private string VideoOnlyModeNotice() =>
         $"Up to {MaximumVideoQuality(FormatsForMode(DownloadMode.VideoOnly))}. " +
-        "Video track only: no audio. High-quality video + audio needs TubeForge's internal muxer.";
+        "Video track only: no audio. Choose Audio + video for a locally muxed file with both tracks.";
 
     private void RefreshMatchingFormats()
     {
+        if (IsAudioVideo)
+        {
+            var videos = AudioVideoVideoFormats()
+                .Where(format =>
+                    (SelectedResolution?.Value is null || format.Height == SelectedResolution.Value.Value) &&
+                    (SelectedContainer?.Value is null || format.Container == SelectedContainer.Value.Value) &&
+                    (SelectedVideoCodec?.Value is null || format.VideoCodec == SelectedVideoCodec.Value.Value) &&
+                    (SelectedFrameRate?.Value is null || format.FramesPerSecond == SelectedFrameRate.Value.Value) &&
+                    (SelectedDynamicRange?.Value is null || format.IsHdr == SelectedDynamicRange.Value.Value))
+                .ToArray();
+            var audio = _allFormats
+                .Where(format => format.Kind == StreamKind.AudioOnly &&
+                                 (SelectedBitrate?.Value is null || format.Bitrate == SelectedBitrate.Value.Value) &&
+                                 (SelectedAudioCodec?.Value is null || format.AudioCodec == SelectedAudioCodec.Value.Value))
+                .OrderByDescending(format => format.Bitrate ?? 0)
+                .ThenByDescending(format => format.AudioSampleRate ?? 0)
+                .ThenBy(format => format.FormatId)
+                .ToArray();
+
+            Formats.Clear();
+            foreach (var video in videos)
+            {
+                if (video.Kind == StreamKind.Progressive)
+                {
+                    Formats.Add(new FormatItemViewModel(video));
+                    continue;
+                }
+
+                var companion = audio.FirstOrDefault(candidate =>
+                    AdaptiveFormatSelector.AreMuxCompatible(video, candidate));
+                if (companion is not null)
+                {
+                    Formats.Add(new FormatItemViewModel(video, companion));
+                }
+            }
+
+            CompleteFormatRefresh();
+            return;
+        }
+
         var criteria = new FormatSelectionCriteria
         {
             Mode = SelectedDownloadMode.Value,
@@ -881,13 +1072,18 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             Formats.Add(new FormatItemViewModel(format));
         }
 
+        CompleteFormatRefresh();
+    }
+
+    private void CompleteFormatRefresh()
+    {
         SelectedFormat = Formats.FirstOrDefault();
         OnPropertyChanged(nameof(FormatCountLabel));
         if (_metadata is not null && !IsBusy)
         {
             StatusMessage = Formats.Count > 0
-                ? "Choose exact stream, then download"
-                : "No stream matches these filters";
+                ? "Choose exact output, then download"
+                : "No output matches these filters";
         }
     }
 

@@ -7,6 +7,7 @@ public static class FormatRanker
             .OrderByDescending(UsabilityTier)
             .ThenByDescending(format => format.Height ?? 0)
             .ThenByDescending(format => format.FramesPerSecond ?? 0)
+            .ThenByDescending(format => format.HasVideo && format.Container == MediaContainer.Mp4)
             .ThenByDescending(format => format.Bitrate ?? 0)
             .ThenBy(format => format.FormatId)
             .ToArray();

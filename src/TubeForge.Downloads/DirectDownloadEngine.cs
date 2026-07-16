@@ -3,8 +3,10 @@ using System.Diagnostics;
 using System.Net;
 using System.Net.Http.Headers;
 using TubeForge.Core.Errors;
+using TubeForge.Core.Media;
 using TubeForge.Core.Results;
 using TubeForge.Downloads.Resume;
+using TubeForge.Media;
 
 namespace TubeForge.Downloads;
 
@@ -128,7 +130,13 @@ public sealed class DirectDownloadEngine
             if (response.StatusCode == HttpStatusCode.RequestedRangeNotSatisfiable &&
                 canResume && request.ExpectedLength == existingLength)
             {
-                return FinalizeCompletedPartial(destinationPath, partialPath, statePath, existingLength, resumed: true);
+                return FinalizeCompletedPartial(
+                    destinationPath,
+                    partialPath,
+                    statePath,
+                    existingLength,
+                    resumed: true,
+                    request.ExpectedContainer);
             }
 
             if (!response.IsSuccessStatusCode)
@@ -187,7 +195,13 @@ public sealed class DirectDownloadEngine
                     IsTransient: true));
             }
 
-            return FinalizeCompletedPartial(destinationPath, partialPath, statePath, finalLength, append);
+            return FinalizeCompletedPartial(
+                destinationPath,
+                partialPath,
+                statePath,
+                finalLength,
+                append,
+                request.ExpectedContainer);
         }
         catch (OperationCanceledException)
         {
@@ -298,13 +312,23 @@ public sealed class DirectDownloadEngine
         string partialPath,
         string statePath,
         long finalLength,
-        bool resumed)
+        bool resumed,
+        MediaContainer expectedContainer)
     {
         if (!File.Exists(partialPath) || new FileInfo(partialPath).Length != finalLength)
         {
             return Failure(
                 "Download.Incomplete",
                 "The partial file did not pass final length validation.");
+        }
+
+        if (expectedContainer != MediaContainer.Unknown)
+        {
+            var validation = MediaContainerValidator.Validate(partialPath, expectedContainer);
+            if (!validation.IsSuccess)
+            {
+                return Result<DownloadReceipt>.Failure(validation.Error!);
+            }
         }
 
         File.Move(partialPath, destinationPath, overwrite: false);

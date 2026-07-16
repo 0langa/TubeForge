@@ -1,3 +1,5 @@
+using TubeForge.Core.Media;
+
 namespace TubeForge.Downloads;
 
 public sealed record DownloadRequest
@@ -9,4 +11,6 @@ public sealed record DownloadRequest
     public required string DestinationPath { get; init; }
 
     public long? ExpectedLength { get; init; }
+
+    public MediaContainer ExpectedContainer { get; init; } = MediaContainer.Unknown;
 }

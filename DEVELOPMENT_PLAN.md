@@ -15,9 +15,9 @@ The application is built from source in this repository. Network access is limit
 - WPF UI using the Windows Desktop runtime shipped with .NET.
 - Standard-library and Windows APIs only at runtime.
 - Public YouTube videos first.
-- Progressive MP4 downloads first: streams already containing audio and video need no muxer.
+- Audio + video defaults to the highest compatible adaptive video and audio tracks; progressive media is fallback only.
 - Audio-only downloads in the stream's native container (`m4a`/MP4 or WebM) before transcoding support.
-- Adaptive video plus audio after in-house ISO BMFF/MP4 muxing is proven.
+- In-house ISO BMFF/MP4 and EBML/WebM muxing combines encoded tracks without re-encoding.
 - Resumable, bounded-concurrency downloads with atomic finalization.
 
 ### Forbidden dependencies
@@ -304,7 +304,7 @@ Exit: metadata and unsigned stream URLs resolve for maintained public fixtures a
 - [x] Implement active-download pause/resume controls.
 - [x] Implement application-shutdown queue recovery.
 - [x] Add deterministic HTTP handler contract tests for ranges, validators, truncation, retries, and cancellation.
-- [ ] Add a loopback HTTP fault server for socket-level integration tests.
+- [x] Add a loopback HTTP fault server for socket-level integration tests.
 
 Exit: dependency-free CLI/harness downloads a progressive MP4 reliably and resumes after forced interruption.
 
@@ -340,7 +340,7 @@ Exit: signed public formats resolve without executing arbitrary JavaScript.
 - [x] Identify audio-only streams, codec, bitrate, sample rate, and container.
 - [x] Download M4A/MP4 and WebM audio without re-encoding through the direct transfer engine.
 - [x] Use the correct `.m4a` or `.webm` extension and map declared MIME/container metadata.
-- [ ] Validate the downloaded container structure before finalization.
+- [x] Validate the downloaded container structure before finalization.
 - [x] Add metadata display and recommended-audio ranking.
 - [x] Document why MP3 conversion is unavailable without transcoding.
 
@@ -348,13 +348,13 @@ Exit: user can save best/native audio stream with truthful format labeling.
 
 ### M7 — In-house MP4 muxer
 
-- [ ] Implement bounded ISO BMFF box reader/writer.
-- [ ] Parse init segments and fragmented media metadata.
-- [ ] Validate codec/container compatibility.
-- [ ] Build new movie/track/sample tables or a safe fragmented output path.
-- [ ] Interleave/copy samples using bounded buffers.
-- [ ] Preserve timestamps, sync samples, rotation, color, and audio parameters.
-- [ ] Validate output structure and playback against Windows media stack.
+- [x] Implement bounded ISO BMFF box reader/writer.
+- [x] Parse init segments and fragmented media metadata.
+- [x] Validate codec/container compatibility.
+- [x] Build a seekable regular-MP4 output with merged tracks and rewritten 64-bit chunk offsets.
+- [x] Interleave/copy samples using bounded buffers.
+- [x] Preserve source sample tables, timestamps, sync samples, rotation, color, and audio parameters.
+- [x] Validate output structure and playback against Windows media stack.
 - [ ] Fuzz box sizes, nesting, integer overflow, truncation, and hostile input.
 
 Exit: compatible adaptive MP4 video and audio combine into a seekable file without re-encoding.
@@ -373,10 +373,10 @@ Exit: robust batch workflow with user-controlled content selection and bounded l
 
 ### M9 — WebM muxing and extended media
 
-- [ ] Implement bounded EBML reader/writer.
-- [ ] Parse WebM tracks, clusters, cues, timecodes, and lacing.
-- [ ] Mux compatible Opus/Vorbis audio and VP9/AV1 video without re-encoding.
-- [ ] Generate cues for seeking and validate duration/timestamps.
+- [x] Implement bounded EBML reader/writer.
+- [x] Parse WebM tracks, clusters, timecodes, SimpleBlocks, and BlockGroups while preserving laced payloads.
+- [x] Mux compatible Opus/Vorbis audio and VP9/AV1 video without re-encoding.
+- [x] Interleave clusters by timecode, remap audio track identity, and generate new seek cues.
 - [ ] Add hostile-container fixtures and fuzz coverage.
 
 Exit: best compatible WebM adaptive formats combine into seekable files.
@@ -443,7 +443,10 @@ Order for current work:
 - 2026-07-16: RECALL state is local development context and must remain outside Git.
 - 2026-07-16: Use a versioned Android player profile as the primary direct-format fallback when the watch page exposes only ciphered media. Current WEB/MWEB/TV profiles returned no usable streams during live verification; the tested Android profile returned progressive, audio-only, and video-only URLs.
 - 2026-07-16: Keep the constrained classic signature planner as a guarded fallback. The current ES6 player no longer exposes the traditional split/reverse/splice shape, so current-player decipher and `n` transformation remain unfinished M5 work.
-- 2026-07-16: Use type-first stream selection. Combined audio/video, native audio, and video-only modes expose only relevant filters and report per-mode limits. Do not imply that a 360p progressive limit is the video's maximum quality; adaptive high-resolution video remains video-only until in-house muxing exists.
+- 2026-07-16: Use type-first stream selection. Combined audio/video, native audio, and video-only modes expose only relevant filters and report per-mode limits. Audio + video presents muxable adaptive outputs as complete files, while Video only remains an explicit track-only choice.
+- 2026-07-16: Highest-quality audio + video is an MVP release gate. Audio + video selects the highest compatible adaptive tracks, downloads both resumably, and muxes them internally; low-resolution progressive media is fallback only.
+- 2026-07-16: Support regular MP4 chunk-offset rewriting, fragmented MP4 track/fragment remapping and interleaving, and WebM cluster interleaving/cue generation. A live H.264/AAC fragmented MP4 mux passed structural validation and opened with both tracks in the Windows media stack; AV1 playback still depends on the system codec installation.
+- 2026-07-16: Prefer MP4 when video quality characteristics are equivalent, while keeping quality as the primary rank and retaining higher-quality WebM options.
 
 ## 15. Plan maintenance
 

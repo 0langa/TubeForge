@@ -103,6 +103,81 @@ public static class FormatRankerTests
         Assert.SequenceEqual(new[] { 251 }, matches.Select(format => format.FormatId));
     }
 
+    [Test]
+    public static void SelectsHighestCompatibleAdaptiveVideoAndAudioInsteadOfLowProgressiveStream()
+    {
+        var formats = new[]
+        {
+            Format(18, StreamKind.Progressive, MediaContainer.Mp4, 360, 700_000),
+            Format(137, StreamKind.VideoOnly, MediaContainer.Mp4, 1080, 4_000_000),
+            Format(401, StreamKind.VideoOnly, MediaContainer.Mp4, 2160, 15_000_000) with
+            {
+                FramesPerSecond = 60,
+                VideoCodec = VideoCodec.Av1
+            },
+            Format(140, StreamKind.AudioOnly, MediaContainer.Mp4, null, 128_000),
+            Format(141, StreamKind.AudioOnly, MediaContainer.Mp4, null, 256_000)
+        };
+
+        var selection = AdaptiveFormatSelector.SelectBest(formats);
+
+        Assert.True(selection is not null);
+        Assert.True(selection!.RequiresMuxing);
+        Assert.Equal(401, selection.Video.FormatId);
+        Assert.Equal(141, selection.Audio!.FormatId);
+        Assert.Equal(MediaContainer.Mp4, selection.OutputContainer);
+    }
+
+    [Test]
+    public static void UsesProgressiveFallbackOnlyWhenNoCompatibleAdaptivePairExists()
+    {
+        var formats = new[]
+        {
+            Format(18, StreamKind.Progressive, MediaContainer.Mp4, 360, 700_000),
+            Format(401, StreamKind.VideoOnly, MediaContainer.Mp4, 2160, 15_000_000) with
+            {
+                VideoCodec = VideoCodec.Av1
+            },
+            Format(251, StreamKind.AudioOnly, MediaContainer.WebM, null, 160_000) with
+            {
+                AudioCodec = AudioCodec.Opus
+            }
+        };
+
+        var selection = AdaptiveFormatSelector.SelectBest(formats);
+
+        Assert.True(selection is not null);
+        Assert.False(selection!.RequiresMuxing);
+        Assert.Equal(18, selection.Video.FormatId);
+        Assert.True(selection.Audio is null);
+    }
+
+    [Test]
+    public static void PrefersMp4AtEqualQualityButKeepsHigherQualityWebMEligible()
+    {
+        var mp4Video = Format(137, StreamKind.VideoOnly, MediaContainer.Mp4, 1080, 4_000_000);
+        var webMVideo = Format(248, StreamKind.VideoOnly, MediaContainer.WebM, 1080, 5_000_000) with
+        {
+            VideoCodec = VideoCodec.Vp9
+        };
+        var mp4Audio = Format(140, StreamKind.AudioOnly, MediaContainer.Mp4, null, 128_000);
+        var webMAudio = Format(251, StreamKind.AudioOnly, MediaContainer.WebM, null, 160_000) with
+        {
+            AudioCodec = AudioCodec.Opus
+        };
+
+        var equalQuality = AdaptiveFormatSelector.SelectBest([mp4Video, webMVideo, mp4Audio, webMAudio]);
+        var higherQualityWebM = AdaptiveFormatSelector.SelectBest([
+            mp4Video,
+            webMVideo with { Height = 2160 },
+            mp4Audio,
+            webMAudio
+        ]);
+
+        Assert.Equal(MediaContainer.Mp4, equalQuality!.OutputContainer);
+        Assert.Equal(MediaContainer.WebM, higherQualityWebM!.OutputContainer);
+    }
+
     private static StreamFormat Format(
         int id,
         StreamKind kind,

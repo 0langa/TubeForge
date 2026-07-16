@@ -1,4 +1,5 @@
 using System.Net;
+using System.Buffers.Binary;
 using TubeForge.Core.Media;
 using TubeForge.Core.YouTube;
 using TubeForge.YouTube;
@@ -70,4 +71,198 @@ if (data.Diagnostics is not null)
     Console.WriteLine($"Extractor stage: {data.Diagnostics.Stage}");
     Console.WriteLine($"Transform plans/probes: {data.Diagnostics.TransformPlanCount}/{data.Diagnostics.ProbeAttemptCount}");
 }
+
+var best = AdaptiveFormatSelector.SelectBest(data.Metadata.Formats);
+if (best is not null)
+{
+    Console.WriteLine(best.RequiresMuxing
+        ? $"Best A/V selection: video {best.Video.FormatId} ({best.Video.Height}p) + audio {best.Audio!.FormatId} ({best.Audio.Bitrate} bps)"
+        : $"Best A/V selection: progressive {best.Video.FormatId} ({best.Video.Height}p)");
+    Console.WriteLine($"Video layout prefix: {await ProbeLayoutAsync(client, best.Video)}");
+    if (best.Audio is not null)
+    {
+        Console.WriteLine($"Audio layout prefix: {await ProbeLayoutAsync(client, best.Audio)}");
+    }
+}
+
 return data.Metadata.Formats.Count > 0 ? 0 : 1;
+
+static async Task<string> ProbeLayoutAsync(HttpClient client, StreamFormat format)
+{
+    const int maximumProbeBytes = 64 * 1024;
+    using var request = new HttpRequestMessage(HttpMethod.Get, format.Url);
+    request.Headers.Range = new System.Net.Http.Headers.RangeHeaderValue(0, maximumProbeBytes - 1);
+    request.Headers.UserAgent.ParseAdd("Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/138.0.0.0");
+    using var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead);
+    if (!response.IsSuccessStatusCode)
+    {
+        return $"HTTP {(int)response.StatusCode}";
+    }
+
+    await using var stream = await response.Content.ReadAsStreamAsync();
+    var bytes = new byte[maximumProbeBytes];
+    var length = 0;
+    while (length < bytes.Length)
+    {
+        var read = await stream.ReadAsync(bytes.AsMemory(length));
+        if (read == 0)
+        {
+            break;
+        }
+
+        length += read;
+    }
+
+    ReadOnlySpan<byte> ebmlMagic = [0x1A, 0x45, 0xDF, 0xA3];
+    if (length >= 4 && bytes.AsSpan(0, 4).SequenceEqual(ebmlMagic))
+    {
+        return ProbeEbmlPrefix(bytes.AsSpan(0, length));
+    }
+
+    var boxes = new List<string>();
+    var offset = 0;
+    while (offset + 8 <= length && boxes.Count < 16)
+    {
+        var shortSize = BinaryPrimitives.ReadUInt32BigEndian(bytes.AsSpan(offset, 4));
+        var type = System.Text.Encoding.ASCII.GetString(bytes, offset + 4, 4);
+        var headerSize = 8;
+        ulong size = shortSize;
+        if (shortSize == 1)
+        {
+            if (offset + 16 > length)
+            {
+                boxes.Add(type + "(truncated header)");
+                break;
+            }
+
+            size = BinaryPrimitives.ReadUInt64BigEndian(bytes.AsSpan(offset + 8, 8));
+            headerSize = 16;
+        }
+
+        if (shortSize == 0)
+        {
+            boxes.Add(type + "(to EOF)");
+            break;
+        }
+
+        if (size < (ulong)headerSize || size > int.MaxValue)
+        {
+            boxes.Add(type + "(invalid size)");
+            break;
+        }
+
+        boxes.Add($"{type}({size})");
+        if ((ulong)(length - offset) < size)
+        {
+            boxes[^1] += "…";
+            break;
+        }
+
+        offset += (int)size;
+    }
+
+    return boxes.Count == 0 ? "unrecognized" : string.Join(" → ", boxes);
+}
+
+static string ProbeEbmlPrefix(ReadOnlySpan<byte> bytes)
+{
+    var header = ReadEbmlElement(bytes, 0);
+    if (header is null)
+    {
+        return "EBML (truncated header)";
+    }
+
+    var segmentOffset = checked(header.Value.Offset + header.Value.HeaderSize + (int)header.Value.DataSize);
+    var segment = ReadEbmlElement(bytes, segmentOffset);
+    if (segment is null || segment.Value.Id != 0x18538067)
+    {
+        return "EBML → Segment (not visible in probe)";
+    }
+
+    var names = new List<string> { "EBML", "Segment" };
+    var cursor = segment.Value.Offset + segment.Value.HeaderSize;
+    while (cursor < bytes.Length && names.Count < 16)
+    {
+        var child = ReadEbmlElement(bytes, cursor);
+        if (child is null)
+        {
+            names.Add("truncated");
+            break;
+        }
+
+        var name = child.Value.Id switch
+        {
+            0x114D9B74 => "SeekHead",
+            0x1549A966 => "Info",
+            0x1654AE6B => "Tracks",
+            0x1F43B675 => "Cluster",
+            0x1C53BB6B => "Cues",
+            0x1254C367 => "Tags",
+            0xEC => "Void",
+            _ => $"0x{child.Value.Id:X}"
+        };
+        names.Add($"{name}({child.Value.DataSize})");
+        if (child.Value.DataSize > int.MaxValue ||
+            (ulong)child.Value.HeaderSize + child.Value.DataSize > (ulong)(bytes.Length - cursor))
+        {
+            names[^1] += "…";
+            break;
+        }
+
+        cursor = checked(cursor + child.Value.HeaderSize + (int)child.Value.DataSize);
+    }
+
+    return string.Join(" → ", names);
+}
+
+static (ulong Id, int Offset, int HeaderSize, ulong DataSize)? ReadEbmlElement(
+    ReadOnlySpan<byte> bytes,
+    int offset)
+{
+    if (offset < 0 || offset >= bytes.Length)
+    {
+        return null;
+    }
+
+    var idWidth = VintWidth(bytes[offset], 4);
+    if (idWidth == 0 || offset + idWidth >= bytes.Length)
+    {
+        return null;
+    }
+
+    ulong id = 0;
+    for (var index = 0; index < idWidth; index++)
+    {
+        id = (id << 8) | bytes[offset + index];
+    }
+
+    var sizeOffset = offset + idWidth;
+    var sizeWidth = VintWidth(bytes[sizeOffset], 8);
+    if (sizeWidth == 0 || sizeOffset + sizeWidth > bytes.Length)
+    {
+        return null;
+    }
+
+    var marker = 1 << (8 - sizeWidth);
+    ulong size = (ulong)(bytes[sizeOffset] & (marker - 1));
+    for (var index = 1; index < sizeWidth; index++)
+    {
+        size = (size << 8) | bytes[sizeOffset + index];
+    }
+
+    var unknown = size == ((1UL << (7 * sizeWidth)) - 1);
+    return (id, offset, idWidth + sizeWidth, unknown ? ulong.MaxValue : size);
+}
+
+static int VintWidth(byte firstByte, int maximum)
+{
+    for (var width = 1; width <= maximum; width++)
+    {
+        if ((firstByte & (0x80 >> (width - 1))) != 0)
+        {
+            return width;
+        }
+    }
+
+    return 0;
+}

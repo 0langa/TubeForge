@@ -6,5 +6,6 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../TubeForge.Core/TubeForge.Core.csproj" />
+    <ProjectReference Include="../TubeForge.Media/TubeForge.Media.csproj" />
   </ItemGroup>
 </Project>
