@@ -93,7 +93,11 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     private string _diagnosticsStatus = "Export contains whitelisted technical state only.";
     private string _diagnosticsExtractionStage = "NotRun";
 
-    public MainViewModel()
+    public MainViewModel() : this(applicationDataDirectory: null)
+    {
+    }
+
+    internal MainViewModel(string? applicationDataDirectory)
     {
         var handler = new SocketsHttpHandler
         {
@@ -107,9 +111,10 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         _resolver = new YouTubeMetadataResolver(_httpClient);
         _downloader = new DirectDownloadEngine(_httpClient);
         _adaptiveDownloader = new AdaptiveDownloadEngine(_downloader);
-        var applicationDataDirectory = Path.Combine(
+        applicationDataDirectory ??= Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
             "TubeForge");
+        applicationDataDirectory = Path.GetFullPath(applicationDataDirectory);
         _queueStore = new DownloadQueueStore(Path.Combine(applicationDataDirectory, "queue.json"));
         _settingsStore = new TubeForgeSettingsStore(Path.Combine(applicationDataDirectory, "settings.json"));
         _downloadFolder = Path.Combine(

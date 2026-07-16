@@ -25,8 +25,9 @@ Working now:
 - local settings, first-run responsible-use acknowledgement, and redacted runtime/extraction diagnostics pages;
 - keyboard-focused navigation, screen-reader labels/live regions, DPI-aware layout rounding, and dark Windows title-bar integration;
 - dependency-free fixture/transfer test runner with deterministic hostile-container mutation coverage, plus sanitized live smoke tools.
+- isolated performance budgets for analysis latency, startup, CPU, memory, and UI frame pacing, with the deterministic core gate enforced in CI.
 
-Not finished: playlist/bulk scheduling, hostile-container fuzzing, audio transcoding/MP3, current ES6 player decipher, throttling-parameter transforms, accessibility hardening, packaging, and releases. See [DEVELOPMENT_PLAN.md](DEVELOPMENT_PLAN.md) for exact checklist state.
+Not finished: playlist/bulk scheduling, caption downloads/conversion, audio transcoding/MP3, current ES6 player decipher, throttling-parameter transforms, packaging, and releases. See [DEVELOPMENT_PLAN.md](DEVELOPMENT_PLAN.md) for exact checklist state.
 
 ## Baseline
 
@@ -63,6 +64,13 @@ Opt-in live MP4 mux smoke test (downloads the smallest compatible H.264/AAC pair
 
 ```powershell
 dotnet run --project tools/TubeForge.LiveMuxSmoke -- "https://www.youtube.com/watch?v=VIDEO_ID"
+```
+
+Run the isolated local [performance budget](docs/PERFORMANCE_BUDGET.md) probe:
+
+```powershell
+dotnet build TubeForge.slnx --configuration Release
+dotnet run --project tools/TubeForge.Performance --configuration Release --no-build
 ```
 
 Run the desktop application:

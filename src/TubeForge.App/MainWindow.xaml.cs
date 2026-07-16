@@ -5,16 +5,24 @@ using System.IO;
 using System.Runtime.InteropServices;
 using System.Text;
 using Microsoft.Win32;
+using TubeForge.App.Diagnostics;
 using TubeForge.App.ViewModels;
 
 namespace TubeForge.App;
 
 public partial class MainWindow : Window
 {
-    private readonly MainViewModel _viewModel = new();
+    private readonly DesktopPerformanceProbe? _performanceProbe;
+    private readonly MainViewModel _viewModel;
 
-    public MainWindow()
+    public MainWindow() : this(performanceProbe: null)
     {
+    }
+
+    internal MainWindow(DesktopPerformanceProbe? performanceProbe)
+    {
+        _performanceProbe = performanceProbe;
+        _viewModel = new MainViewModel(performanceProbe?.ApplicationDataDirectory);
         InitializeComponent();
         DataContext = _viewModel;
         Loaded += MainWindow_OnLoaded;
@@ -42,6 +50,11 @@ public partial class MainWindow : Window
         else
         {
             UrlTextBox.Focus();
+        }
+
+        if (_performanceProbe is not null)
+        {
+            await _performanceProbe.CaptureAsync();
         }
     }
 

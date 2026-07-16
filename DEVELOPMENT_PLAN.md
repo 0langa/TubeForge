@@ -389,7 +389,7 @@ Exit: best compatible WebM adaptive formats combine into seekable files.
 - [x] Add disk-space forecasting and low-space recovery.
 - [x] Add queue soak tests and crash-consistent persistence.
 - [x] Add redacted diagnostic export and issue template.
-- [ ] Performance budget: startup, analysis latency, CPU, memory, UI frame time.
+- [x] Performance budget: startup, analysis latency, CPU, memory, UI frame time.
 
 Exit: release-candidate reliability targets met on supported Windows versions.
 
@@ -457,6 +457,7 @@ Order for current work:
 - 2026-07-16: Queue commits flush a same-directory pending file before atomic replacement and retain the prior committed snapshot as recovery backup. Startup accepts only a fully validated primary, pending, or backup snapshot and pauses interrupted active items.
 - 2026-07-16: Deterministic transfer reliability coverage uses real loopback sockets for connection loss, explicit proxies, and IPv4/IPv6, plus gated streams for sleep-like transport stalls and slow-destination backpressure without timing sleeps.
 - 2026-07-16: Segmented transfer is an opt-in setting for large known-length streams. Up to four concurrent ranges must agree on bounds, total length, and validators; completed-range state is resumable and servers that ignore ranges fall back to the normal direct engine.
+- 2026-07-16: Enforce deterministic fixture-analysis latency in CI and measure desktop startup, isolated idle CPU, working set, and WPF frame cadence with a local-only probe. Keep 2 s startup and 34 ms frames as targets; use 4 s and 50 ms as hard cold/30 Hz environment ceilings.
 
 ## 15. Plan maintenance
 
