@@ -3,6 +3,7 @@ using System.Net;
 using System.Text;
 using System.Text.Json;
 using TubeForge.Core.Errors;
+using TubeForge.Core.Networking;
 using TubeForge.Core.Results;
 using TubeForge.Core.YouTube;
 
@@ -44,7 +45,7 @@ public sealed class YouTubeCollectionResolver(HttpClient httpClient)
 
             if (!initialResponse.IsSuccessStatusCode)
             {
-                return HttpFailure(initialResponse.StatusCode);
+                return HttpFailure(initialResponse);
             }
 
             var initialHtml = await ReadBoundedTextAsync(initialResponse.Content, cancellationToken)
@@ -83,7 +84,7 @@ public sealed class YouTubeCollectionResolver(HttpClient httpClient)
 
                 if (!response.IsSuccessStatusCode)
                 {
-                    return HttpFailure(response.StatusCode);
+                    return HttpFailure(response);
                 }
 
                 var json = await ReadBoundedTextAsync(response.Content, cancellationToken).ConfigureAwait(false);
@@ -252,27 +253,34 @@ public sealed class YouTubeCollectionResolver(HttpClient httpClient)
         (uri.Host.Equals("youtube.com", StringComparison.OrdinalIgnoreCase) ||
          uri.Host.EndsWith(".youtube.com", StringComparison.OrdinalIgnoreCase));
 
-    private static Result<YouTubeCollectionResult> HttpFailure(HttpStatusCode statusCode) => statusCode switch
+    private static Result<YouTubeCollectionResult> HttpFailure(HttpResponseMessage response) => response.StatusCode switch
     {
         HttpStatusCode.TooManyRequests => Failure(
             "Network.RateLimited",
             "YouTube temporarily rate-limited collection analysis.",
-            isTransient: true),
+            isTransient: true,
+            retryAfter: HttpRetryAfterParser.Parse(response.Headers)),
         HttpStatusCode.Forbidden => Failure(
             "Network.Forbidden",
             "YouTube refused the collection analysis request."),
         _ => Failure(
             "Network.HttpError",
-            $"YouTube returned HTTP {(int)statusCode} during collection analysis.",
-            isTransient: (int)statusCode >= 500)
+            $"YouTube returned HTTP {(int)response.StatusCode} during collection analysis.",
+            isTransient: (int)response.StatusCode >= 500)
     };
 
     private static Result<YouTubeCollectionResult> Failure(
         string code,
         string message,
         string? detail = null,
-        bool isTransient = false) =>
-        Result<YouTubeCollectionResult>.Failure(new TubeForgeError(code, message, detail, isTransient));
+        bool isTransient = false,
+        TimeSpan? retryAfter = null) =>
+        Result<YouTubeCollectionResult>.Failure(new TubeForgeError(
+            code,
+            message,
+            detail,
+            isTransient,
+            retryAfter));
 
     private sealed class ContentTooLargeException : Exception;
 }

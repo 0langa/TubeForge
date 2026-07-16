@@ -19,6 +19,7 @@ Working now:
 - caption-track metadata plus manual/auto language selection and atomic SRT/WebVTT sidecar saves;
 - on-demand validated thumbnail saves and stable JSON metadata sidecars with chapters but without signed stream URLs;
 - bounded playlist/channel enumeration with per-video selection, source ordering, indexed filenames, and batch queue preparation;
+- shared per-provider request limits and bounded `Retry-After` backoff that stops persistent rate-limited bulk preparation;
 - resumable `.part` transfers, bounded container validation, retries, progress, cancellation, and atomic finalization;
 - opt-in segmented transfer for large files with validated parallel ranges, resumable segment state, and automatic direct-transfer fallback;
 - preflight disk-space forecasting with adaptive-mux peak-space accounting and retryable low-space failures;
@@ -29,7 +30,7 @@ Working now:
 - dependency-free fixture/transfer test runner with deterministic hostile-container mutation coverage, plus sanitized live smoke tools.
 - isolated performance budgets for analysis latency, startup, CPU, memory, and UI frame pacing, with the deterministic core gate enforced in CI.
 
-Not finished: rate-limit-aware bulk scheduling, custom naming/history, audio transcoding/MP3, current ES6 player decipher, throttling-parameter transforms, packaging, and releases. See [DEVELOPMENT_PLAN.md](DEVELOPMENT_PLAN.md) for exact checklist state.
+Not finished: custom naming/history, Shorts/live-specific workflows, audio transcoding/MP3, current ES6 player decipher, throttling-parameter transforms, packaging, and releases. See [DEVELOPMENT_PLAN.md](DEVELOPMENT_PLAN.md) for exact checklist state.
 
 ## Baseline
 

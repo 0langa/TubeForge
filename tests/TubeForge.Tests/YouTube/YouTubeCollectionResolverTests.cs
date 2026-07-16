@@ -1,4 +1,5 @@
 using System.Net;
+using System.Net.Http.Headers;
 using TubeForge.Core.YouTube;
 using TubeForge.Tests.Framework;
 using TubeForge.YouTube.Collections;
@@ -69,6 +70,27 @@ public static class YouTubeCollectionResolverTests
         Assert.Equal(1, result.Value.Items.Count);
         Assert.True(result.Value.IsTruncated);
         Assert.Equal(1, requestCount);
+    }
+
+    [Test]
+    public static async Task PreservesBoundedRetryAfterOnRateLimit()
+    {
+        using var handler = new StubHandler((_, _) =>
+        {
+            var response = new HttpResponseMessage(HttpStatusCode.TooManyRequests);
+            response.Headers.RetryAfter = new RetryConditionHeaderValue(TimeSpan.FromSeconds(23));
+            return Task.FromResult(response);
+        });
+        using var client = new HttpClient(handler);
+        var resolver = new YouTubeCollectionResolver(client);
+        var source = YouTubeCollectionUrlParser.Parse(
+            "https://www.youtube.com/playlist?list=PL1234567890").Value;
+
+        var result = await resolver.ResolveAsync(source);
+
+        Assert.False(result.IsSuccess);
+        Assert.Equal("Network.RateLimited", result.Error?.Code);
+        Assert.Equal(TimeSpan.FromSeconds(23), result.Error?.RetryAfter);
     }
 
     private sealed class StubHandler(

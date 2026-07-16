@@ -566,7 +566,7 @@
                 <Grid Grid.Row="0">
                     <StackPanel>
                         <TextBlock Text="Download queue" FontSize="29" FontWeight="SemiBold" />
-                        <TextBlock Text="Concurrent transfers, recovery, and per-item controls."
+                        <TextBlock Text="Rate-aware transfers, recovery, and per-item controls."
                                    Margin="0,7,0,0" FontSize="14" Foreground="{StaticResource MutedTextBrush}" />
                     </StackPanel>
                     <TextBlock Text="{Binding QueueSummary}" HorizontalAlignment="Right" VerticalAlignment="Bottom"
@@ -586,7 +586,7 @@
                         </Grid.ColumnDefinitions>
                         <StackPanel VerticalAlignment="Center">
                             <TextBlock Text="GLOBAL CONCURRENCY" Style="{StaticResource FieldLabel}" />
-                            <TextBlock Text="New transfers start when a slot opens" Margin="0,4,0,0" FontSize="10"
+                            <TextBlock Text="Global 1–4 · provider host cap 2 · Retry-After honored" Margin="0,4,0,0" FontSize="10"
                                        Foreground="{StaticResource MutedTextBrush}" />
                         </StackPanel>
                         <ComboBox Grid.Column="2" ItemsSource="{Binding MaxConcurrentDownloadOptions}"
@@ -745,6 +745,9 @@
                         <ComboBox ItemsSource="{Binding MaxConcurrentDownloadOptions}"
                                   SelectedItem="{Binding SelectedMaxConcurrentDownloads}" Width="160"
                                   HorizontalAlignment="Left" AutomationProperties.Name="Default maximum concurrent downloads" />
+                        <TextBlock Text="Requests to one provider host are capped at two and pause on server rate-limit guidance."
+                                   Margin="0,6,0,0" FontSize="10" TextWrapping="Wrap"
+                                   Foreground="{StaticResource MutedTextBrush}" />
 
                         <CheckBox IsChecked="{Binding EnableSegmentedTransfers}" Margin="0,20,0,0"
                                   AutomationProperties.Name="Enable experimental segmented transfers">

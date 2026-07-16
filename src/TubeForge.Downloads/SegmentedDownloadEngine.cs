@@ -238,7 +238,7 @@ internal sealed class SegmentedDownloadEngine(HttpClient httpClient, DownloadUri
 
             if (!response.IsSuccessStatusCode)
             {
-                var httpFailure = DirectDownloadEngine.HttpFailure(response.StatusCode);
+                var httpFailure = DirectDownloadEngine.HttpFailure(response);
                 return Result<bool>.Failure(httpFailure.Error!);
             }
 

@@ -25,6 +25,9 @@ namespace TubeForge.App.ViewModels;
 
 public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
 {
+    private const int MaximumConcurrentRequestsPerHost = 2;
+    private static readonly Uri YouTubeOrigin = new("https://www.youtube.com/");
+
     private static readonly IReadOnlyList<DownloadModeOption> BaseModeChoices =
     [
         new(DownloadMode.AudioVideo, "Audio + video", "Best video + best audio, muxed locally"),
@@ -54,6 +57,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     private readonly DownloadQueueStore _queueStore;
     private readonly TubeForgeSettingsStore _settingsStore;
     private readonly DownloadQueueDispatcher _queueDispatcher = new(2);
+    private readonly HostRequestGate _hostRequestGate;
+    private readonly RateLimitedRequestExecutor _rateLimitedRequests;
     private readonly SemaphoreSlim _queueMutationLock = new(1, 1);
     private readonly Dictionary<Guid, QueuedDownloadWork> _preparedQueueWork = [];
     private readonly Dictionary<Guid, CancellationTokenSource> _downloadCancellations = [];
@@ -118,6 +123,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
 
     internal MainViewModel(string? applicationDataDirectory)
     {
+        _hostRequestGate = new HostRequestGate(MaximumConcurrentRequestsPerHost);
+        _rateLimitedRequests = new RateLimitedRequestExecutor(_hostRequestGate);
         var handler = new SocketsHttpHandler
         {
             AutomaticDecompression = DecompressionMethods.All,
@@ -795,7 +802,11 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         StatusMessage = "Analyzing video…";
         try
         {
-            var result = await _resolver.ResolveAsync(parsed.Value, _analysisCancellation.Token);
+            var result = await _rateLimitedRequests.ExecuteAsync(
+                YouTubeOrigin,
+                token => _resolver.ResolveAsync(parsed.Value, token),
+                delay => StatusMessage = $"Rate limited · retrying in {FormatRateLimitDelay(delay)}",
+                _analysisCancellation.Token);
             if (!result.IsSuccess)
             {
                 _diagnosticsExtractionStage = "ResolutionFailed";
@@ -857,9 +868,10 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             : "Enumerating channel videos…";
         try
         {
-            var result = await _collectionResolver.ResolveAsync(
-                source,
-                maximumItems: 1_000,
+            var result = await _rateLimitedRequests.ExecuteAsync(
+                YouTubeOrigin,
+                token => _collectionResolver.ResolveAsync(source, maximumItems: 1_000, token),
+                delay => StatusMessage = $"Rate limited · retrying in {FormatRateLimitDelay(delay)}",
                 _analysisCancellation.Token);
             if (!result.IsSuccess)
             {
@@ -966,6 +978,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         var queued = 0;
         var skipped = 0;
         var failed = 0;
+        var deferred = 0;
+        var stoppedForRateLimit = false;
         var indexWidth = Math.Max(2, CollectionItems.Count.ToString().Length);
         try
         {
@@ -979,7 +993,11 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                 var card = selected[itemIndex];
                 StatusMessage = $"Preparing collection item {itemIndex + 1} of {selected.Length}…";
                 card.SetStatus("Resolving streams…");
-                var resolved = await _resolver.ResolveAsync(card.Item.VideoId, cancellationToken);
+                var resolved = await _rateLimitedRequests.ExecuteAsync(
+                    YouTubeOrigin,
+                    token => _resolver.ResolveAsync(card.Item.VideoId, token),
+                    delay => card.SetStatus($"Rate limited · retrying in {FormatRateLimitDelay(delay)}"),
+                    cancellationToken);
                 if (!resolved.IsSuccess)
                 {
                     if (cancellationToken.IsCancellationRequested)
@@ -990,6 +1008,18 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
 
                     card.SetStatus($"Failed · {resolved.Error!.Code}");
                     failed++;
+                    if (resolved.Error.Code == "Network.RateLimited")
+                    {
+                        stoppedForRateLimit = true;
+                        foreach (var remaining in selected.Skip(itemIndex + 1))
+                        {
+                            remaining.SetStatus("Deferred · rate limited");
+                            deferred++;
+                        }
+
+                        break;
+                    }
+
                     continue;
                 }
 
@@ -1035,7 +1065,6 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                         continue;
                     }
 
-                    _preparedQueueWork[queueItem.Id] = new QueuedDownloadWork(metadata, selection, destination);
                     card.SetStatus($"Queued · {Path.GetFileName(destination)}");
                     queued++;
                     PumpQueue();
@@ -1050,11 +1079,15 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
 
             StatusMessage = cancellationToken.IsCancellationRequested
                 ? "Collection queue preparation cancelled"
-                : $"Queued {queued} collection items";
-            ProgressDetail = $"{queued} queued · {skipped} skipped · {failed} failed";
+                : stoppedForRateLimit
+                    ? "YouTube rate limited collection preparation"
+                    : $"Queued {queued} collection items";
+            ProgressDetail = $"{queued} queued · {skipped} skipped · {failed} failed · {deferred} deferred";
             if (failed > 0)
             {
-                ErrorMessage = "Some collection items could not be prepared. Review item statuses. (Collection.PartialFailure)";
+                ErrorMessage = stoppedForRateLimit
+                    ? "TubeForge stopped bulk requests after repeated rate limits. Retry deferred items later. (Network.RateLimited)"
+                    : "Some collection items could not be prepared. Review item statuses. (Collection.PartialFailure)";
             }
         }
         finally
@@ -1325,6 +1358,9 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             var progress = new Progress<DownloadProgress>(value => UpdateQueueProgress(itemId, value));
             TubeForgeError? downloadError;
             long completedBytes;
+            using var mediaLease = await _hostRequestGate.EnterAsync(
+                work.Selection.Format.Url,
+                cancellation.Token);
             if (work.Selection.AudioFormat is StreamFormat audioFormat)
             {
                 var result = await _adaptiveDownloader.DownloadAsync(new AdaptiveDownloadRequest
@@ -1351,6 +1387,11 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                     cancellation.Token);
                 downloadError = result.Error;
                 completedBytes = result.IsSuccess ? result.Value.BytesWritten : SelectionPartialLength(work.Destination, work.Selection);
+            }
+
+            if (downloadError?.Code == "Network.RateLimited")
+            {
+                _hostRequestGate.Defer(work.Selection.Format.Url, downloadError.RetryAfter);
             }
 
             if (downloadError is not null)
@@ -1426,7 +1467,10 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             return (null, new TubeForgeError("Queue.InvalidVideoId", "The queued video ID is invalid."));
         }
 
-        var resolved = await _resolver.ResolveAsync(videoId, cancellationToken);
+        var resolved = await _rateLimitedRequests.ExecuteAsync(
+            YouTubeOrigin,
+            token => _resolver.ResolveAsync(videoId, token),
+            cancellationToken: cancellationToken);
         if (!resolved.IsSuccess)
         {
             return (null, resolved.Error);
@@ -1466,6 +1510,10 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         return (work, null);
     }
 
+    private static string FormatRateLimitDelay(TimeSpan delay) => delay.TotalMinutes >= 1
+        ? $"{Math.Ceiling(delay.TotalMinutes)}m"
+        : $"{Math.Max(1, Math.Ceiling(delay.TotalSeconds))}s";
+
     private async Task CompleteQueueRunAsync(
         Guid itemId,
         DownloadQueueStatus status,
@@ -1490,7 +1538,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         var card = QueueItems.FirstOrDefault(item => item.Id == itemId);
         card?.UpdateProgress(progress);
         DownloadFraction = progress.Fraction ?? 0;
-        ProgressDetail = $"{_queueDispatcher.ActiveCount} active · global limit {SelectedMaxConcurrentDownloads}";
+        ProgressDetail = $"{_queueDispatcher.ActiveCount} active · global limit {SelectedMaxConcurrentDownloads} · host limit {MaximumConcurrentRequestsPerHost}";
     }
 
     private long? QueuePartialLength(Guid itemId)

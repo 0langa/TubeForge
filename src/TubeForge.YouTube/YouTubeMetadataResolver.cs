@@ -4,6 +4,7 @@ using System.Text;
 using System.Collections.Concurrent;
 using System.Text.Json;
 using TubeForge.Core.Errors;
+using TubeForge.Core.Networking;
 using TubeForge.Core.Results;
 using TubeForge.Core.YouTube;
 using TubeForge.YouTube.Extraction;
@@ -39,7 +40,7 @@ public sealed class YouTubeMetadataResolver(HttpClient httpClient)
 
             if (!response.IsSuccessStatusCode)
             {
-                return HttpFailure(response.StatusCode);
+                return HttpFailure(response);
             }
 
             if (response.Content.Headers.ContentLength is > MaximumWatchPageCharacters)
@@ -372,16 +373,19 @@ public sealed class YouTubeMetadataResolver(HttpClient httpClient)
         }
     }
 
-    private static Result<WatchPageData> HttpFailure(HttpStatusCode statusCode) => statusCode switch
+    private static Result<WatchPageData> HttpFailure(HttpResponseMessage response) => response.StatusCode switch
     {
         HttpStatusCode.TooManyRequests => Result<WatchPageData>.Failure(new TubeForgeError(
-            "Network.RateLimited", "YouTube temporarily rate-limited this device.", IsTransient: true)),
+            "Network.RateLimited",
+            "YouTube temporarily rate-limited this device.",
+            IsTransient: true,
+            RetryAfter: HttpRetryAfterParser.Parse(response.Headers))),
         HttpStatusCode.Forbidden => Result<WatchPageData>.Failure(new TubeForgeError(
             "Network.Forbidden", "YouTube refused the video analysis request.")),
         _ => Result<WatchPageData>.Failure(new TubeForgeError(
             "Network.HttpError",
-            $"YouTube returned HTTP {(int)statusCode} while analyzing the video.",
-            IsTransient: (int)statusCode >= 500))
+            $"YouTube returned HTTP {(int)response.StatusCode} while analyzing the video.",
+            IsTransient: (int)response.StatusCode >= 500))
     };
 
     private static Result<WatchPageData> ExtractorFailure(string detail) =>

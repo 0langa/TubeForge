@@ -369,7 +369,7 @@ Exit: compatible adaptive MP4 video and audio combine into a seekable file witho
 - [x] Chapters: bounded watch-page extraction and metadata sidecar export.
 - [x] Playlist indexing and ordering metadata.
 - [ ] Shorts/live metadata; completed live streams before active-live capture.
-- [ ] Rate-limit-aware bulk scheduling and per-host concurrency.
+- [x] Rate-limit-aware bulk scheduling and per-host concurrency.
 
 Exit: robust batch workflow with user-controlled content selection and bounded load.
 
@@ -464,6 +464,7 @@ Order for current work:
 - 2026-07-16: Thumbnail sidecars accept only bounded JPEG, PNG, or WebP bytes from trusted YouTube image hosts and publish atomically. JSON sidecars contain stable metadata and format summaries while excluding ephemeral signed media and caption URLs.
 - 2026-07-16: Chapter metadata comes only from bounded description-chapter marker structures, is sorted and deduplicated by start time, and appears in stable JSON sidecars without affecting download eligibility.
 - 2026-07-16: Enumerate public playlists and channel video tabs from bounded first-party page data and first-party continuation requests without API keys. Accept legacy renderer and current lockup shapes, deduplicate by video ID, preserve playlist indexes, cap UI analysis at 1,000 items, and treat consent preference as a fixed non-authentication request header.
+- 2026-07-16: Coordinate metadata and media requests by provider host-group with a two-request cap, bounded three-attempt rate-limit retries, shared backoff, and clamped `Retry-After` handling. Persistent bulk 429 responses defer untouched items instead of continuing request pressure; queued bulk downloads re-resolve expiring stream URLs at execution time.
 
 ## 15. Plan maintenance
 

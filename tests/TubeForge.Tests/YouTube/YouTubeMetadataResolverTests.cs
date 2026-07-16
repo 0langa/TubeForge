@@ -36,7 +36,12 @@ public static class YouTubeMetadataResolverTests
     [Test]
     public static async Task ClassifiesRateLimitWithoutReadingBody()
     {
-        using var handler = new StubHandler(_ => new HttpResponseMessage(HttpStatusCode.TooManyRequests));
+        using var handler = new StubHandler(_ =>
+        {
+            var response = new HttpResponseMessage(HttpStatusCode.TooManyRequests);
+            response.Headers.RetryAfter = new RetryConditionHeaderValue(TimeSpan.FromSeconds(17));
+            return response;
+        });
         using var client = new HttpClient(handler);
         var resolver = new YouTubeMetadataResolver(client);
         Assert.True(YouTubeVideoId.TryCreate("Fixture123_", out var videoId));
@@ -46,6 +51,7 @@ public static class YouTubeMetadataResolverTests
         Assert.False(result.IsSuccess);
         Assert.Equal("Network.RateLimited", result.Error?.Code);
         Assert.True(result.Error?.IsTransient == true);
+        Assert.Equal(TimeSpan.FromSeconds(17), result.Error?.RetryAfter);
     }
 
     [Test]

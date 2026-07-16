@@ -109,6 +109,42 @@ public static class DirectDownloadEngineTests
     }
 
     [Test]
+    public static async Task HonorsBoundedRetryAfterBeforeRetryingRateLimit()
+    {
+        using var directory = new TestDirectory();
+        var destination = Path.Combine(directory.Path, "fixture.mp4");
+        var attempts = 0;
+        var delays = new List<TimeSpan>();
+        using var handler = new StubHandler((_, _) =>
+        {
+            attempts++;
+            if (attempts > 1)
+            {
+                return Task.FromResult(Response(HttpStatusCode.OK, Encoding.ASCII.GetBytes("done")));
+            }
+
+            var response = Response(HttpStatusCode.TooManyRequests, []);
+            response.Headers.RetryAfter = new RetryConditionHeaderValue(TimeSpan.FromSeconds(11));
+            return Task.FromResult(response);
+        });
+        using var client = new HttpClient(handler);
+        var engine = new DirectDownloadEngine(
+            client,
+            DownloadUriPolicy.YouTubeMediaAndLoopback,
+            (delay, _) =>
+            {
+                delays.Add(delay);
+                return Task.CompletedTask;
+            });
+
+        var result = await engine.DownloadAsync(Request(destination, 4));
+
+        Assert.True(result.IsSuccess, result.Error?.Message);
+        Assert.Equal(2, attempts);
+        Assert.SequenceEqual(new[] { TimeSpan.FromSeconds(11) }, delays);
+    }
+
+    [Test]
     public static async Task LeavesPartialWhenServerEndsEarly()
     {
         using var directory = new TestDirectory();

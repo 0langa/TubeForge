@@ -4,6 +4,7 @@ using System.Net;
 using System.Net.Http.Headers;
 using TubeForge.Core.Errors;
 using TubeForge.Core.Media;
+using TubeForge.Core.Networking;
 using TubeForge.Core.Results;
 using TubeForge.Downloads.Resume;
 using TubeForge.Media;
@@ -75,7 +76,8 @@ public sealed class DirectDownloadEngine
 
             try
             {
-                await _delay(DownloadRetryPolicy.DelayBeforeAttempt(attempt), cancellationToken)
+                var delay = result.Error?.RetryAfter ?? DownloadRetryPolicy.DelayBeforeAttempt(attempt);
+                await _delay(delay, cancellationToken)
                     .ConfigureAwait(false);
             }
             catch (OperationCanceledException)
@@ -165,7 +167,7 @@ public sealed class DirectDownloadEngine
 
             if (!response.IsSuccessStatusCode)
             {
-                return HttpFailure(response.StatusCode);
+                return HttpFailure(response);
             }
 
             var append = canResume && response.StatusCode == HttpStatusCode.PartialContent;
@@ -422,14 +424,18 @@ public sealed class DirectDownloadEngine
         return null;
     }
 
-    internal static Result<DownloadReceipt> HttpFailure(HttpStatusCode statusCode)
+    internal static Result<DownloadReceipt> HttpFailure(HttpResponseMessage response)
     {
+        var statusCode = response.StatusCode;
         var transient = statusCode is HttpStatusCode.RequestTimeout or HttpStatusCode.TooManyRequests ||
                         (int)statusCode >= 500;
         return Result<DownloadReceipt>.Failure(new TubeForgeError(
             statusCode == HttpStatusCode.TooManyRequests ? "Network.RateLimited" : "Network.HttpError",
             $"The media server returned HTTP {(int)statusCode}.",
-            IsTransient: transient));
+            IsTransient: transient,
+            RetryAfter: statusCode == HttpStatusCode.TooManyRequests
+                ? HttpRetryAfterParser.Parse(response.Headers)
+                : null));
     }
 
     private static Result<DownloadReceipt> Failure(string code, string message) =>
