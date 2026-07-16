@@ -16,15 +16,26 @@ public sealed class DirectDownloadEngine
     private readonly HttpClient _httpClient;
     private readonly DownloadUriPolicy _uriPolicy;
     private readonly Func<TimeSpan, CancellationToken, Task> _delay;
+    private readonly Func<string, bool, Stream> _outputStreamFactory;
 
     public DirectDownloadEngine(
         HttpClient httpClient,
         DownloadUriPolicy? uriPolicy = null,
         Func<TimeSpan, CancellationToken, Task>? delay = null)
+        : this(httpClient, uriPolicy, delay, outputStreamFactory: null)
+    {
+    }
+
+    internal DirectDownloadEngine(
+        HttpClient httpClient,
+        DownloadUriPolicy? uriPolicy,
+        Func<TimeSpan, CancellationToken, Task>? delay,
+        Func<string, bool, Stream>? outputStreamFactory)
     {
         _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
         _uriPolicy = uriPolicy ?? DownloadUriPolicy.YouTubeMediaOnly;
         _delay = delay ?? Task.Delay;
+        _outputStreamFactory = outputStreamFactory ?? CreateOutputStream;
     }
 
     public async Task<Result<DownloadReceipt>> DownloadAsync(
@@ -239,7 +250,7 @@ public sealed class DirectDownloadEngine
         }
     }
 
-    private static async Task<long> CopyResponseAsync(
+    private async Task<long> CopyResponseAsync(
         HttpResponseMessage response,
         string partialPath,
         bool append,
@@ -249,13 +260,7 @@ public sealed class DirectDownloadEngine
         CancellationToken cancellationToken)
     {
         await using var input = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
-        await using var output = new FileStream(
-            partialPath,
-            append ? FileMode.Append : FileMode.Create,
-            FileAccess.Write,
-            FileShare.Read,
-            BufferSize,
-            FileOptions.Asynchronous | FileOptions.SequentialScan);
+        await using var output = _outputStreamFactory(partialPath, append);
         var buffer = ArrayPool<byte>.Shared.Rent(BufferSize);
         var stopwatch = Stopwatch.StartNew();
         var transferred = 0L;
@@ -292,6 +297,14 @@ public sealed class DirectDownloadEngine
             ArrayPool<byte>.Shared.Return(buffer);
         }
     }
+
+    private static Stream CreateOutputStream(string partialPath, bool append) => new FileStream(
+        partialPath,
+        append ? FileMode.Append : FileMode.Create,
+        FileAccess.Write,
+        FileShare.Read,
+        BufferSize,
+        FileOptions.Asynchronous | FileOptions.SequentialScan);
 
     private static void ReportProgress(
         IProgress<DownloadProgress> progress,

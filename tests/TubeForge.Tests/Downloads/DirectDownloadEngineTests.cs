@@ -1,7 +1,8 @@
+using System.Diagnostics;
 using System.Net;
 using System.Net.Http.Headers;
+using System.Net.Sockets;
 using System.Text;
-using System.Diagnostics;
 using TubeForge.Downloads;
 using TubeForge.Tests.Framework;
 
@@ -224,6 +225,140 @@ public static class DirectDownloadEngineTests
         Assert.True(File.Exists(destination + ".part"));
     }
 
+    [Test]
+    public static async Task DownloadsThroughExplicitHttpProxy()
+    {
+        using var directory = new TestDirectory();
+        var destination = Path.Combine(directory.Path, "proxy-fixture.mp4");
+        var payload = Encoding.ASCII.GetBytes("proxied-media");
+        await using var proxy = LoopbackHttpResponseServer.Start(IPAddress.Loopback, payload);
+        using var handler = new SocketsHttpHandler
+        {
+            Proxy = new WebProxy(proxy.EndpointUri, BypassOnLocal: false),
+            UseProxy = true
+        };
+        using var client = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(10) };
+        var engine = Engine(client);
+        var request = Request(destination, payload.Length) with
+        {
+            SourceUrl = new Uri("http://localhost:49152/media")
+        };
+
+        var result = await engine.DownloadAsync(request);
+        var proxyRequest = await proxy.Request;
+
+        Assert.True(result.IsSuccess, result.Error?.Message);
+        Assert.SequenceEqual(payload, await File.ReadAllBytesAsync(destination));
+        Assert.True(proxyRequest.StartsWith(
+            "GET http://localhost:49152/media HTTP/1.1",
+            StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Test]
+    public static async Task DownloadsOverIpv4AndIpv6Loopback()
+    {
+        using var directory = new TestDirectory();
+        var payload = Encoding.ASCII.GetBytes("address-family-media");
+
+        await DownloadFromLoopbackAsync(
+            IPAddress.Loopback,
+            Path.Combine(directory.Path, "ipv4.mp4"),
+            payload);
+
+        if (Socket.OSSupportsIPv6)
+        {
+            await DownloadFromLoopbackAsync(
+                IPAddress.IPv6Loopback,
+                Path.Combine(directory.Path, "ipv6.mp4"),
+                payload);
+        }
+    }
+
+    [Test]
+    public static async Task ContinuesAfterStalledResponseResumes()
+    {
+        using var directory = new TestDirectory();
+        var destination = Path.Combine(directory.Path, "stalled-response.mp4");
+        var payload = Enumerable.Range(0, 256 * 1024).Select(index => (byte)(index % 251)).ToArray();
+        var stalled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var resume = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var contentStream = new GatedReadStream(payload, stalled, resume.Task);
+        using var handler = new StubHandler((_, _) =>
+        {
+            var response = new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StreamContent(contentStream)
+            };
+            response.Content.Headers.ContentLength = payload.Length;
+            return Task.FromResult(response);
+        });
+        using var client = new HttpClient(handler);
+        var engine = Engine(client);
+
+        var download = engine.DownloadAsync(Request(destination, payload.Length));
+        await stalled.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.False(download.IsCompleted);
+        resume.SetResult();
+        var result = await download;
+
+        Assert.True(result.IsSuccess, result.Error?.Message);
+        Assert.SequenceEqual(payload, await File.ReadAllBytesAsync(destination));
+    }
+
+    [Test]
+    public static async Task BackpressureFromSlowDestinationDoesNotLoseBytes()
+    {
+        using var directory = new TestDirectory();
+        var destination = Path.Combine(directory.Path, "slow-destination.mp4");
+        var payload = Enumerable.Range(0, 256 * 1024).Select(index => (byte)(index % 241)).ToArray();
+        var writeStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseWrite = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var handler = new StubHandler((_, _) =>
+            Task.FromResult(Response(HttpStatusCode.OK, payload)));
+        using var client = new HttpClient(handler);
+        var engine = new DirectDownloadEngine(
+            client,
+            DownloadUriPolicy.YouTubeMediaAndLoopback,
+            (_, _) => Task.CompletedTask,
+            (path, append) => new GatedWriteStream(
+                new FileStream(
+                    path,
+                    append ? FileMode.Append : FileMode.Create,
+                    FileAccess.Write,
+                    FileShare.Read,
+                    16 * 1024,
+                    FileOptions.Asynchronous | FileOptions.SequentialScan),
+                writeStarted,
+                releaseWrite.Task));
+
+        var download = engine.DownloadAsync(Request(destination, payload.Length));
+        await writeStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.False(download.IsCompleted);
+        releaseWrite.SetResult();
+        var result = await download;
+
+        Assert.True(result.IsSuccess, result.Error?.Message);
+        Assert.SequenceEqual(payload, await File.ReadAllBytesAsync(destination));
+    }
+
+    private static async Task DownloadFromLoopbackAsync(
+        IPAddress address,
+        string destination,
+        byte[] payload)
+    {
+        await using var server = LoopbackHttpResponseServer.Start(address, payload);
+        using var handler = new SocketsHttpHandler { UseProxy = false };
+        using var client = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(10) };
+        var result = await Engine(client).DownloadAsync(Request(destination, payload.Length) with
+        {
+            SourceUrl = server.EndpointUri
+        });
+
+        Assert.True(result.IsSuccess, result.Error?.Message);
+        Assert.SequenceEqual(payload, await File.ReadAllBytesAsync(destination));
+        Assert.True((await server.Request).StartsWith("GET /media HTTP/1.1", StringComparison.Ordinal));
+    }
+
     private static DirectDownloadEngine Engine(HttpClient client) => new(
         client,
         DownloadUriPolicy.YouTubeMediaAndLoopback,
@@ -256,6 +391,131 @@ public static class DirectDownloadEngineTests
         public List<T> Values { get; } = [];
 
         public void Report(T value) => Values.Add(value);
+    }
+
+    private sealed class GatedReadStream(
+        byte[] payload,
+        TaskCompletionSource stalled,
+        Task resume) : Stream
+    {
+        private readonly MemoryStream _inner = new(payload, writable: false);
+        private bool _firstRead = true;
+
+        public override bool CanRead => true;
+
+        public override bool CanSeek => false;
+
+        public override bool CanWrite => false;
+
+        public override long Length => _inner.Length;
+
+        public override long Position
+        {
+            get => _inner.Position;
+            set => throw new NotSupportedException();
+        }
+
+        public override int Read(byte[] buffer, int offset, int count) =>
+            throw new NotSupportedException();
+
+        public override async ValueTask<int> ReadAsync(
+            Memory<byte> buffer,
+            CancellationToken cancellationToken = default)
+        {
+            if (_firstRead)
+            {
+                _firstRead = false;
+                return await _inner.ReadAsync(buffer[..Math.Min(buffer.Length, payload.Length / 2)], cancellationToken);
+            }
+
+            stalled.TrySetResult();
+            await resume.WaitAsync(cancellationToken);
+            return await _inner.ReadAsync(buffer, cancellationToken);
+        }
+
+        public override void Flush() => throw new NotSupportedException();
+
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+
+        public override void SetLength(long value) => throw new NotSupportedException();
+
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+            {
+                _inner.Dispose();
+            }
+
+            base.Dispose(disposing);
+        }
+    }
+
+    private sealed class GatedWriteStream(
+        Stream inner,
+        TaskCompletionSource writeStarted,
+        Task releaseWrite) : Stream
+    {
+        private bool _firstWrite = true;
+
+        public override bool CanRead => false;
+
+        public override bool CanSeek => inner.CanSeek;
+
+        public override bool CanWrite => true;
+
+        public override long Length => inner.Length;
+
+        public override long Position
+        {
+            get => inner.Position;
+            set => inner.Position = value;
+        }
+
+        public override void Flush() => inner.Flush();
+
+        public override Task FlushAsync(CancellationToken cancellationToken) =>
+            inner.FlushAsync(cancellationToken);
+
+        public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+
+        public override long Seek(long offset, SeekOrigin origin) => inner.Seek(offset, origin);
+
+        public override void SetLength(long value) => inner.SetLength(value);
+
+        public override void Write(byte[] buffer, int offset, int count) =>
+            throw new NotSupportedException();
+
+        public override async ValueTask WriteAsync(
+            ReadOnlyMemory<byte> buffer,
+            CancellationToken cancellationToken = default)
+        {
+            if (_firstWrite)
+            {
+                _firstWrite = false;
+                writeStarted.TrySetResult();
+                await releaseWrite.WaitAsync(cancellationToken);
+            }
+
+            await inner.WriteAsync(buffer, cancellationToken);
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+            {
+                inner.Dispose();
+            }
+
+            base.Dispose(disposing);
+        }
+
+        public override async ValueTask DisposeAsync()
+        {
+            await inner.DisposeAsync();
+            GC.SuppressFinalize(this);
+        }
     }
 
     private sealed class TestDirectory : IDisposable

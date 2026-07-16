@@ -385,7 +385,7 @@ Exit: best compatible WebM adaptive formats combine into seekable files.
 
 - [x] Maintain extraction canary set and documented update playbook.
 - [ ] Add segmented transfer behind a feature flag and prove integrity/performance.
-- [ ] Add network-change, sleep/resume, proxy, IPv4/IPv6, and slow-disk tests.
+- [x] Add network-change, sleep/resume, proxy, IPv4/IPv6, and slow-disk tests.
 - [x] Add disk-space forecasting and low-space recovery.
 - [x] Add queue soak tests and crash-consistent persistence.
 - [x] Add redacted diagnostic export and issue template.
@@ -455,6 +455,7 @@ Order for current work:
 - 2026-07-16: Keep canary URLs in an operator-owned local file, never Git. Canary output is ordinal and aggregate-only; maintenance playbook forbids URLs, IDs, titles, channels, headers, scripts, and media in reports/fixtures.
 - 2026-07-16: Diagnostic export uses a whitelist-only JSON schema and deliberately omits all content/source/local-path fields. GitHub extractor reports require this redacted report plus explicit safety acknowledgement.
 - 2026-07-16: Queue commits flush a same-directory pending file before atomic replacement and retain the prior committed snapshot as recovery backup. Startup accepts only a fully validated primary, pending, or backup snapshot and pauses interrupted active items.
+- 2026-07-16: Deterministic transfer reliability coverage uses real loopback sockets for connection loss, explicit proxies, and IPv4/IPv6, plus gated streams for sleep-like transport stalls and slow-destination backpressure without timing sleeps.
 
 ## 15. Plan maintenance
 
