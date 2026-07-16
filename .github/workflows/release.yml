@@ -1,0 +1,74 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: write
+  id-token: write
+  attestations: write
+
+jobs:
+  publish:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out tagged source
+        uses: actions/checkout@v4
+
+      - name: Install .NET SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Read version from tag
+        id: version
+        shell: pwsh
+        run: |
+          $tag = '${{ github.ref_name }}'
+          if ($tag -notmatch '^v\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$') {
+            throw "Invalid release tag: $tag"
+          }
+          "value=$($tag.Substring(1))" >> $env:GITHUB_OUTPUT
+
+      - name: Build
+        run: dotnet build TubeForge.slnx --configuration Release
+
+      - name: Test
+        run: dotnet run --project tests/TubeForge.Tests --configuration Release --no-build -- --all
+
+      - name: Core performance budget
+        run: dotnet run --project tools/TubeForge.Performance --configuration Release --no-build -- --core-only
+
+      - name: Produce release archives
+        shell: pwsh
+        run: .\scripts\Publish-Release.ps1 -Version '${{ steps.version.outputs.value }}'
+
+      - name: Verify release archives
+        shell: pwsh
+        run: .\scripts\Test-Release.ps1 -Version '${{ steps.version.outputs.value }}' -SkipLaunch
+
+      - name: Attest release artifacts
+        uses: actions/attest@v4
+        with:
+          subject-path: |
+            artifacts/release/*.zip
+            artifacts/release/*-manifest.json
+            artifacts/release/SHA256SUMS.txt
+
+      - name: Publish GitHub release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create '${{ github.ref_name }}' `
+            artifacts/release/*.zip `
+            artifacts/release/*-manifest.json `
+            artifacts/release/SHA256SUMS.txt `
+            --verify-tag `
+            --title "TubeForge ${{ github.ref_name }}" `
+            --notes-file docs/RELEASE_NOTES.md `
+            --generate-notes
+

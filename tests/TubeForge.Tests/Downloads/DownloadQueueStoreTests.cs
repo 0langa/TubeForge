@@ -1,0 +1,251 @@
+using TubeForge.Downloads.Queue;
+using TubeForge.Tests.Framework;
+
+namespace TubeForge.Tests.Downloads;
+
+public static class DownloadQueueStoreTests
+{
+    [Test]
+    public static async Task PersistsPrivacySafeItemsAndRecoversInterruptedDownloads()
+    {
+        using var directory = new TestDirectory();
+        var path = Path.Combine(directory.Path, "queue.json");
+        var now = new DateTimeOffset(2026, 7, 16, 12, 0, 0, TimeSpan.Zero);
+        var store = new DownloadQueueStore(path);
+        var snapshot = new DownloadQueueSnapshot
+        {
+            Items =
+            [
+                Item(Guid.Parse("11111111-1111-1111-1111-111111111111"), DownloadQueueStatus.Queued, now),
+                Item(Guid.Parse("22222222-2222-2222-2222-222222222222"), DownloadQueueStatus.Downloading, now)
+            ]
+        };
+
+        var saveResult = await store.SaveAsync(snapshot);
+
+        Assert.True(saveResult.IsSuccess, saveResult.Error?.Message);
+        var json = await File.ReadAllTextAsync(path);
+        Assert.False(json.Contains("googlevideo", StringComparison.OrdinalIgnoreCase));
+        Assert.False(json.Contains("sourceUrl", StringComparison.OrdinalIgnoreCase));
+        Assert.False(json.Contains("expire=", StringComparison.OrdinalIgnoreCase));
+
+        var loadResult = await store.LoadAsync();
+
+        Assert.True(loadResult.IsSuccess, loadResult.Error?.Message);
+        Assert.Equal(2, loadResult.Value.Items.Count);
+        Assert.Equal(DownloadQueueStatus.Queued, loadResult.Value.Items[0].Status);
+        Assert.Equal(DownloadQueueStatus.Paused, loadResult.Value.Items[1].Status);
+        Assert.Equal("Fixture123_:22", loadResult.Value.Items[1].SourceIdentity);
+        Assert.Equal(512L, loadResult.Value.Items[1].BytesReceived);
+    }
+
+    [Test]
+    public static async Task RejectsUnsupportedSchemaAndInvalidItems()
+    {
+        using var directory = new TestDirectory();
+        var store = new DownloadQueueStore(Path.Combine(directory.Path, "queue.json"));
+        var now = new DateTimeOffset(2026, 7, 16, 12, 0, 0, TimeSpan.Zero);
+
+        var unsupported = await store.SaveAsync(new DownloadQueueSnapshot
+        {
+            SchemaVersion = DownloadQueueSnapshot.CurrentSchemaVersion + 1,
+            Items = []
+        });
+        Assert.False(unsupported.IsSuccess);
+        Assert.Equal("Queue.UnsupportedSchema", unsupported.Error?.Code);
+
+        var invalid = await store.SaveAsync(new DownloadQueueSnapshot
+        {
+            Items = [Item(Guid.Empty, DownloadQueueStatus.Queued, now)]
+        });
+        Assert.False(invalid.IsSuccess);
+        Assert.Equal("Queue.InvalidState", invalid.Error?.Code);
+    }
+
+    [Test]
+    public static async Task ReportsCorruptQueueWithoutOverwritingIt()
+    {
+        using var directory = new TestDirectory();
+        var path = Path.Combine(directory.Path, "queue.json");
+        await File.WriteAllTextAsync(path, "{not-json");
+        var store = new DownloadQueueStore(path);
+
+        var result = await store.LoadAsync();
+
+        Assert.False(result.IsSuccess);
+        Assert.Equal("Queue.Corrupt", result.Error?.Code);
+        Assert.Equal("{not-json", await File.ReadAllTextAsync(path));
+    }
+
+    [Test]
+    public static async Task ReturnsTypedCancellationBeforeTakingStorageLock()
+    {
+        using var directory = new TestDirectory();
+        var store = new DownloadQueueStore(Path.Combine(directory.Path, "queue.json"));
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+
+        var loadResult = await store.LoadAsync(cancellation.Token);
+        var saveResult = await store.SaveAsync(new DownloadQueueSnapshot(), cancellation.Token);
+
+        Assert.False(loadResult.IsSuccess);
+        Assert.Equal("Operation.Cancelled", loadResult.Error?.Code);
+        Assert.False(saveResult.IsSuccess);
+        Assert.Equal("Operation.Cancelled", saveResult.Error?.Code);
+    }
+
+    [Test]
+    public static async Task RejectsSourceIdentityThatDoesNotMatchPersistedSelection()
+    {
+        using var directory = new TestDirectory();
+        var store = new DownloadQueueStore(Path.Combine(directory.Path, "queue.json"));
+        var now = DateTimeOffset.UtcNow;
+        var mismatched = Item(Guid.NewGuid(), DownloadQueueStatus.Queued, now) with
+        {
+            SourceIdentity = "Fixture123_:401+140"
+        };
+
+        var result = await store.SaveAsync(new DownloadQueueSnapshot { Items = [mismatched] });
+
+        Assert.False(result.IsSuccess);
+        Assert.Equal("Queue.InvalidState", result.Error?.Code);
+    }
+
+    [Test]
+    public static async Task RecoversFlushedPendingStateAfterInterruptedReplacement()
+    {
+        using var directory = new TestDirectory();
+        var path = Path.Combine(directory.Path, "queue.json");
+        var store = new DownloadQueueStore(path);
+        var now = new DateTimeOffset(2026, 7, 16, 12, 0, 0, TimeSpan.Zero);
+        var original = new DownloadQueueSnapshot
+        {
+            Items = [Item(Guid.Parse("11111111-1111-1111-1111-111111111111"), DownloadQueueStatus.Queued, now)]
+        };
+        var pending = new DownloadQueueSnapshot
+        {
+            Items = [Item(Guid.Parse("22222222-2222-2222-2222-222222222222"), DownloadQueueStatus.Downloading, now)]
+        };
+
+        Assert.True((await store.SaveAsync(original)).IsSuccess);
+        Assert.True((await new DownloadQueueStore(path + ".new").SaveAsync(pending)).IsSuccess);
+        await File.WriteAllTextAsync(path, "{ interrupted replacement");
+
+        var recovered = await store.LoadAsync();
+
+        Assert.True(recovered.IsSuccess, recovered.Error?.Message);
+        Assert.Equal(1, recovered.Value.Items.Count);
+        Assert.Equal(pending.Items[0].Id, recovered.Value.Items[0].Id);
+        Assert.Equal(DownloadQueueStatus.Paused, recovered.Value.Items[0].Status);
+        Assert.Equal("{ interrupted replacement", await File.ReadAllTextAsync(path));
+    }
+
+    [Test]
+    public static async Task RecoversLastCommittedBackupWhenPrimaryAndPendingAreDamaged()
+    {
+        using var directory = new TestDirectory();
+        var path = Path.Combine(directory.Path, "queue.json");
+        var store = new DownloadQueueStore(path);
+        var now = new DateTimeOffset(2026, 7, 16, 12, 0, 0, TimeSpan.Zero);
+        var firstId = Guid.Parse("11111111-1111-1111-1111-111111111111");
+
+        Assert.True((await store.SaveAsync(new DownloadQueueSnapshot
+        {
+            Items = [Item(firstId, DownloadQueueStatus.Queued, now)]
+        })).IsSuccess);
+        Assert.True((await store.SaveAsync(new DownloadQueueSnapshot
+        {
+            Items = [Item(Guid.Parse("22222222-2222-2222-2222-222222222222"), DownloadQueueStatus.Queued, now)]
+        })).IsSuccess);
+        await File.WriteAllTextAsync(path, "{\"schemaVersion\":1,\"items\":null}");
+        await File.WriteAllTextAsync(path + ".new", "{ damaged pending");
+
+        var recovered = await store.LoadAsync();
+
+        Assert.True(recovered.IsSuccess, recovered.Error?.Message);
+        Assert.Equal(firstId, recovered.Value.Items[0].Id);
+    }
+
+    [Test]
+    public static async Task RepeatedAtomicSavesRemainReadableAndBounded()
+    {
+        using var directory = new TestDirectory();
+        var path = Path.Combine(directory.Path, "queue.json");
+        var store = new DownloadQueueStore(path);
+        var now = new DateTimeOffset(2026, 7, 16, 12, 0, 0, TimeSpan.Zero);
+
+        for (var iteration = 0; iteration < 128; iteration++)
+        {
+            var items = Enumerable.Range(0, 32)
+                .Select(index => Item(
+                    DeterministicId(iteration, index),
+                    index % 3 == 0 ? DownloadQueueStatus.Downloading : DownloadQueueStatus.Queued,
+                    now.AddSeconds(iteration)))
+                .ToArray();
+            var saved = await store.SaveAsync(new DownloadQueueSnapshot { Items = items });
+            var loaded = await store.LoadAsync();
+
+            Assert.True(saved.IsSuccess, saved.Error?.Message);
+            Assert.True(loaded.IsSuccess, loaded.Error?.Message);
+            Assert.Equal(items.Length, loaded.Value.Items.Count);
+            Assert.Equal(items[0].Id, loaded.Value.Items[0].Id);
+            Assert.True(loaded.Value.Items.All(item => item.Status != DownloadQueueStatus.Downloading));
+            Assert.False(File.Exists(path + ".new"));
+        }
+    }
+
+    private static Guid DeterministicId(int iteration, int index)
+    {
+        Span<byte> bytes = stackalloc byte[16];
+        BitConverter.TryWriteBytes(bytes, iteration + 1);
+        BitConverter.TryWriteBytes(bytes[4..], index + 1);
+        BitConverter.TryWriteBytes(bytes[8..], ((long)iteration << 32) | (uint)index | 1L);
+        return new Guid(bytes);
+    }
+
+    private static DownloadQueueItem Item(
+        Guid id,
+        DownloadQueueStatus status,
+        DateTimeOffset now) => new()
+        {
+            Id = id,
+            VideoId = "Fixture123_",
+            FormatId = 22,
+            SourceIdentity = "Fixture123_:22",
+            DisplayTitle = "Synthetic fixture",
+            DestinationPath = Path.Combine(Path.GetTempPath(), "TubeForge.Tests", "fixture.mp4"),
+            ExpectedLength = 1024,
+            BytesReceived = 512,
+            Status = status,
+            CreatedAtUtc = now,
+            UpdatedAtUtc = now
+        };
+
+    private sealed class TestDirectory : IDisposable
+    {
+        private static readonly string SafeRoot = System.IO.Path.GetFullPath(
+            System.IO.Path.Combine(System.IO.Path.GetTempPath(), "TubeForge.Tests"));
+
+        public TestDirectory()
+        {
+            Path = System.IO.Path.Combine(SafeRoot, Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(Path);
+        }
+
+        public string Path { get; }
+
+        public void Dispose()
+        {
+            var resolved = System.IO.Path.GetFullPath(Path);
+            if (!resolved.StartsWith(SafeRoot + System.IO.Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidOperationException("Refusing to clean a test directory outside the safe root.");
+            }
+
+            if (Directory.Exists(resolved))
+            {
+                Directory.Delete(resolved, recursive: true);
+            }
+        }
+    }
+}

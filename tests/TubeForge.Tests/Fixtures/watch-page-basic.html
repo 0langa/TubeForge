@@ -1,0 +1,88 @@
+<!doctype html>
+<html>
+<head><title>Synthetic fixture</title></head>
+<body>
+<script>
+var unrelated = {"ytInitialPlayerResponse":"text only","shape":{"ignored":true}};
+var ytInitialPlayerResponse = {
+  "playabilityStatus":{"status":"OK"},
+  "videoDetails":{
+    "videoId":"Fixture123_",
+    "title":"Fixture {video}; title",
+    "author":"Fixture channel",
+    "lengthSeconds":"123",
+    "thumbnail":{"thumbnails":[
+      {"url":"https://i.ytimg.com/vi/Fixture123_/default.jpg","width":120,"height":90},
+      {"url":"https://i.ytimg.com/vi/Fixture123_/hqdefault.jpg","width":480,"height":360}
+    ]}
+  },
+  "captions":{"playerCaptionsTracklistRenderer":{"captionTracks":[
+    {
+      "baseUrl":"https://www.youtube.com/api/timedtext?v=Fixture123_&lang=en",
+      "name":{"simpleText":"English"},
+      "vssId":".en",
+      "languageCode":"en",
+      "isTranslatable":true
+    },
+    {
+      "baseUrl":"https://www.youtube.com/api/timedtext?v=Fixture123_&lang=de&kind=asr",
+      "name":{"runs":[{"text":"German"},{"text":" (auto-generated)"}]},
+      "vssId":"a.de",
+      "languageCode":"de",
+      "kind":"asr",
+      "isTranslatable":false
+    },
+    {
+      "baseUrl":"https://attacker.example/api/timedtext?v=Fixture123_&lang=xx",
+      "name":{"simpleText":"Untrusted"},
+      "vssId":".xx",
+      "languageCode":"xx"
+    }
+  ]}},
+  "playerOverlays":{"playerOverlayRenderer":{"decoratedPlayerBarRenderer":{"decoratedPlayerBarRenderer":{
+    "playerBar":{"multiMarkersPlayerBarRenderer":{"markersMap":[{
+      "key":"DESCRIPTION_CHAPTERS",
+      "value":{"chapters":[
+        {"chapterRenderer":{"title":{"simpleText":"Introduction"},"timeRangeStartMillis":0}},
+        {"chapterRenderer":{"title":{"runs":[{"text":"Main "},{"text":"section"}]},"timeRangeStartMillis":60000}},
+        {"chapterRenderer":{"title":{"simpleText":"Duplicate"},"timeRangeStartMillis":60000}},
+        {"chapterRenderer":{"title":{"simpleText":"Invalid"},"timeRangeStartMillis":-1}}
+      ]}
+    }]}}
+  }}}},
+  "streamingData":{
+    "formats":[{
+      "itag":22,
+      "url":"https://fixture.googlevideo.com/videoplayback?id=synthetic&itag=22",
+      "mimeType":"video/mp4; codecs=\"avc1.64001F, mp4a.40.2\"",
+      "bitrate":2000000,
+      "width":1280,
+      "height":720,
+      "fps":30,
+      "qualityLabel":"720p",
+      "contentLength":"134217728"
+    }],
+    "adaptiveFormats":[
+      {
+        "itag":251,
+        "url":"https://fixture.googlevideo.com/videoplayback?id=synthetic&itag=251",
+        "mimeType":"audio/webm; codecs=\"opus\"",
+        "bitrate":160000,
+        "audioQuality":"AUDIO_QUALITY_MEDIUM",
+        "audioSampleRate":"48000",
+        "contentLength":"3145728"
+      },
+      {
+        "itag":137,
+        "signatureCipher":"url=https%3A%2F%2Ffixture.googlevideo.com%2Fvideoplayback%3Fitag%3D137&s=synthetic&sp=sig",
+        "mimeType":"video/mp4; codecs=\"avc1.640028\"",
+        "width":1920,
+        "height":1080
+      }
+    ]
+  }
+};
+ytcfg.set({"PLAYER_JS_URL":"\/s\/player\/fixture\/player_ias.vflset\/en_US\/base.js"});
+</script>
+</body>
+</html>

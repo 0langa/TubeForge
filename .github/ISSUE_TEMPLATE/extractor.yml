@@ -1,0 +1,63 @@
+name: Extractor or format regression
+description: Report public-video analysis failures using redacted technical data only
+title: "[Extractor] "
+labels:
+  - extractor
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not include video URLs/IDs, titles, channels, cookies, headers, signatures, visitor data, local paths, player scripts, private-video details, or downloaded media. Use TubeForge Diagnostics → Export JSON.
+
+  - type: input
+    id: commit
+    attributes:
+      label: Commit or version
+      placeholder: 1478c0a or 0.1.0
+    validations:
+      required: true
+
+  - type: dropdown
+    id: failure
+    attributes:
+      label: Failure class
+      options:
+        - Extractor.PageChanged
+        - Extractor.PlayerChanged
+        - Extractor.NoStreams
+        - Extractor.NoUsableOutput
+        - Network or rate limit
+        - Format classification
+        - Other typed failure
+    validations:
+      required: true
+
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Redacted diagnostic JSON
+      description: Paste only report produced by TubeForge Diagnostics. Review it before submission.
+      render: json
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Sanitized reproduction
+      description: Describe UI/command steps without identifying media or including URLs.
+      placeholder: Analyze public authorized canary 2; resolver returns Extractor.NoStreams.
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Safety checklist
+      options:
+        - label: I removed URLs, IDs, titles, channels, local paths, headers, cookies, signatures, visitor data, scripts, and media.
+          required: true
+        - label: I reproduced with public media I am authorized to probe or with synthetic fixtures.
+          required: true
+        - label: I ran the current test suite and checked the extractor playbook.
+          required: true

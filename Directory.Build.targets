@@ -1,0 +1,6 @@
+<Project>
+  <Target Name="RejectPackageReferences" BeforeTargets="CollectPackageReferences"
+          Condition="'@(PackageReference)' != ''">
+    <Error Text="TubeForge forbids PackageReference dependencies. Use the .NET/Windows platform or implement the capability in-repository." />
+  </Target>
+</Project>

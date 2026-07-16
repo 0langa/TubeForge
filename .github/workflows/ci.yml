@@ -1,0 +1,46 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Install .NET SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Build
+        run: dotnet build TubeForge.slnx --configuration Release
+
+      - name: Test
+        run: dotnet run --project tests/TubeForge.Tests --configuration Release --no-build -- --all
+
+      - name: Core performance budget
+        run: dotnet run --project tools/TubeForge.Performance --configuration Release --no-build -- --core-only
+
+      - name: Validate release PowerShell
+        shell: pwsh
+        run: |
+          $failed = $false
+          foreach ($file in Get-ChildItem -LiteralPath scripts -Filter '*.ps1') {
+            $tokens = $null
+            $errors = $null
+            [Management.Automation.Language.Parser]::ParseFile($file.FullName, [ref]$tokens, [ref]$errors) | Out-Null
+            foreach ($error in $errors) {
+              Write-Error "$($file.Name):$($error.Extent.StartLineNumber): $($error.Message)"
+              $failed = $true
+            }
+          }
+          if ($failed) { exit 1 }

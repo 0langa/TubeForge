@@ -15,9 +15,9 @@ The application is built from source in this repository. Network access is limit
 - WPF UI using the Windows Desktop runtime shipped with .NET.
 - Standard-library and Windows APIs only at runtime.
 - Public YouTube videos first.
-- Progressive MP4 downloads first: streams already containing audio and video need no muxer.
+- Audio + video defaults to the highest compatible adaptive video and audio tracks; progressive media is fallback only.
 - Audio-only downloads in the stream's native container (`m4a`/MP4 or WebM) before transcoding support.
-- Adaptive video plus audio after in-house ISO BMFF/MP4 muxing is proven.
+- In-house ISO BMFF/MP4 and EBML/WebM muxing combines encoded tracks without re-encoding.
 - Resumable, bounded-concurrency downloads with atomic finalization.
 
 ### Forbidden dependencies
@@ -172,10 +172,10 @@ Muxing means combining existing encoded tracks. Transcoding means decoding and r
 
 - `%LocalAppData%/TubeForge/settings.json`: user preferences.
 - `%LocalAppData%/TubeForge/queue.json`: non-sensitive queue state.
-- `%LocalAppData%/TubeForge/logs/`: bounded rolling diagnostic logs.
+- `%LocalAppData%/TubeForge/logs/`: planned bounded rolling diagnostic logs; not created yet.
 - Downloads remain in user-selected folders.
 - Writes use temporary files plus replace/rename.
-- Schemas carry a version and migration path.
+- Settings and queue schemas are versioned and fail closed on unsupported versions; migrations remain future work.
 - No authentication cookies in the first public release.
 - If cookie support is later approved, use Windows DPAPI and explicit import/clear controls; never log cookie contents.
 
@@ -258,141 +258,151 @@ Checkboxes track repository state. Each milestone ends with passing gates, updat
 ### M0 — Foundation and public project
 
 - [x] Define product boundaries, architecture, risks, and milestones.
-- [ ] Initialize Git repository with `main` branch.
-- [ ] Create public GitHub repository and push initial commit.
-- [ ] Initialize local RECALL project memory; keep `.recall/` untracked.
-- [ ] Add README, responsible-use notice, contribution rules, and security policy.
-- [ ] Scaffold solution and dependency-free test runner.
-- [ ] Add deterministic build properties and warning policy.
-- [ ] Add GitHub Actions build/test workflow using only official actions.
+- [x] Initialize Git repository with `main` branch.
+- [x] Create public GitHub repository and push initial commit.
+- [x] Initialize local RECALL project memory; keep `.recall/` untracked.
+- [x] Add README, responsible-use notice, contribution rules, and security policy.
+- [x] Scaffold solution and dependency-free test runner.
+- [x] Add deterministic build properties and warning policy.
+- [x] Add GitHub Actions build/test workflow using only official actions.
 
 Exit: fresh clone builds and tests on Windows with the documented .NET SDK.
 
 ### M1 — Input and domain foundation
 
-- [ ] Parse `youtube.com/watch`, `youtu.be`, `/shorts/`, `/live/`, and `/embed/` URLs.
-- [ ] Validate video IDs without accepting arbitrary hostnames.
-- [ ] Define video, format, codec, container, availability, and failure models.
-- [ ] Implement filename sanitization and collision policy.
-- [ ] Implement format classification, display labels, and deterministic ranking.
-- [ ] Cover edge cases and malicious inputs in unit tests.
+- [x] Parse `youtube.com/watch`, `youtu.be`, `/shorts/`, `/live/`, and `/embed/` URLs.
+- [x] Validate video IDs without accepting arbitrary hostnames.
+- [x] Define video, format, codec, container, availability, and failure models.
+- [x] Implement filename sanitization and collision policy.
+- [x] Implement format classification, display labels, and deterministic ranking.
+- [x] Cover edge cases and malicious inputs in unit tests.
 
 Exit: URL-to-video-ID and domain decisions pass exhaustive local tests.
 
 ### M2 — Metadata resolver
 
-- [ ] Build coherent YouTube HTTP session and request headers.
-- [ ] Fetch watch page with timeouts, cancellation, compression, and redirect checks.
-- [ ] Extract embedded player response and player-script URL without regex-only parsing.
-- [ ] Map metadata, thumbnails, duration, captions, playability, and streaming formats.
-- [ ] Implement internal player request using page-derived configuration.
-- [ ] Add fallback strategy orchestration and failure classification.
-- [ ] Add sanitized fixture tests and opt-in live smoke command.
+- [x] Build coherent YouTube HTTP session and request headers.
+- [x] Fetch watch page with timeouts, cancellation, compression, and bounded redirects.
+- [x] Extract embedded player response and player-script URL using balanced structural scanning.
+- [x] Map metadata, thumbnails, duration, playability, and streaming formats.
+- [x] Map caption tracks and language metadata.
+- [x] Implement internal Android player request using page-derived public configuration.
+- [x] Add fallback strategy orchestration and typed failure classification.
+- [x] Add sanitized fixture tests and opt-in live smoke command.
 
 Exit: metadata and unsigned stream URLs resolve for maintained public fixtures and live smoke set.
 
 ### M3 — Direct-stream downloader MVP
 
-- [ ] Implement remote probe and safe target-name creation.
-- [ ] Stream a direct URL to `.part` with cancellation and progress.
-- [ ] Validate length/type and atomically finalize.
-- [ ] Implement retry classification and bounded backoff.
-- [ ] Persist queue/resume state with schema versioning.
-- [ ] Implement pause, resume, cancel, retry, and shutdown recovery.
-- [ ] Add local HTTP fault server and transfer contract tests.
+- [x] Validate the response endpoint and create a safe collision-free target name.
+- [x] Stream a direct URL to `.part` with cancellation and progress.
+- [x] Validate remote/final length and atomically finalize.
+- [x] Implement retry classification and bounded backoff.
+- [x] Persist privacy-safe resume state with schema versioning.
+- [x] Persist the multi-item queue with schema versioning.
+- [x] Implement byte-range resume, cancel, and retry in the transfer engine.
+- [x] Implement active-download pause/resume controls.
+- [x] Implement application-shutdown queue recovery.
+- [x] Add deterministic HTTP handler contract tests for ranges, validators, truncation, retries, and cancellation.
+- [x] Add a loopback HTTP fault server for socket-level integration tests.
 
 Exit: dependency-free CLI/harness downloads a progressive MP4 reliably and resumes after forced interruption.
 
 ### M4 — Modern desktop MVP
 
-- [ ] Create styled WPF shell, theme resources, typography, and icons drawn as vectors.
-- [ ] Implement paste/analyze workflow and metadata card.
-- [ ] Implement recommended format list and advanced format table.
-- [ ] Implement destination picker and collision choices.
-- [ ] Implement queue cards and global concurrency control.
-- [ ] Add settings, first-run responsible-use notice, and diagnostics view.
-- [ ] Complete keyboard, scaling, screen-reader, dark-mode, and cancellation review.
+- [x] Create styled WPF shell, theme resources, typography, and icons drawn as vectors.
+- [x] Implement paste/analyze workflow and metadata card.
+- [x] Implement recommended and detailed format list.
+- [x] Add advanced resolution/container/codec/FPS/HDR filters.
+- [x] Implement destination picker and automatic collision-safe naming.
+- [x] Implement queue cards and global concurrency control.
+- [x] Add settings, first-run responsible-use notice, and diagnostics view.
+- [x] Complete keyboard, scaling, screen-reader, dark-mode, and cancellation review.
 
 Exit: normal user can analyze and download a progressive MP4 entirely through the GUI.
 
 ### M5 — Signature and throttling decipher
 
-- [ ] Capture sanitized player-script shapes and expected transform plans.
-- [ ] Build tokenizer for the required JavaScript subset.
-- [ ] Build constrained parser and evaluator with strict resource limits.
-- [ ] Locate signature and throttling functions structurally.
-- [ ] Cache transform plans by script hash.
-- [ ] Resolve `signatureCipher` and `n` transformations.
-- [ ] Add mutation/fuzz tests for malformed scripts and unsupported syntax.
-- [ ] Add health reporting and fast fallback when player code changes.
+- [x] Capture synthetic player-script shapes and expected transform plans.
+- [x] Build tokenizer for the required JavaScript subset.
+- [x] Build constrained classic signature transform planner/evaluator with strict size and operation limits.
+- [x] Locate signature and throttling functions structurally.
+- [x] Cache transform plans by script hash.
+- [x] Resolve supported classic `signatureCipher` transform shapes without executing JavaScript.
+- [x] Resolve the current ES6 signature shape and `n` transformations.
+- [x] Add mutation/fuzz tests for malformed scripts and unsupported syntax.
+- [x] Add sanitized extraction-stage health reporting and Android client fallback.
 
 Exit: signed public formats resolve without executing arbitrary JavaScript.
 
 ### M6 — Native audio downloads
 
-- [ ] Identify audio-only streams, codec, bitrate, sample rate, and container.
-- [ ] Download M4A/MP4 and WebM audio without re-encoding.
-- [ ] Use correct extension and MIME/container validation.
-- [ ] Add metadata display and recommended-audio ranking.
-- [ ] Document why MP3 conversion is unavailable without transcoding.
+- [x] Identify audio-only streams, codec, bitrate, sample rate, and container.
+- [x] Download M4A/MP4 and WebM audio without re-encoding through the direct transfer engine.
+- [x] Use the correct `.m4a` or `.webm` extension and map declared MIME/container metadata.
+- [x] Validate the downloaded container structure before finalization.
+- [x] Add metadata display and recommended-audio ranking.
+- [x] Document why MP3 conversion is unavailable without transcoding.
 
 Exit: user can save best/native audio stream with truthful format labeling.
 
 ### M7 — In-house MP4 muxer
 
-- [ ] Implement bounded ISO BMFF box reader/writer.
-- [ ] Parse init segments and fragmented media metadata.
-- [ ] Validate codec/container compatibility.
-- [ ] Build new movie/track/sample tables or a safe fragmented output path.
-- [ ] Interleave/copy samples using bounded buffers.
-- [ ] Preserve timestamps, sync samples, rotation, color, and audio parameters.
-- [ ] Validate output structure and playback against Windows media stack.
-- [ ] Fuzz box sizes, nesting, integer overflow, truncation, and hostile input.
+- [x] Implement bounded ISO BMFF box reader/writer.
+- [x] Parse init segments and fragmented media metadata.
+- [x] Validate codec/container compatibility.
+- [x] Build a seekable regular-MP4 output with merged tracks and rewritten 64-bit chunk offsets.
+- [x] Interleave/copy samples using bounded buffers.
+- [x] Preserve source sample tables, timestamps, sync samples, rotation, color, and audio parameters.
+- [x] Validate output structure and playback against Windows media stack.
+- [x] Fuzz box sizes, nesting, integer overflow, truncation, and hostile input.
 
 Exit: compatible adaptive MP4 video and audio combine into a seekable file without re-encoding.
 
 ### M8 — Advanced content features
 
-- [ ] Playlist/channel URL parsing and paged enumeration.
-- [ ] Per-item selection, naming templates, archive/history, and duplicate detection.
-- [ ] Captions: language selection, manual/automatic distinction, SRT/VTT conversion.
-- [ ] Thumbnails and optional metadata sidecars.
-- [ ] Chapters and playlist indexing.
-- [ ] Shorts/live metadata; completed live streams before active-live capture.
-- [ ] Rate-limit-aware bulk scheduling and per-host concurrency.
+- [x] Playlist/channel URL parsing and bounded paged enumeration.
+- [x] Per-item selection, indexed naming, and in-queue duplicate suppression.
+- [x] Custom naming templates, persistent archive/history, and full duplicate detection.
+- [x] Captions: language selection, manual/automatic distinction, SRT/VTT conversion.
+- [x] Thumbnails and optional metadata sidecars.
+- [x] Chapters: bounded watch-page extraction and metadata sidecar export.
+- [x] Playlist indexing and ordering metadata.
+- [x] Shorts/live metadata; completed live streams before active-live capture.
+- [x] Rate-limit-aware bulk scheduling and per-host concurrency.
 
 Exit: robust batch workflow with user-controlled content selection and bounded load.
 
 ### M9 — WebM muxing and extended media
 
-- [ ] Implement bounded EBML reader/writer.
-- [ ] Parse WebM tracks, clusters, cues, timecodes, and lacing.
-- [ ] Mux compatible Opus/Vorbis audio and VP9/AV1 video without re-encoding.
-- [ ] Generate cues for seeking and validate duration/timestamps.
-- [ ] Add hostile-container fixtures and fuzz coverage.
+- [x] Implement bounded EBML reader/writer.
+- [x] Parse WebM tracks, clusters, timecodes, SimpleBlocks, and BlockGroups while preserving laced payloads.
+- [x] Mux compatible Opus/Vorbis audio and VP9/AV1 video without re-encoding.
+- [x] Interleave clusters by timecode, remap audio track identity, and generate new seek cues.
+- [x] Add hostile-container fixtures and fuzz coverage.
 
 Exit: best compatible WebM adaptive formats combine into seekable files.
 
 ### M10 — Reliability hardening
 
-- [ ] Maintain extraction canary set and documented update playbook.
-- [ ] Add segmented transfer behind a feature flag and prove integrity/performance.
-- [ ] Add network-change, sleep/resume, proxy, IPv4/IPv6, and slow-disk tests.
-- [ ] Add disk-space forecasting and low-space recovery.
-- [ ] Add queue soak tests and crash-consistent persistence.
-- [ ] Add redacted diagnostic export and issue template.
-- [ ] Performance budget: startup, analysis latency, CPU, memory, UI frame time.
+- [x] Maintain extraction canary set and documented update playbook.
+- [x] Add segmented transfer behind a feature flag and prove integrity/performance.
+- [x] Add network-change, sleep/resume, proxy, IPv4/IPv6, and slow-disk tests.
+- [x] Add disk-space forecasting and low-space recovery.
+- [x] Add queue soak tests and crash-consistent persistence.
+- [x] Add redacted diagnostic export and issue template.
+- [x] Performance budget: startup, analysis latency, CPU, memory, UI frame time.
 
 Exit: release-candidate reliability targets met on supported Windows versions.
 
 ### M11 — Packaging and v1.0
 
-- [ ] Choose project license before accepting outside contributions.
-- [ ] Produce framework-dependent and self-contained x64 builds.
-- [ ] Add reproducible release script, checksums, and signed artifacts when certificate exists.
-- [ ] Add upgrade/uninstall behavior and data-retention documentation.
-- [ ] Add versioned extraction compatibility notes.
-- [ ] Complete privacy, security, responsible-use, accessibility, and threat-model reviews.
+- [x] Choose project license before accepting outside contributions.
+- [x] Produce framework-dependent and self-contained x64 builds.
+- [x] Add reproducible release script, checksums, and signed artifacts when certificate exists.
+- [x] Add upgrade/uninstall behavior and data-retention documentation.
+- [x] Add versioned extraction compatibility notes.
+- [x] Complete privacy, security, responsible-use, accessibility, and threat-model reviews.
 - [ ] Publish v1.0 with limitations and support policy.
 
 Exit: clean-machine installation, download smoke test, uninstall, checksum verification, and rollback pass.
@@ -433,6 +443,30 @@ Order for current work:
 - 2026-07-16: Zero third-party application dependencies is an architectural invariant, not merely a packaging goal.
 - 2026-07-16: Progressive and native-container output precede muxing; transcoding is not conflated with downloading.
 - 2026-07-16: RECALL state is local development context and must remain outside Git.
+- 2026-07-16: Use a versioned Android player profile as the primary direct-format fallback when the watch page exposes only ciphered media. Current WEB/MWEB/TV profiles returned no usable streams during live verification; the tested Android profile returned progressive, audio-only, and video-only URLs.
+- 2026-07-16: Keep the constrained classic signature planner as a guarded fallback. The current ES6 player no longer exposes the traditional split/reverse/splice shape, so current-player decipher and `n` transformation remain unfinished M5 work.
+- 2026-07-16: Use type-first stream selection. Combined audio/video, native audio, and video-only modes expose only relevant filters and report per-mode limits. Audio + video presents muxable adaptive outputs as complete files, while Video only remains an explicit track-only choice.
+- 2026-07-16: Highest-quality audio + video is an MVP release gate. Audio + video selects the highest compatible adaptive tracks, downloads both resumably, and muxes them internally; low-resolution progressive media is fallback only.
+- 2026-07-16: Support regular MP4 chunk-offset rewriting, fragmented MP4 track/fragment remapping and interleaving, and WebM cluster interleaving/cue generation. A live H.264/AAC fragmented MP4 mux passed structural validation and opened with both tracks in the Windows media stack; AV1 playback still depends on the system codec installation.
+- 2026-07-16: Prefer MP4 when video quality characteristics are equivalent, while keeping quality as the primary rank and retaining higher-quality WebM options.
+- 2026-07-16: Queue downloads through a tested global 1–4 transfer dispatcher. Persist only validated video/format identities and local destinations; re-resolve fresh media URLs when resuming recovered work.
+- 2026-07-16: Persist bounded local settings atomically. Gate first use on a locally stored responsible-use acknowledgement and keep diagnostics redacted to runtime, counts, stages, and local storage paths.
+- 2026-07-16: Keep first-run acknowledgement keyboard-modal, expose explicit analysis/download cancellation, label live status/progress for assistive technology, use DPI layout rounding, and request a dark DWM title bar with the Windows 10 fallback attribute.
+- 2026-07-16: Keep deterministic MP4/WebM mutation suites and hostile size/truncation/offset fixtures in normal CI. Readers must return typed failures; muxers must never publish output or leave `.muxing` files after rejected input.
+- 2026-07-16: Forecast destination space before each queue run. Direct transfers reserve remaining source bytes plus headroom; adaptive muxes also reserve a full output estimate. Insufficient-space failures stay retryable after cleanup.
+- 2026-07-16: Keep canary URLs in an operator-owned local file, never Git. Canary output is ordinal and aggregate-only; maintenance playbook forbids URLs, IDs, titles, channels, headers, scripts, and media in reports/fixtures.
+- 2026-07-16: Diagnostic export uses a whitelist-only JSON schema and deliberately omits all content/source/local-path fields. GitHub extractor reports require this redacted report plus explicit safety acknowledgement.
+- 2026-07-16: Queue commits flush a same-directory pending file before atomic replacement and retain the prior committed snapshot as recovery backup. Startup accepts only a fully validated primary, pending, or backup snapshot and pauses interrupted active items.
+- 2026-07-16: Deterministic transfer reliability coverage uses real loopback sockets for connection loss, explicit proxies, and IPv4/IPv6, plus gated streams for sleep-like transport stalls and slow-destination backpressure without timing sleeps.
+- 2026-07-16: Segmented transfer is an opt-in setting for large known-length streams. Up to four concurrent ranges must agree on bounds, total length, and validators; completed-range state is resumable and servers that ignore ranges fall back to the normal direct engine.
+- 2026-07-16: Enforce deterministic fixture-analysis latency in CI and measure desktop startup, isolated idle CPU, working set, and WPF frame cadence with a local-only probe. Keep 2 s startup and 34 ms frames as targets; use 4 s and 50 ms as hard cold/30 Hz environment ceilings.
+- 2026-07-16: Caption downloads are bounded to the trusted YouTube timed-text endpoint, requested as WebVTT, validated before publication, and atomically saved as normalized VTT or safely converted SRT. Manual and auto-generated tracks remain explicit in the UI and filename.
+- 2026-07-16: Thumbnail sidecars accept only bounded JPEG, PNG, or WebP bytes from trusted YouTube image hosts and publish atomically. JSON sidecars contain stable metadata and format summaries while excluding ephemeral signed media and caption URLs.
+- 2026-07-16: Chapter metadata comes only from bounded description-chapter marker structures, is sorted and deduplicated by start time, and appears in stable JSON sidecars without affecting download eligibility.
+- 2026-07-16: Enumerate public playlists and channel video tabs from bounded first-party page data and first-party continuation requests without API keys. Accept legacy renderer and current lockup shapes, deduplicate by video ID, preserve playlist indexes, cap UI analysis at 1,000 items, and treat consent preference as a fixed non-authentication request header.
+- 2026-07-16: Coordinate metadata and media requests by provider host-group with a two-request cap, bounded three-attempt rate-limit retries, shared backoff, and clamped `Retry-After` handling. Persistent bulk 429 responses defer untouched items instead of continuing request pressure; queued bulk downloads re-resolve expiring stream URLs at execution time.
+- 2026-07-16: Render filenames from a bounded token template before Windows filename sanitization, retaining indexed default collection names. Persist completed-output history atomically with recovery candidates and no media URLs; exact source-output and destination matches across queue/history are explicit duplicates, while different output selections for the same video remain allowed.
+- 2026-07-16: Classify Shorts and completed live replays in stable metadata and sidecars, preserving live start/end timestamps when present. Completed replays use ordinary adaptive selection and internal muxing; active, upcoming, and offline live capture fail with explicit typed errors until a dedicated segmented-live design exists. Always try the versioned direct-format client when a watch page has zero streams, even when it also has zero ciphers.
 
 ## 15. Plan maintenance
 

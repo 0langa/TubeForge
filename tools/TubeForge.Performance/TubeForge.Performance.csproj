@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <AssemblyName>TubeForge.Performance</AssemblyName>
+    <RootNamespace>TubeForge.Performance</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../src/TubeForge.YouTube/TubeForge.YouTube.csproj" />
+  </ItemGroup>
+</Project>
