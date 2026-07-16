@@ -10,6 +10,7 @@
     <Project Path="tests/TubeForge.Tests/TubeForge.Tests.csproj" />
   </Folder>
   <Folder Name="/tools/">
+    <Project Path="tools/TubeForge.Branding/TubeForge.Branding.csproj" />
     <Project Path="tools/TubeForge.LiveMuxSmoke/TubeForge.LiveMuxSmoke.csproj" />
     <Project Path="tools/TubeForge.Performance/TubeForge.Performance.csproj" />
     <Project Path="tools/TubeForge.Smoke/TubeForge.Smoke.csproj" />

@@ -1,3 +1,5 @@
+<p align="center"><img src="assets/TubeForge.svg" width="104" height="104" alt="TubeForge icon"></p>
+
 # TubeForge
 
 TubeForge is an experimental, ad-free Windows desktop downloader built from scratch for media you are authorized to save from YouTube. It does not use `yt-dlp`, FFmpeg, hosted conversion services, third-party NuGet packages, or bundled external executables.

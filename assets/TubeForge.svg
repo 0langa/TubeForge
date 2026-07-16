@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-labelledby="title description">
+  <title id="title">TubeForge</title>
+  <desc id="description">White play symbol struck by an orange forge spark on a purple rounded square.</desc>
+  <defs>
+    <linearGradient id="surface" x1="36" y1="24" x2="220" y2="232" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#8b6cff"/>
+      <stop offset="1" stop-color="#5c3ee6"/>
+    </linearGradient>
+  </defs>
+  <rect width="256" height="256" rx="58" fill="url(#surface)"/>
+  <path d="M78 59c-7-4-15 1-15 9v120c0 8 9 13 16 9l105-61c7-4 7-13 0-17L78 59Z" fill="#fff"/>
+  <path d="m194 27 7 20 21 7-21 7-7 21-7-21-21-7 21-7 7-20Z" fill="#ffad42"/>
+  <path d="m214 88 14 8M161 27l-8-14" fill="none" stroke="#ffad42" stroke-width="10" stroke-linecap="round"/>
+</svg>

@@ -5,7 +5,12 @@
     <UseWPF>true</UseWPF>
     <AssemblyName>TubeForge</AssemblyName>
     <RootNamespace>TubeForge.App</RootNamespace>
+    <ApplicationIcon>Assets\TubeForge.ico</ApplicationIcon>
   </PropertyGroup>
+  <ItemGroup>
+    <Resource Include="Assets\TubeForge.ico" />
+    <Resource Include="Assets\TubeForge.png" />
+  </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="../TubeForge.Core/TubeForge.Core.csproj" />
     <ProjectReference Include="../TubeForge.Downloads/TubeForge.Downloads.csproj" />

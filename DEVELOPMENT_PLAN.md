@@ -16,7 +16,7 @@ The application is built from source in this repository. Network access is limit
 - Standard-library and Windows APIs only at runtime.
 - Public YouTube videos first.
 - Audio + video defaults to the highest compatible adaptive video and audio tracks; progressive media is fallback only.
-- Audio-only downloads in the stream's native container (`m4a`/MP4 or WebM) before transcoding support.
+- Audio-only downloads in the native container (`m4a`/MP4 or WebM), with optional Windows Media Foundation MP3 transcoding.
 - In-house ISO BMFF/MP4 and EBML/WebM muxing combines encoded tracks without re-encoding.
 - Resumable, bounded-concurrency downloads with atomic finalization.
 
@@ -31,7 +31,7 @@ The application is built from source in this repository. Network access is limit
 
 - DRM-protected, paid, members-only, or rental content.
 - Circumventing access controls.
-- MP3/AAC/Opus transcoding before an independently implemented and legally reviewed codec path exists.
+- Bundling or silently installing third-party codec binaries.
 - Mobile, macOS, or Linux UI before the Windows release is stable.
 - Guaranteed support for every YouTube experiment at all times.
 
@@ -165,8 +165,9 @@ YouTube delivery changes frequently. Extraction must be a replaceable subsystem 
 - Phase 4: mux compatible fragmented MP4 audio/video without re-encoding.
 - Phase 5: parse and mux compatible WebM/Matroska tracks.
 - Phase 6: metadata tagging, chapters, thumbnails, and captions where the container permits.
+- Phase 7: decode and re-encode audio through Windows Media Foundation platform codecs, with explicit format/bitrate choices and typed unsupported-codec failures.
 
-Muxing means combining existing encoded tracks. Transcoding means decoding and re-encoding, and is a separate, much larger codec project. UI must never label native audio extraction as MP3 conversion.
+Muxing combines existing encoded tracks without quality loss. Transcoding decodes and re-encodes through an explicitly selected Windows platform codec. UI must distinguish native output from lossy conversion and show selected bitrate.
 
 ## 7. Persistence and settings
 
@@ -407,27 +408,58 @@ Exit: release-candidate reliability targets met on supported Windows versions.
 
 Exit: clean-machine installation, download smoke test, uninstall, checksum verification, and rollback pass.
 
+### M12 — TubeForge product identity
+
+- [x] Replace generic play-button branding with a scalable TubeForge forge/play mark.
+- [ ] Apply icon to window, executable, installer, release artifacts, and repository surfaces.
+- [ ] Audit product names, descriptions, package IDs, paths, and URLs for one TubeForge identity.
+- [ ] Rename the public GitHub repository to `TubeForge` after code and release references migrate.
+
+Exit: app, artifacts, documentation, and public repository use one recognizable TubeForge identity.
+
+### M13 — Native Windows audio transcoding
+
+- [ ] Add dependency-free Windows Media Foundation source-reader/sink-writer bridge.
+- [ ] Expose MP3 output at 128, 192, 256, and 320 kbps for audio-only downloads.
+- [ ] Preserve native M4A/AAC and WebM/Opus as lossless-copy choices.
+- [ ] Stage source audio, transcode to a sibling temporary file, validate output, then publish atomically.
+- [ ] Persist output profile across queue restart and include it in duplicate identity.
+- [ ] Add deterministic validation, unsupported-codec, cancellation, and cleanup tests.
+
+Exit: supported Windows codecs convert selected public audio to playable MP3 without FFmpeg or bundled codec binaries.
+
+### M14 — Installer, updater, and v1.1
+
+- [ ] Build a per-user, unelevated installer with Start Menu entry and Add/Remove Programs registration.
+- [ ] Preserve user data by default and offer explicit removal during uninstall.
+- [ ] Check GitHub stable releases on startup only when update checks are enabled.
+- [ ] Download the matching installer with strict repository, asset-name, size, SHA-256 digest, and version validation.
+- [ ] Require explicit user confirmation before applying an update; never elevate or silently execute remote content.
+- [ ] Add atomic staging, rollback, stale-file cleanup, and update/installer failure recovery.
+- [ ] Extend threat model, packaging tests, installation docs, release workflow, and support policy.
+- [ ] Publish v1.1 with installer, updater, branding, and MP3 limitations documented.
+
+Exit: clean-machine install, in-app update, rollback, uninstall, MP3 conversion, checksum, and provenance smoke tests pass.
+
 ## 12. Immediate implementation backlog
 
 Order for current work:
 
-1. Repository, GitHub, RECALL, policies, solution scaffold, CI.
-2. URL parser and tests.
-3. Domain media models and format ranking.
-4. Filename/path safety.
-5. Direct-stream transfer engine plus local fault server.
-6. Watch-page HTTP client and embedded JSON extraction.
-7. Metadata/format mapping fixtures.
-8. Minimal WPF analyze/download vertical slice.
-9. Player decipher research and constrained interpreter.
-10. Native audio and MP4 muxing.
+1. TubeForge vector/icon identity and repository-wide naming audit.
+2. Windows Media Foundation MP3 transcode engine and tests.
+3. Audio-output profile persistence and UI integration.
+4. Per-user installer and uninstall behavior.
+5. Release discovery, verified download, update staging, and apply helper.
+6. Packaging/release pipeline integration and clean-machine smoke tests.
+7. Threat-model/documentation refresh, v1.1 publication, and GitHub repository rename.
 
 ## 13. Risk register
 
 | Risk | Impact | Mitigation | Trigger/action |
 |---|---|---|---|
 | YouTube page/player changes | Core resolution breaks | Isolate extractor, fixtures, structural parsing, canaries | Classified extractor errors spike; capture sanitized new shape and patch adapter |
-| No external muxer/codecs | Advanced formats arrive later | Progressive/native formats first; implement containers separately | Never mislabel muxing/transcoding; keep UI capability-driven |
+| Platform codec availability differs | MP3 conversion may reject some source codecs | Use Windows Media Foundation capability negotiation and typed failures | Preserve native output path; never claim unsupported conversion |
+| Updater supply-chain compromise | Remote code executes as user | Pin repository/asset policy; verify API digest, checksum, version, and bounded payload | Fail closed; keep manual download path; update threat model before release |
 | Arbitrary player JavaScript | Security and reliability risk | Constrained subset interpreter with hard limits | Unsupported syntax fails closed and records sanitized structure |
 | Signed URL expiry | Resume fails | Store source identity; re-resolve and compare format/validators | Refresh URL, then resume only if remote identity matches |
 | Rate limiting | Temporary failures/bans | Bounded concurrency, jitter, Retry-After, no aggressive probing | Pause host queue and show retry time |
@@ -467,6 +499,9 @@ Order for current work:
 - 2026-07-16: Coordinate metadata and media requests by provider host-group with a two-request cap, bounded three-attempt rate-limit retries, shared backoff, and clamped `Retry-After` handling. Persistent bulk 429 responses defer untouched items instead of continuing request pressure; queued bulk downloads re-resolve expiring stream URLs at execution time.
 - 2026-07-16: Render filenames from a bounded token template before Windows filename sanitization, retaining indexed default collection names. Persist completed-output history atomically with recovery candidates and no media URLs; exact source-output and destination matches across queue/history are explicit duplicates, while different output selections for the same video remain allowed.
 - 2026-07-16: Classify Shorts and completed live replays in stable metadata and sidecars, preserving live start/end timestamps when present. Completed replays use ordinary adaptive selection and internal muxing; active, upcoming, and offline live capture fail with explicit typed errors until a dedicated segmented-live design exists. Always try the versioned direct-format client when a watch page has zero streams, even when it also has zero ciphers.
+- 2026-07-17: TubeForge becomes the public repository and artifact identity. Use a vector-first forge/play mark and derive Windows icon sizes from the same geometry.
+- 2026-07-17: MP3 conversion uses Windows Media Foundation codecs already present in supported Windows, preserving the no-FFmpeg/no-third-party-package invariant. Native M4A/WebM remains available and is the no-quality-loss choice.
+- 2026-07-17: Installer and updater remain per-user and unelevated. Update checks are configurable; applying an update requires explicit confirmation plus strict GitHub repository, version, asset, size, and SHA-256 validation.
 
 ## 15. Plan maintenance
 

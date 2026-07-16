@@ -19,5 +19,11 @@
     <None Include="../../src/TubeForge.App/MainWindow.xaml"
           Link="Fixtures/MainWindow.xaml"
           CopyToOutputDirectory="PreserveNewest" />
+    <None Include="../../assets/TubeForge.svg"
+          Link="Fixtures/TubeForge.svg"
+          CopyToOutputDirectory="PreserveNewest" />
+    <None Include="../../assets/TubeForge.ico"
+          Link="Fixtures/TubeForge.ico"
+          CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>
