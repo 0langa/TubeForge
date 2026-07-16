@@ -131,15 +131,44 @@ public static class YouTubeWatchPageParser
             return null;
         }
 
+        var microformat = PlayerMicroformat(root);
+        var liveBroadcast = microformat is { } renderer &&
+                            renderer.TryGetProperty("liveBroadcastDetails", out var broadcast) &&
+                            broadcast.ValueKind == JsonValueKind.Object
+            ? broadcast
+            : (JsonElement?)null;
+        var liveStartedAtUtc = ParseTimestamp(liveBroadcast is { } liveStart
+            ? ReadString(liveStart, "startTimestamp")
+            : null);
+        var liveEndedAtUtc = ParseTimestamp(liveBroadcast is { } liveEnd
+            ? ReadString(liveEnd, "endTimestamp")
+            : null);
+        var isLiveNow = ReadBoolean(details, "isLive") ||
+                        liveBroadcast is { } liveNow && ReadBoolean(liveNow, "isLiveNow");
         var status = ReadString(root, "playabilityStatus", "status") ?? "UNKNOWN";
         if (!status.Equals("OK", StringComparison.OrdinalIgnoreCase))
         {
             var reason = ReadString(root, "playabilityStatus", "reason") ??
                          "YouTube reported that this video is unavailable.";
+            if (status.Equals("LIVE_STREAM_OFFLINE", StringComparison.OrdinalIgnoreCase) ||
+                liveStartedAtUtc is not null && liveEndedAtUtc is null)
+            {
+                return UnsupportedLive(
+                    "Video.LiveUpcomingUnsupported",
+                    "Upcoming and offline live-stream capture is not implemented.");
+            }
+
             var code = status.Equals("LOGIN_REQUIRED", StringComparison.OrdinalIgnoreCase)
                 ? "Video.LoginRequired"
                 : "Video.Unavailable";
             return Result<WatchPageData>.Failure(new TubeForgeError(code, reason));
+        }
+
+        if (isLiveNow)
+        {
+            return UnsupportedLive(
+                "Video.ActiveLiveUnsupported",
+                "Active live-stream capture is not implemented. Completed replays with normal streams are supported.");
         }
 
         var rawId = ReadString(details, "videoId");
@@ -164,6 +193,9 @@ public static class YouTubeWatchPageParser
         }
 
         var duration = ParseDuration(ReadString(details, "lengthSeconds"));
+        var isLiveContent = ReadBoolean(details, "isLiveContent") || liveBroadcast is not null;
+        var isShort = ReadBoolean(details, "isShortsEligible") ||
+                      microformat is { } shortRenderer && ReadBoolean(shortRenderer, "isShortsEligible");
         var metadata = new VideoMetadata
         {
             Id = videoId,
@@ -172,6 +204,11 @@ public static class YouTubeWatchPageParser
             Duration = duration,
             ThumbnailUrl = ParseThumbnail(details),
             Availability = VideoAvailability.Available,
+            ContentKind = isLiveContent
+                ? VideoContentKind.LiveReplay
+                : isShort ? VideoContentKind.Short : VideoContentKind.Standard,
+            LiveStartedAtUtc = liveStartedAtUtc,
+            LiveEndedAtUtc = liveEndedAtUtc,
             Formats = formats
                 .DistinctBy(format => format.FormatId)
                 .ToArray(),
@@ -717,6 +754,34 @@ public static class YouTubeWatchPageParser
         element.TryGetProperty(property, out var value) &&
         value.ValueKind is JsonValueKind.True;
 
+    private static JsonElement? PlayerMicroformat(JsonElement root)
+    {
+        if (!root.TryGetProperty("microformat", out var microformat) ||
+            microformat.ValueKind != JsonValueKind.Object ||
+            !microformat.TryGetProperty("playerMicroformatRenderer", out var renderer) ||
+            renderer.ValueKind != JsonValueKind.Object)
+        {
+            return null;
+        }
+
+        return renderer;
+    }
+
+    private static DateTimeOffset? ParseTimestamp(string? value)
+    {
+        if (!DateTimeOffset.TryParse(
+                value,
+                CultureInfo.InvariantCulture,
+                DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal,
+                out var timestamp) ||
+            timestamp.Year is < 2005 or > 2200)
+        {
+            return null;
+        }
+
+        return timestamp;
+    }
+
     private static bool IsSafeLanguageCode(string? value) =>
         !string.IsNullOrWhiteSpace(value) &&
         value.Length <= 35 &&
@@ -755,4 +820,7 @@ public static class YouTubeWatchPageParser
             "Extractor.PageChanged",
             "TubeForge could not read this YouTube watch page.",
             detail));
+
+    private static Result<WatchPageData> UnsupportedLive(string code, string message) =>
+        Result<WatchPageData>.Failure(new TubeForgeError(code, message));
 }

@@ -84,6 +84,7 @@ Console.WriteLine($"Video ID: {data.Metadata.Id}");
 Console.WriteLine($"Title: {data.Metadata.Title}");
 Console.WriteLine($"Channel: {data.Metadata.Channel}");
 Console.WriteLine($"Duration: {data.Metadata.Duration}");
+Console.WriteLine($"Content kind: {data.Metadata.ContentKind}");
 Console.WriteLine($"Direct formats: {data.Metadata.Formats.Count} ({progressive} progressive, {audioOnly} audio-only, {videoOnly} video-only)");
 Console.WriteLine($"Maximum heights: {maximumCombinedHeight}p combined, {maximumVideoOnlyHeight}p video-only");
 Console.WriteLine($"Caption tracks: {data.Metadata.CaptionTracks.Count} ({string.Join(", ", data.Metadata.CaptionTracks.Select(track => track.LanguageCode).Distinct(StringComparer.OrdinalIgnoreCase))})");

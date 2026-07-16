@@ -368,7 +368,7 @@ Exit: compatible adaptive MP4 video and audio combine into a seekable file witho
 - [x] Thumbnails and optional metadata sidecars.
 - [x] Chapters: bounded watch-page extraction and metadata sidecar export.
 - [x] Playlist indexing and ordering metadata.
-- [ ] Shorts/live metadata; completed live streams before active-live capture.
+- [x] Shorts/live metadata; completed live streams before active-live capture.
 - [x] Rate-limit-aware bulk scheduling and per-host concurrency.
 
 Exit: robust batch workflow with user-controlled content selection and bounded load.
@@ -466,6 +466,7 @@ Order for current work:
 - 2026-07-16: Enumerate public playlists and channel video tabs from bounded first-party page data and first-party continuation requests without API keys. Accept legacy renderer and current lockup shapes, deduplicate by video ID, preserve playlist indexes, cap UI analysis at 1,000 items, and treat consent preference as a fixed non-authentication request header.
 - 2026-07-16: Coordinate metadata and media requests by provider host-group with a two-request cap, bounded three-attempt rate-limit retries, shared backoff, and clamped `Retry-After` handling. Persistent bulk 429 responses defer untouched items instead of continuing request pressure; queued bulk downloads re-resolve expiring stream URLs at execution time.
 - 2026-07-16: Render filenames from a bounded token template before Windows filename sanitization, retaining indexed default collection names. Persist completed-output history atomically with recovery candidates and no media URLs; exact source-output and destination matches across queue/history are explicit duplicates, while different output selections for the same video remain allowed.
+- 2026-07-16: Classify Shorts and completed live replays in stable metadata and sidecars, preserving live start/end timestamps when present. Completed replays use ordinary adaptive selection and internal muxing; active, upcoming, and offline live capture fail with explicit typed errors until a dedicated segmented-live design exists. Always try the versioned direct-format client when a watch page has zero streams, even when it also has zero ciphers.
 
 ## 15. Plan maintenance
 

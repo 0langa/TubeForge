@@ -16,6 +16,12 @@ public sealed record VideoMetadata
 
     public VideoAvailability Availability { get; init; } = VideoAvailability.Available;
 
+    public VideoContentKind ContentKind { get; init; } = VideoContentKind.Standard;
+
+    public DateTimeOffset? LiveStartedAtUtc { get; init; }
+
+    public DateTimeOffset? LiveEndedAtUtc { get; init; }
+
     public IReadOnlyList<StreamFormat> Formats { get; init; } = [];
 
     public IReadOnlyList<CaptionTrack> CaptionTracks { get; init; } = [];

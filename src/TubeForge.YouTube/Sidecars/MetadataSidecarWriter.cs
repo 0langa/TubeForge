@@ -92,16 +92,21 @@ public static class MetadataSidecarWriter
 
     private static object CreateDocument(VideoMetadata metadata) => new
     {
-        schemaVersion = 1,
+        schemaVersion = 2,
         extractor = "TubeForge",
         service = "YouTube",
         videoId = metadata.Id.Value,
-        sourceUrl = $"https://www.youtube.com/watch?v={metadata.Id.Value}",
+        sourceUrl = metadata.ContentKind == VideoContentKind.Short
+            ? $"https://www.youtube.com/shorts/{metadata.Id.Value}"
+            : $"https://www.youtube.com/watch?v={metadata.Id.Value}",
         metadata.Title,
         metadata.Channel,
         durationSeconds = metadata.Duration?.TotalSeconds,
         thumbnailUrl = metadata.ThumbnailUrl?.AbsoluteUri,
         availability = metadata.Availability.ToString(),
+        contentKind = metadata.ContentKind.ToString(),
+        liveStartedAtUtc = metadata.LiveStartedAtUtc,
+        liveEndedAtUtc = metadata.LiveEndedAtUtc,
         captions = metadata.CaptionTracks.Select(track => new
         {
             track.LanguageCode,

@@ -279,6 +279,12 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     {
         _videoChannel,
         _videoDuration is null ? string.Empty : FormatDuration(_videoDuration.Value),
+        _metadata?.ContentKind switch
+        {
+            VideoContentKind.Short => "Short",
+            VideoContentKind.LiveReplay => "Completed live replay",
+            _ => string.Empty
+        },
         _metadata?.Chapters.Count > 0 ? $"{_metadata.Chapters.Count} chapters" : string.Empty
     }.Where(value => !string.IsNullOrWhiteSpace(value)));
 
@@ -907,9 +913,15 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                 RebuildFormatFilters(resetSelections: true);
             }
 
-            ExtractionStatus = result.Value.Diagnostics?.Stage == "AndroidClientResolved"
+            var extractionStatus = result.Value.Diagnostics?.Stage == "AndroidClientResolved"
                 ? "DIRECT STREAMS VERIFIED"
                 : "WATCH PAGE RESOLVED";
+            ExtractionStatus = _metadata.ContentKind switch
+            {
+                VideoContentKind.Short => "SHORT · " + extractionStatus,
+                VideoContentKind.LiveReplay => "LIVE REPLAY · " + extractionStatus,
+                _ => extractionStatus
+            };
             StatusMessage = Formats.Count > 0
                 ? "Choose a stream and download folder"
                 : "Metadata found, but no downloadable stream was resolved";

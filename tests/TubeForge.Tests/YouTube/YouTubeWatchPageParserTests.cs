@@ -80,4 +80,68 @@ public static class YouTubeWatchPageParserTests
         Assert.True(hostileThumbnail.IsSuccess, hostileThumbnail.Error?.TechnicalDetail);
         Assert.Equal<Uri?>(null, hostileThumbnail.Value.Metadata.ThumbnailUrl);
     }
+
+    [Test]
+    public static void ClassifiesShortsAndCompletedLiveReplays()
+    {
+        var shortResult = YouTubeWatchPageParser.Parse(PlayerResponse("""
+            "videoDetails":{
+              "videoId":"Fixture123_","title":"Short fixture","lengthSeconds":"15",
+              "isShortsEligible":true
+            }
+            """));
+        var replayResult = YouTubeWatchPageParser.Parse(PlayerResponse("""
+            "videoDetails":{
+              "videoId":"Fixture123_","title":"Replay fixture","lengthSeconds":"3600",
+              "isLiveContent":true,"isLive":false
+            },
+            "microformat":{"playerMicroformatRenderer":{"liveBroadcastDetails":{
+              "startTimestamp":"2026-07-15T18:00:00Z",
+              "endTimestamp":"2026-07-15T19:00:00Z",
+              "isLiveNow":false
+            }}}
+            """));
+
+        Assert.True(shortResult.IsSuccess, shortResult.Error?.TechnicalDetail);
+        Assert.Equal(VideoContentKind.Short, shortResult.Value.Metadata.ContentKind);
+        Assert.True(replayResult.IsSuccess, replayResult.Error?.TechnicalDetail);
+        Assert.Equal(VideoContentKind.LiveReplay, replayResult.Value.Metadata.ContentKind);
+        Assert.Equal(
+            new DateTimeOffset(2026, 7, 15, 18, 0, 0, TimeSpan.Zero),
+            replayResult.Value.Metadata.LiveStartedAtUtc);
+        Assert.Equal(
+            new DateTimeOffset(2026, 7, 15, 19, 0, 0, TimeSpan.Zero),
+            replayResult.Value.Metadata.LiveEndedAtUtc);
+    }
+
+    [Test]
+    public static void RejectsActiveAndUpcomingLiveCaptureWithTypedErrors()
+    {
+        var active = YouTubeWatchPageParser.Parse(PlayerResponse("""
+            "videoDetails":{
+              "videoId":"Fixture123_","title":"Active fixture","isLiveContent":true,"isLive":true
+            }
+            """));
+        var upcoming = YouTubeWatchPageParser.Parse("""
+            <script>var ytInitialPlayerResponse={
+              "playabilityStatus":{"status":"LIVE_STREAM_OFFLINE","reason":"Starts later"},
+              "videoDetails":{"videoId":"Fixture123_","title":"Upcoming fixture","isLiveContent":true},
+              "microformat":{"playerMicroformatRenderer":{"liveBroadcastDetails":{
+                "startTimestamp":"2099-07-16T20:00:00Z","isLiveNow":false
+              }}}
+            };</script>
+            """);
+
+        Assert.False(active.IsSuccess);
+        Assert.Equal("Video.ActiveLiveUnsupported", active.Error?.Code);
+        Assert.False(upcoming.IsSuccess);
+        Assert.Equal("Video.LiveUpcomingUnsupported", upcoming.Error?.Code);
+    }
+
+    private static string PlayerResponse(string body) => $$"""
+        <script>var ytInitialPlayerResponse={
+          "playabilityStatus":{"status":"OK"},
+          {{body}}
+        };</script>
+        """;
 }

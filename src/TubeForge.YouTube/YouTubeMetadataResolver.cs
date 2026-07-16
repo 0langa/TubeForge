@@ -54,9 +54,7 @@ public sealed class YouTubeMetadataResolver(HttpClient httpClient)
                 timeoutSource.Token).ConfigureAwait(false);
             var watchResult = YouTubeWatchPageParser.Parse(html);
             if (!watchResult.IsSuccess ||
-                watchResult.Value.Metadata.Formats.Count > 0 ||
-                watchResult.Value.CipheredFormatCount == 0 ||
-                watchResult.Value.PlayerScriptUrl is null)
+                watchResult.Value.Metadata.Formats.Count > 0)
             {
                 return watchResult;
             }
@@ -68,6 +66,12 @@ public sealed class YouTubeMetadataResolver(HttpClient httpClient)
             if (clientResult is not null && clientResult.Metadata.Formats.Count > 0)
             {
                 return Result<WatchPageData>.Success(clientResult);
+            }
+
+            if (watchResult.Value.CipheredFormatCount == 0 ||
+                watchResult.Value.PlayerScriptUrl is null)
+            {
+                return watchResult;
             }
 
             return await TryResolveCipheredFormatsAsync(
@@ -183,9 +187,15 @@ public sealed class YouTubeMetadataResolver(HttpClient httpClient)
             {
                 Metadata = parsed.Value.Metadata with
                 {
+                    ContentKind = fallback.Metadata.ContentKind,
+                    LiveStartedAtUtc = fallback.Metadata.LiveStartedAtUtc,
+                    LiveEndedAtUtc = fallback.Metadata.LiveEndedAtUtc,
                     CaptionTracks = parsed.Value.Metadata.CaptionTracks.Count > 0
                         ? parsed.Value.Metadata.CaptionTracks
-                        : fallback.Metadata.CaptionTracks
+                        : fallback.Metadata.CaptionTracks,
+                    Chapters = parsed.Value.Metadata.Chapters.Count > 0
+                        ? parsed.Value.Metadata.Chapters
+                        : fallback.Metadata.Chapters
                 },
                 PlayerScriptUrl = fallback.PlayerScriptUrl,
                 Diagnostics = new ExtractionDiagnostics("AndroidClientResolved")

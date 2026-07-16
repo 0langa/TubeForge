@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Http.Headers;
+using TubeForge.Core.Media;
 using TubeForge.Core.YouTube;
 using TubeForge.Tests.Framework;
 using TubeForge.YouTube;
@@ -120,17 +121,12 @@ public static class YouTubeMetadataResolverTests
             <script>
             var ytInitialPlayerResponse={
               "playabilityStatus":{"status":"OK"},
-              "videoDetails":{"videoId":"Fixture123_","title":"Watch metadata","lengthSeconds":"10"},
+              "videoDetails":{"videoId":"Fixture123_","title":"Watch metadata","lengthSeconds":"10","isShortsEligible":true},
               "captions":{"playerCaptionsTracklistRenderer":{"captionTracks":[{
                 "baseUrl":"https://www.youtube.com/api/timedtext?v=Fixture123_&lang=en",
                 "name":{"simpleText":"English"},
                 "vssId":".en","languageCode":"en","isTranslatable":true
-              }]}},
-              "streamingData":{"formats":[{
-                "itag":22,
-                "signatureCipher":"url=https%3A%2F%2Ffixture.googlevideo.com%2Fvideoplayback%3Fitag%3D22&s=abcdef&sp=sig",
-                "mimeType":"video/mp4; codecs=\"avc1.64001F, mp4a.40.2\""
-              }]}
+              }]}}
             };
             ytcfg.set({
               "INNERTUBE_API_KEY":"fixturePublicConfig",
@@ -178,6 +174,7 @@ public static class YouTubeMetadataResolverTests
         Assert.Equal(1, result.Value.Metadata.CaptionTracks.Count);
         Assert.Equal("en", result.Value.Metadata.CaptionTracks[0].LanguageCode);
         Assert.Equal("Android metadata", result.Value.Metadata.Title);
+        Assert.Equal(VideoContentKind.Short, result.Value.Metadata.ContentKind);
         Assert.Equal("AndroidClientResolved", result.Value.Diagnostics?.Stage);
         Assert.Equal(2, requestCount);
     }
