@@ -63,7 +63,19 @@
                             </Style>
                         </Button.Style>
                     </Button>
-                    <Button Style="{StaticResource NavButton}" Content="□   Library" IsEnabled="False" ToolTip="Planned" />
+                    <Button Content="□   Library" Command="{Binding ShowLibraryCommand}"
+                            AutomationProperties.Name="Download library page">
+                        <Button.Style>
+                            <Style TargetType="Button" BasedOn="{StaticResource NavButton}">
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding IsLibraryPage}" Value="True">
+                                        <Setter Property="Background" Value="#1A2240" />
+                                        <Setter Property="Foreground" Value="White" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Button.Style>
+                    </Button>
                     <Button Content="⚙   Settings" Command="{Binding ShowSettingsCommand}"
                             AutomationProperties.Name="Settings page">
                         <Button.Style>
@@ -549,6 +561,95 @@
 
         <ScrollViewer Grid.Column="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
                       IsEnabled="{Binding IsMainContentEnabled}"
+                      Visibility="{Binding IsLibraryPage, Converter={StaticResource BooleanToVisibilityConverter}}">
+            <Grid Margin="38,30,38,40" MaxWidth="1020">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="24" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="14" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="14" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+
+                <Grid Grid.Row="0">
+                    <StackPanel>
+                        <TextBlock Text="Library" FontSize="29" FontWeight="SemiBold" />
+                        <TextBlock Text="Durable local history powers duplicate detection. No media URLs are stored."
+                                   Margin="0,7,0,0" FontSize="14" Foreground="{StaticResource MutedTextBrush}" />
+                    </StackPanel>
+                    <StackPanel HorizontalAlignment="Right" VerticalAlignment="Bottom">
+                        <TextBlock Text="{Binding HistorySummary}" HorizontalAlignment="Right"
+                                   Foreground="{StaticResource MutedTextBrush}" FontSize="11" />
+                        <Button Style="{StaticResource SecondaryButton}" Content="Clear history" Margin="0,9,0,0"
+                                Command="{Binding ClearHistoryCommand}" Padding="13,8" />
+                    </StackPanel>
+                </Grid>
+
+                <Border Grid.Row="2" Style="{StaticResource Card}">
+                    <StackPanel>
+                        <TextBlock Text="HISTORY STORAGE" Style="{StaticResource FieldLabel}" />
+                        <TextBlock Text="{Binding HistoryStoragePath}" Margin="0,6,0,0" FontSize="10"
+                                   Foreground="{StaticResource MutedTextBrush}" TextWrapping="Wrap" />
+                    </StackPanel>
+                </Border>
+
+                <Border Grid.Row="4">
+                    <Border.Style>
+                        <Style TargetType="Border" BasedOn="{StaticResource Card}">
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding HasHistory}" Value="True">
+                                    <Setter Property="Visibility" Value="Collapsed" />
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </Border.Style>
+                    <StackPanel HorizontalAlignment="Center" Margin="20">
+                        <TextBlock Text="Library empty" FontSize="17" FontWeight="SemiBold" HorizontalAlignment="Center" />
+                        <TextBlock Text="Completed downloads appear here and remain recorded after queue cleanup."
+                                   Margin="0,7,0,0" Foreground="{StaticResource MutedTextBrush}" />
+                    </StackPanel>
+                </Border>
+
+                <ListBox Grid.Row="6" ItemsSource="{Binding HistoryItems}" Height="600"
+                         ScrollViewer.VerticalScrollBarVisibility="Auto"
+                         VirtualizingPanel.IsVirtualizing="True"
+                         VirtualizingPanel.VirtualizationMode="Recycling"
+                         AutomationProperties.Name="Completed download history">
+                    <ListBox.ItemTemplate>
+                        <DataTemplate>
+                            <Border Style="{StaticResource Card}" Margin="0,0,0,12">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="12" />
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="8" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel>
+                                        <TextBlock Text="{Binding Title}" FontSize="15" FontWeight="SemiBold"
+                                                   TextTrimming="CharacterEllipsis" />
+                                        <TextBlock Text="{Binding Detail}" Margin="0,5,0,0" FontSize="10"
+                                                   Foreground="{StaticResource MutedTextBrush}" />
+                                        <TextBlock Text="{Binding Destination}" Margin="0,4,0,0" FontSize="9"
+                                                   Foreground="{StaticResource MutedTextBrush}" TextTrimming="CharacterEllipsis" />
+                                    </StackPanel>
+                                    <Button Grid.Column="2" Style="{StaticResource SecondaryButton}" Content="Open folder"
+                                            Command="{Binding RevealCommand}" Padding="12,8" VerticalAlignment="Center" />
+                                    <Button Grid.Column="4" Style="{StaticResource SecondaryButton}" Content="Remove record"
+                                            Command="{Binding RemoveCommand}" Padding="12,8" VerticalAlignment="Center" />
+                                </Grid>
+                            </Border>
+                        </DataTemplate>
+                    </ListBox.ItemTemplate>
+                </ListBox>
+            </Grid>
+        </ScrollViewer>
+
+        <ScrollViewer Grid.Column="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
+                      IsEnabled="{Binding IsMainContentEnabled}"
                       Visibility="{Binding IsQueuePage, Converter={StaticResource BooleanToVisibilityConverter}}">
             <Grid Margin="38,30,38,40" MaxWidth="1020">
                 <Grid.RowDefinitions>
@@ -741,6 +842,13 @@
                                     Click="BrowseButton_OnClick" />
                         </Grid>
 
+                        <TextBlock Text="FILENAME TEMPLATE" Style="{StaticResource FieldLabel}" Margin="0,18,0,6" />
+                        <TextBox Text="{Binding FileNameTemplateText, UpdateSourceTrigger=PropertyChanged}"
+                                 AutomationProperties.Name="Filename template" />
+                        <TextBlock Text="{}Tokens: {title}, {channel}, {videoId}, {quality}, {container}, {index}. Double braces print a literal brace. Default collection names keep their source index."
+                                   Margin="0,6,0,0" FontSize="10" TextWrapping="Wrap"
+                                   Foreground="{StaticResource MutedTextBrush}" />
+
                         <TextBlock Text="MAXIMUM CONCURRENT DOWNLOADS" Style="{StaticResource FieldLabel}" Margin="0,18,0,6" />
                         <ComboBox ItemsSource="{Binding MaxConcurrentDownloadOptions}"
                                   SelectedItem="{Binding SelectedMaxConcurrentDownloads}" Width="160"
@@ -786,7 +894,7 @@
                 <Border Grid.Row="6" Style="{StaticResource Card}">
                     <StackPanel>
                         <TextBlock Text="Privacy and responsibility" FontSize="17" FontWeight="SemiBold" />
-                        <TextBlock Text="Settings and queue state stay in local application data. Media URLs, cookies, signatures, visitor data, and telemetry are not persisted."
+                        <TextBlock Text="Settings, queue state, and completed-output history stay in local application data. Media URLs, cookies, signatures, visitor data, and telemetry are not persisted."
                                    Margin="0,8,0,0" TextWrapping="Wrap" Foreground="{StaticResource MutedTextBrush}" />
                         <TextBlock Text="Download only media you own or have permission to save. TubeForge does not bypass DRM, payment, membership, or access controls."
                                    Margin="0,7,0,0" TextWrapping="Wrap" Foreground="{StaticResource MutedTextBrush}" />
@@ -861,6 +969,9 @@
 
                         <TextBlock Text="QUEUE STATE" Style="{StaticResource FieldLabel}" Margin="0,20,0,5" />
                         <TextBlock Text="{Binding QueueStoragePath}" TextWrapping="Wrap"
+                                   Foreground="{StaticResource MutedTextBrush}" />
+                        <TextBlock Text="LIBRARY HISTORY" Style="{StaticResource FieldLabel}" Margin="0,14,0,5" />
+                        <TextBlock Text="{Binding HistoryStoragePath}" TextWrapping="Wrap"
                                    Foreground="{StaticResource MutedTextBrush}" />
                         <TextBlock Text="SETTINGS" Style="{StaticResource FieldLabel}" Margin="0,14,0,5" />
                         <TextBlock Text="{Binding SettingsStoragePath}" TextWrapping="Wrap"

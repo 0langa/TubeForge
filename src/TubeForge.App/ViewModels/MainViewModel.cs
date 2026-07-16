@@ -12,9 +12,11 @@ using TubeForge.Core.Diagnostics;
 using TubeForge.Core.Errors;
 using TubeForge.Core.Files;
 using TubeForge.Core.Media;
+using TubeForge.Core.Results;
 using TubeForge.Core.Settings;
 using TubeForge.Core.YouTube;
 using TubeForge.Downloads;
+using TubeForge.Downloads.History;
 using TubeForge.Downloads.Queue;
 using TubeForge.YouTube;
 using TubeForge.YouTube.Captions;
@@ -55,11 +57,13 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     private readonly YouTubeCollectionResolver _collectionResolver;
     private readonly ThumbnailDownloadEngine _thumbnailDownloader;
     private readonly DownloadQueueStore _queueStore;
+    private readonly DownloadHistoryStore _historyStore;
     private readonly TubeForgeSettingsStore _settingsStore;
     private readonly DownloadQueueDispatcher _queueDispatcher = new(2);
     private readonly HostRequestGate _hostRequestGate;
     private readonly RateLimitedRequestExecutor _rateLimitedRequests;
     private readonly SemaphoreSlim _queueMutationLock = new(1, 1);
+    private readonly SemaphoreSlim _historyMutationLock = new(1, 1);
     private readonly Dictionary<Guid, QueuedDownloadWork> _preparedQueueWork = [];
     private readonly Dictionary<Guid, CancellationTokenSource> _downloadCancellations = [];
     private readonly HashSet<Guid> _cancelledQueueItems = [];
@@ -99,12 +103,15 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     private FilterOption<AudioCodec>? _selectedAudioCodec;
     private string _selectedAudioProcessing = AudioProcessingChoices[0];
     private DownloadQueueSnapshot _queueSnapshot = new();
+    private DownloadHistorySnapshot _historySnapshot = new();
     private bool _isInitialized;
     private bool _queueUnavailable;
+    private bool _historyUnavailable;
     private string _downloadActionLabel = "Add to queue";
     private AppPage _activePage = AppPage.Download;
     private int _selectedMaxConcurrentDownloads = 2;
     private bool _enableSegmentedTransfers;
+    private string _fileNameTemplate = FileNameTemplate.Default;
     private TubeForgeSettings _settings;
     private bool _showResponsibleUseNotice = true;
     private string _settingsStatus = "Settings stay on this device.";
@@ -153,6 +160,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             "TubeForge");
         applicationDataDirectory = Path.GetFullPath(applicationDataDirectory);
         _queueStore = new DownloadQueueStore(Path.Combine(applicationDataDirectory, "queue.json"));
+        _historyStore = new DownloadHistoryStore(Path.Combine(applicationDataDirectory, "history.json"));
         _settingsStore = new TubeForgeSettingsStore(Path.Combine(applicationDataDirectory, "settings.json"));
         _downloadFolder = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
@@ -187,11 +195,13 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         CancelCommand = new RelayCommand(PauseAll, () => IsDownloading);
         ShowDownloadCommand = new RelayCommand(() => ShowPage(AppPage.Download));
         ShowQueueCommand = new RelayCommand(() => ShowPage(AppPage.Queue));
+        ShowLibraryCommand = new RelayCommand(() => ShowPage(AppPage.Library));
         ShowSettingsCommand = new RelayCommand(() => ShowPage(AppPage.Settings));
         ShowDiagnosticsCommand = new RelayCommand(() => ShowPage(AppPage.Diagnostics));
         SaveSettingsCommand = new AsyncRelayCommand(SaveSettingsAsync);
         AcceptResponsibleUseCommand = new AsyncRelayCommand(AcceptResponsibleUseAsync);
         ClearCompletedCommand = new AsyncRelayCommand(ClearCompletedAsync, () => QueueItems.Any(item => item.Status == DownloadQueueStatus.Completed));
+        ClearHistoryCommand = new AsyncRelayCommand(ClearHistoryAsync, () => HistoryItems.Count > 0 || _historyUnavailable);
     }
 
     public event PropertyChangedEventHandler? PropertyChanged;
@@ -201,6 +211,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     public ObservableCollection<QueueItemViewModel> QueueItems { get; } = [];
 
     public ObservableCollection<CollectionItemViewModel> CollectionItems { get; } = [];
+
+    public ObservableCollection<HistoryItemViewModel> HistoryItems { get; } = [];
 
     public IReadOnlyList<DownloadModeOption> DownloadModes => _downloadModes;
 
@@ -230,6 +242,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
 
     public RelayCommand ShowQueueCommand { get; }
 
+    public RelayCommand ShowLibraryCommand { get; }
+
     public RelayCommand ShowSettingsCommand { get; }
 
     public RelayCommand ShowDiagnosticsCommand { get; }
@@ -239,6 +253,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     public AsyncRelayCommand AcceptResponsibleUseCommand { get; }
 
     public AsyncRelayCommand ClearCompletedCommand { get; }
+
+    public AsyncRelayCommand ClearHistoryCommand { get; }
 
     public IReadOnlyList<int> MaxConcurrentDownloadOptions { get; } = [1, 2, 3, 4];
 
@@ -393,6 +409,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
 
     public bool IsQueuePage => _activePage == AppPage.Queue;
 
+    public bool IsLibraryPage => _activePage == AppPage.Library;
+
     public bool IsSettingsPage => _activePage == AppPage.Settings;
 
     public bool IsDiagnosticsPage => _activePage == AppPage.Diagnostics;
@@ -435,6 +453,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
 
     public string QueueStoragePath => _queueStore.StoragePath;
 
+    public string HistoryStoragePath => _historyStore.StoragePath;
+
     public string SettingsStoragePath => _settingsStore.StoragePath;
 
     public string DiagnosticsExtractionStatus => _diagnosticsExtractionStage;
@@ -444,6 +464,12 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         : $"{_allFormats.Count} direct formats · {Formats.Count} matching outputs";
 
     public bool HasQueueItems => QueueItems.Count > 0;
+
+    public bool HasHistory => HistoryItems.Count > 0;
+
+    public string HistorySummary => HistoryItems.Count == 1
+        ? "1 completed output"
+        : $"{HistoryItems.Count} completed outputs";
 
     public string QueueSummary
     {
@@ -475,6 +501,12 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     {
         get => _enableSegmentedTransfers;
         set => Set(ref _enableSegmentedTransfers, value);
+    }
+
+    public string FileNameTemplateText
+    {
+        get => _fileNameTemplate;
+        set => Set(ref _fileNameTemplate, value);
     }
 
     public double DownloadFraction
@@ -656,6 +688,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             OnPropertyChanged(nameof(SelectedMaxConcurrentDownloads));
             _enableSegmentedTransfers = _settings.EnableSegmentedTransfers;
             OnPropertyChanged(nameof(EnableSegmentedTransfers));
+            _fileNameTemplate = _settings.FileNameTemplate;
+            OnPropertyChanged(nameof(FileNameTemplateText));
             ShowResponsibleUseNotice = !_settings.ResponsibleUseAccepted;
         }
         else
@@ -665,31 +699,55 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             ShowResponsibleUseNotice = true;
         }
 
-        var result = await _queueStore.LoadAsync();
-        if (!result.IsSuccess)
+        var queueResult = await _queueStore.LoadAsync();
+        if (!queueResult.IsSuccess)
         {
             _queueUnavailable = true;
-            ErrorMessage = $"{result.Error!.Message} ({result.Error.Code})";
+            ErrorMessage = $"{queueResult.Error!.Message} ({queueResult.Error.Code})";
             StatusMessage = "Queue recovery unavailable";
-            return;
         }
-
-        _queueSnapshot = result.Value;
-        RebuildQueueItems();
-        var recoverableCount = _queueSnapshot.Items.Count(item =>
-            item.Status is DownloadQueueStatus.Queued or DownloadQueueStatus.Paused);
-        if (recoverableCount > 0)
+        else
         {
-            StatusMessage = recoverableCount == 1
-                ? "Recovered 1 interrupted download"
-                : $"Recovered {recoverableCount} interrupted downloads";
+            _queueSnapshot = queueResult.Value;
+            RebuildQueueItems();
+            var recoverableCount = _queueSnapshot.Items.Count(item =>
+                item.Status is DownloadQueueStatus.Queued or DownloadQueueStatus.Paused);
+            if (recoverableCount > 0)
+            {
+                StatusMessage = recoverableCount == 1
+                    ? "Recovered 1 interrupted download"
+                    : $"Recovered {recoverableCount} interrupted downloads";
+            }
         }
 
-        PumpQueue();
+        var historyResult = await _historyStore.LoadAsync();
+        if (!historyResult.IsSuccess)
+        {
+            _historyUnavailable = true;
+            ErrorMessage = $"{historyResult.Error!.Message} ({historyResult.Error.Code})";
+            NotifyHistoryProperties();
+        }
+        else
+        {
+            _historySnapshot = historyResult.Value;
+            RebuildHistoryItems();
+        }
+
+        if (!_queueUnavailable)
+        {
+            PumpQueue();
+        }
     }
 
     private async Task SaveSettingsAsync()
     {
+        if (!FileNameTemplate.IsValid(FileNameTemplateText))
+        {
+            ErrorMessage = "The filename template contains an unknown token or unmatched brace. (FileName.InvalidTemplate)";
+            SettingsStatus = "Filename template was not saved.";
+            return;
+        }
+
         TubeForgeSettings next;
         try
         {
@@ -702,6 +760,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             {
                 DownloadFolder = Path.GetFullPath(DownloadFolder),
                 MaximumConcurrentDownloads = SelectedMaxConcurrentDownloads,
+                FileNameTemplate = FileNameTemplateText,
                 EnableSegmentedTransfers = EnableSegmentedTransfers
             };
         }
@@ -727,6 +786,12 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
 
     private async Task AcceptResponsibleUseAsync()
     {
+        if (!FileNameTemplate.IsValid(FileNameTemplateText))
+        {
+            ErrorMessage = "The filename template contains an unknown token or unmatched brace. (FileName.InvalidTemplate)";
+            return;
+        }
+
         TubeForgeSettings accepted;
         try
         {
@@ -739,6 +804,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             {
                 DownloadFolder = Path.GetFullPath(DownloadFolder),
                 MaximumConcurrentDownloads = SelectedMaxConcurrentDownloads,
+                FileNameTemplate = FileNameTemplateText,
                 EnableSegmentedTransfers = EnableSegmentedTransfers,
                 ResponsibleUseAccepted = true
             };
@@ -772,6 +838,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         _activePage = page;
         OnPropertyChanged(nameof(IsDownloadPage));
         OnPropertyChanged(nameof(IsQueuePage));
+        OnPropertyChanged(nameof(IsLibraryPage));
         OnPropertyChanged(nameof(IsSettingsPage));
         OnPropertyChanged(nameof(IsDiagnosticsPage));
     }
@@ -919,15 +986,38 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         var format = selection.Format;
         try
         {
+            var renderedName = RenderFileName(_metadata, selection, index: null, indexWidth: 2);
+            if (!renderedName.IsSuccess)
+            {
+                ErrorMessage = $"{renderedName.Error!.Message} ({renderedName.Error.Code})";
+                ProgressDetail = renderedName.Error.TechnicalDetail ?? string.Empty;
+                StatusMessage = "Download not queued";
+                return;
+            }
+
             var destination = FileNamePolicy.AvailablePath(
                 DownloadFolder,
-                _metadata.Title,
+                renderedName.Value,
                 selection.RequiresMuxing
                     ? FormatDisplay.Extension(format.Container)
                     : FormatDisplay.OutputExtension(format),
                 path => File.Exists(path) ||
                         File.Exists(path + ".part") ||
-                        _queueSnapshot.Items.Any(item => item.DestinationPath.Equals(path, StringComparison.OrdinalIgnoreCase)));
+                        _queueSnapshot.Items.Any(item => item.DestinationPath.Equals(path, StringComparison.OrdinalIgnoreCase)) ||
+                        _historySnapshot.Entries.Any(item => item.DestinationPath.Equals(path, StringComparison.OrdinalIgnoreCase)));
+            var duplicate = DownloadDuplicateDetector.Find(
+                SelectionIdentity(_metadata, selection),
+                destination,
+                _queueSnapshot.Items,
+                _historySnapshot.Entries);
+            if (duplicate is not null)
+            {
+                ErrorMessage = $"This exact output is already queued or recorded in Library. Remove that record to download it again. (Queue.DuplicateOutput)";
+                ProgressDetail = DuplicateDescription(duplicate.Kind);
+                StatusMessage = "Duplicate not queued";
+                return;
+            }
+
             var queueItem = CreateQueueItem(_metadata, selection, destination);
             var queueError = await UpsertQueueItemAsync(queueItem);
             if (queueError is not null)
@@ -1024,15 +1114,6 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                 }
 
                 var metadata = resolved.Value.Metadata;
-                if (_queueSnapshot.Items.Any(existing =>
-                        existing.VideoId.Equals(metadata.Id.Value, StringComparison.Ordinal) &&
-                        existing.Status != DownloadQueueStatus.Cancelled))
-                {
-                    card.SetStatus("Skipped · already queued");
-                    skipped++;
-                    continue;
-                }
-
                 var selection = BestCompleteFileSelection(metadata.Formats);
                 if (selection is null)
                 {
@@ -1044,10 +1125,17 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                 try
                 {
                     var position = card.Item.Index ?? itemIndex + 1;
-                    var stem = $"{position.ToString($"D{indexWidth}")} - {metadata.Title}";
+                    var renderedName = RenderFileName(metadata, selection, position, indexWidth);
+                    if (!renderedName.IsSuccess)
+                    {
+                        card.SetStatus($"Failed · {renderedName.Error!.Code}");
+                        failed++;
+                        continue;
+                    }
+
                     var destination = FileNamePolicy.AvailablePath(
                         DownloadFolder,
-                        stem,
+                        renderedName.Value,
                         selection.RequiresMuxing
                             ? FormatDisplay.Extension(selection.Format.Container)
                             : FormatDisplay.OutputExtension(selection.Format),
@@ -1055,7 +1143,22 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                                 File.Exists(path + ".part") ||
                                 _queueSnapshot.Items.Any(existing => existing.DestinationPath.Equals(
                                     path,
+                                    StringComparison.OrdinalIgnoreCase)) ||
+                                _historySnapshot.Entries.Any(existing => existing.DestinationPath.Equals(
+                                    path,
                                     StringComparison.OrdinalIgnoreCase)));
+                    var duplicate = DownloadDuplicateDetector.Find(
+                        SelectionIdentity(metadata, selection),
+                        destination,
+                        _queueSnapshot.Items,
+                        _historySnapshot.Entries);
+                    if (duplicate is not null)
+                    {
+                        card.SetStatus($"Skipped · {DuplicateDescription(duplicate.Kind)}");
+                        skipped++;
+                        continue;
+                    }
+
                     var queueItem = CreateQueueItem(metadata, selection, destination);
                     var queueError = await UpsertQueueItemAsync(queueItem, cancellationToken);
                     if (queueError is not null)
@@ -1408,6 +1511,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                 DownloadQueueStatus.Completed,
                 error: null,
                 completedBytes);
+            await RecordHistoryAsync(work, completedBytes, CancellationToken.None);
             StatusMessage = "Completed: " + Path.GetFileName(work.Destination);
         }
         catch (OperationCanceledException)
@@ -1628,6 +1732,80 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         await RemoveQueueItemsAsync(completedIds);
     }
 
+    private async Task RecordHistoryAsync(
+        QueuedDownloadWork work,
+        long bytesWritten,
+        CancellationToken cancellationToken)
+    {
+        var entry = new DownloadHistoryEntry
+        {
+            Id = Guid.NewGuid(),
+            VideoId = work.Metadata.Id.Value,
+            SourceIdentity = SelectionIdentity(work.Metadata, work.Selection),
+            DisplayTitle = work.Metadata.Title,
+            DestinationPath = work.Destination,
+            BytesWritten = bytesWritten,
+            CompletedAtUtc = DateTimeOffset.UtcNow
+        };
+        await _historyMutationLock.WaitAsync(cancellationToken);
+        try
+        {
+            var entries = _historySnapshot.Entries
+                .Where(existing =>
+                    !existing.SourceIdentity.Equals(entry.SourceIdentity, StringComparison.Ordinal) &&
+                    !existing.DestinationPath.Equals(entry.DestinationPath, StringComparison.OrdinalIgnoreCase))
+                .Prepend(entry)
+                .Take(DownloadHistoryStore.MaximumEntries)
+                .ToArray();
+            var next = _historySnapshot with { Entries = entries };
+            var result = await _historyStore.SaveAsync(next, cancellationToken);
+            if (!result.IsSuccess)
+            {
+                ErrorMessage = $"Download completed, but Library history could not be saved. ({result.Error!.Code})";
+                return;
+            }
+
+            _historySnapshot = next;
+            _historyUnavailable = false;
+            RebuildHistoryItems();
+        }
+        finally
+        {
+            _historyMutationLock.Release();
+        }
+    }
+
+    private async Task RemoveHistoryItemAsync(Guid itemId)
+    {
+        await SaveHistoryEntriesAsync(_historySnapshot.Entries.Where(entry => entry.Id != itemId).ToArray());
+    }
+
+    private async Task ClearHistoryAsync() => await SaveHistoryEntriesAsync([]);
+
+    private async Task SaveHistoryEntriesAsync(IReadOnlyList<DownloadHistoryEntry> entries)
+    {
+        await _historyMutationLock.WaitAsync();
+        try
+        {
+            var next = new DownloadHistorySnapshot { Entries = entries };
+            var result = await _historyStore.SaveAsync(next);
+            if (!result.IsSuccess)
+            {
+                ErrorMessage = $"{result.Error!.Message} ({result.Error.Code})";
+                return;
+            }
+
+            _historySnapshot = next;
+            _historyUnavailable = false;
+            RebuildHistoryItems();
+            StatusMessage = entries.Count == 0 ? "Library history cleared" : "Library history updated";
+        }
+        finally
+        {
+            _historyMutationLock.Release();
+        }
+    }
+
     private async Task RemoveQueueItemsAsync(IReadOnlyCollection<Guid> itemIds)
     {
         if (itemIds.Count == 0 || _queueUnavailable)
@@ -1680,6 +1858,17 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         NotifyQueueProperties();
     }
 
+    private void RebuildHistoryItems()
+    {
+        HistoryItems.Clear();
+        foreach (var entry in _historySnapshot.Entries.OrderByDescending(entry => entry.CompletedAtUtc))
+        {
+            HistoryItems.Add(new HistoryItemViewModel(entry, RevealDestination, RemoveHistoryItemAsync));
+        }
+
+        NotifyHistoryProperties();
+    }
+
     private void RefreshQueueItem(DownloadQueueItem item)
     {
         var existing = QueueItems.FirstOrDefault(candidate => candidate.Id == item.Id);
@@ -1714,6 +1903,13 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         OnPropertyChanged(nameof(QueueSummary));
         ClearCompletedCommand.RaiseCanExecuteChanged();
         CancelCommand.RaiseCanExecuteChanged();
+    }
+
+    private void NotifyHistoryProperties()
+    {
+        OnPropertyChanged(nameof(HasHistory));
+        OnPropertyChanged(nameof(HistorySummary));
+        ClearHistoryCommand.RaiseCanExecuteChanged();
     }
 
     private void RevealDestination(string destination)
@@ -1796,6 +1992,43 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             metadata.Id,
             selection.Format.FormatId,
             selection.AudioFormat?.FormatId);
+
+    private Result<string> RenderFileName(
+        VideoMetadata metadata,
+        FormatItemViewModel selection,
+        int? index,
+        int indexWidth)
+    {
+        var format = selection.Format;
+        var quality = format.HasVideo
+            ? format.Height is > 0 ? $"{format.Height}p" : "video"
+            : format.Bitrate is > 0 ? $"{Math.Round(format.Bitrate.Value / 1000d):0}kbps" : "audio";
+        var extension = selection.RequiresMuxing
+            ? FormatDisplay.Extension(format.Container)
+            : FormatDisplay.OutputExtension(format);
+        var template = index is not null && FileNameTemplateText == FileNameTemplate.Default
+            ? "{index} - {title}"
+            : FileNameTemplateText;
+        return FileNameTemplate.Render(template, new FileNameTemplateContext
+        {
+            Title = metadata.Title,
+            Channel = metadata.Channel,
+            VideoId = metadata.Id.Value,
+            Quality = quality,
+            Container = extension.TrimStart('.'),
+            Index = index,
+            IndexWidth = indexWidth
+        });
+    }
+
+    private static string DuplicateDescription(DownloadDuplicateKind kind) => kind switch
+    {
+        DownloadDuplicateKind.QueuedOutput => "same output already queued",
+        DownloadDuplicateKind.CompletedOutput => "same output already in Library",
+        DownloadDuplicateKind.QueueDestination => "destination already queued",
+        DownloadDuplicateKind.HistoryDestination => "destination already in Library",
+        _ => "duplicate output"
+    };
 
     private static long? CombinedLength(FormatItemViewModel selection)
     {
@@ -2527,6 +2760,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     {
         Download,
         Queue,
+        Library,
         Settings,
         Diagnostics
     }

@@ -16,6 +16,7 @@ public static class TubeForgeSettingsStoreTests
         var save = await store.SaveAsync(defaults with
         {
             MaximumConcurrentDownloads = 4,
+            FileNameTemplate = "{channel} - {title} [{quality}]",
             EnableSegmentedTransfers = true,
             ResponsibleUseAccepted = true
         });
@@ -26,6 +27,7 @@ public static class TubeForgeSettingsStoreTests
         Assert.True(save.IsSuccess);
         Assert.True(loaded.IsSuccess);
         Assert.Equal(4, loaded.Value.MaximumConcurrentDownloads);
+        Assert.Equal("{channel} - {title} [{quality}]", loaded.Value.FileNameTemplate);
         Assert.True(loaded.Value.EnableSegmentedTransfers);
         Assert.True(loaded.Value.ResponsibleUseAccepted);
     }
@@ -41,6 +43,10 @@ public static class TubeForgeSettingsStoreTests
         {
             DownloadFolder = Path.GetFullPath(directory.Path) + "\nprivate"
         });
+        var invalidTemplate = await store.SaveAsync(Settings(directory.Path) with
+        {
+            FileNameTemplate = "{unknown}"
+        });
         await File.WriteAllTextAsync(path, "{ malformed");
 
         var corrupt = await store.LoadAsync(Settings(directory.Path));
@@ -49,6 +55,8 @@ public static class TubeForgeSettingsStoreTests
         Assert.Equal("Settings.InvalidState", invalid.Error?.Code);
         Assert.False(unsafePath.IsSuccess);
         Assert.Equal("Settings.InvalidState", unsafePath.Error?.Code);
+        Assert.False(invalidTemplate.IsSuccess);
+        Assert.Equal("Settings.InvalidState", invalidTemplate.Error?.Code);
         Assert.False(corrupt.IsSuccess);
         Assert.Equal("Settings.Corrupt", corrupt.Error?.Code);
         Assert.Equal("{ malformed", await File.ReadAllTextAsync(path));

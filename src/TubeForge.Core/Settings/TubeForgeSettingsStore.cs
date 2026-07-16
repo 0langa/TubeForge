@@ -1,5 +1,6 @@
 using System.Text.Json;
 using TubeForge.Core.Errors;
+using TubeForge.Core.Files;
 using TubeForge.Core.Results;
 
 namespace TubeForge.Core.Settings;
@@ -169,6 +170,7 @@ public sealed class TubeForgeSettingsStore
         }
 
         if (settings.MaximumConcurrentDownloads is < 1 or > 4 ||
+            !FileNameTemplate.IsValid(settings.FileNameTemplate) ||
             string.IsNullOrWhiteSpace(settings.DownloadFolder) ||
             settings.DownloadFolder.Length > 32_767 ||
             settings.DownloadFolder.Any(char.IsControl))

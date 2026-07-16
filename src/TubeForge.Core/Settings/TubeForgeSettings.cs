@@ -10,6 +10,8 @@ public sealed record TubeForgeSettings
 
     public int MaximumConcurrentDownloads { get; init; } = 2;
 
+    public string FileNameTemplate { get; init; } = Files.FileNameTemplate.Default;
+
     public bool EnableSegmentedTransfers { get; init; }
 
     public bool ResponsibleUseAccepted { get; init; }
