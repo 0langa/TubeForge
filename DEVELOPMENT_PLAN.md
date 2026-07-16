@@ -361,12 +361,13 @@ Exit: compatible adaptive MP4 video and audio combine into a seekable file witho
 
 ### M8 — Advanced content features
 
-- [ ] Playlist/channel URL parsing and paged enumeration.
-- [ ] Per-item selection, naming templates, archive/history, and duplicate detection.
+- [x] Playlist/channel URL parsing and bounded paged enumeration.
+- [x] Per-item selection, indexed naming, and in-queue duplicate suppression.
+- [ ] Custom naming templates, persistent archive/history, and full duplicate detection.
 - [x] Captions: language selection, manual/automatic distinction, SRT/VTT conversion.
 - [x] Thumbnails and optional metadata sidecars.
 - [x] Chapters: bounded watch-page extraction and metadata sidecar export.
-- [ ] Playlist indexing and ordering metadata.
+- [x] Playlist indexing and ordering metadata.
 - [ ] Shorts/live metadata; completed live streams before active-live capture.
 - [ ] Rate-limit-aware bulk scheduling and per-host concurrency.
 
@@ -462,6 +463,7 @@ Order for current work:
 - 2026-07-16: Caption downloads are bounded to the trusted YouTube timed-text endpoint, requested as WebVTT, validated before publication, and atomically saved as normalized VTT or safely converted SRT. Manual and auto-generated tracks remain explicit in the UI and filename.
 - 2026-07-16: Thumbnail sidecars accept only bounded JPEG, PNG, or WebP bytes from trusted YouTube image hosts and publish atomically. JSON sidecars contain stable metadata and format summaries while excluding ephemeral signed media and caption URLs.
 - 2026-07-16: Chapter metadata comes only from bounded description-chapter marker structures, is sorted and deduplicated by start time, and appears in stable JSON sidecars without affecting download eligibility.
+- 2026-07-16: Enumerate public playlists and channel video tabs from bounded first-party page data and first-party continuation requests without API keys. Accept legacy renderer and current lockup shapes, deduplicate by video ID, preserve playlist indexes, cap UI analysis at 1,000 items, and treat consent preference as a fixed non-authentication request header.
 
 ## 15. Plan maintenance
 

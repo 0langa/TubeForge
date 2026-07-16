@@ -13,5 +13,11 @@
   </ItemGroup>
   <ItemGroup>
     <None Include="Fixtures/**" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="../../src/TubeForge.App/App.xaml"
+          Link="Fixtures/App.xaml"
+          CopyToOutputDirectory="PreserveNewest" />
+    <None Include="../../src/TubeForge.App/MainWindow.xaml"
+          Link="Fixtures/MainWindow.xaml"
+          CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

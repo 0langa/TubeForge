@@ -142,10 +142,11 @@
                             <ColumnDefinition Width="130" />
                         </Grid.ColumnDefinitions>
                         <TextBox x:Name="UrlTextBox" Grid.Column="0" Text="{Binding UrlText, UpdateSourceTrigger=PropertyChanged}"
-                                 ToolTip="YouTube video URL" AutomationProperties.Name="YouTube video URL"
+                                 ToolTip="YouTube video, playlist, or channel URL"
+                                 AutomationProperties.Name="YouTube video, playlist, or channel URL"
                                  KeyDown="UrlTextBox_OnKeyDown" />
                         <Button Grid.Column="2" Style="{StaticResource PrimaryButton}" Content="Analyze"
-                                Command="{Binding AnalyzeCommand}" AutomationProperties.Name="Analyze video URL" />
+                                Command="{Binding AnalyzeCommand}" AutomationProperties.Name="Analyze YouTube URL" />
                     </Grid>
                 </Border>
 
@@ -425,6 +426,105 @@
                         </StackPanel>
                     </Border>
                 </Grid>
+
+                <Border Grid.Row="6" Style="{StaticResource Card}"
+                        Visibility="{Binding HasCollection, Converter={StaticResource BooleanToVisibilityConverter}}">
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="16" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="14" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="14" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="14" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+
+                        <Grid Grid.Row="0">
+                            <StackPanel>
+                                <TextBlock Text="{Binding CollectionTitle}" FontSize="20" FontWeight="SemiBold"
+                                           TextWrapping="Wrap" />
+                                <TextBlock Text="{Binding CollectionSummary}" Margin="0,5,0,0" FontSize="11"
+                                           Foreground="{StaticResource MutedTextBrush}" />
+                            </StackPanel>
+                            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Bottom">
+                                <Button Style="{StaticResource SecondaryButton}" Content="Select all" Padding="13,8"
+                                        Command="{Binding SelectAllCollectionCommand}" />
+                                <Button Style="{StaticResource SecondaryButton}" Content="Select none" Padding="13,8"
+                                        Margin="8,0,0,0" Command="{Binding SelectNoneCollectionCommand}" />
+                            </StackPanel>
+                        </Grid>
+
+                        <Border Grid.Row="2" Background="#0E1A2B" BorderBrush="#29405F" BorderThickness="1"
+                                CornerRadius="8" Padding="12,10">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="14" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="10" />
+                                    <ColumnDefinition Width="86" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Text="DESTINATION" Style="{StaticResource FieldLabel}" VerticalAlignment="Center" />
+                                <TextBox Grid.Column="2" Text="{Binding DownloadFolder, UpdateSourceTrigger=PropertyChanged}"
+                                         AutomationProperties.Name="Collection download folder" />
+                                <Button Grid.Column="4" Style="{StaticResource SecondaryButton}" Content="Browse"
+                                        Click="BrowseButton_OnClick" />
+                            </Grid>
+                        </Border>
+
+                        <ListBox Grid.Row="4" ItemsSource="{Binding CollectionItems}" Height="520"
+                                 ScrollViewer.VerticalScrollBarVisibility="Auto"
+                                 AutomationProperties.Name="Collection videos">
+                            <ListBox.ItemTemplate>
+                                <DataTemplate>
+                                    <Grid Margin="3,4">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="42" />
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="16" />
+                                            <ColumnDefinition Width="220" />
+                                        </Grid.ColumnDefinitions>
+                                        <CheckBox IsChecked="{Binding IsSelected}" VerticalAlignment="Center"
+                                                  AutomationProperties.Name="Select collection video" />
+                                        <TextBlock Grid.Column="1" Text="{Binding IndexLabel}" HorizontalAlignment="Center"
+                                                   VerticalAlignment="Center" FontWeight="SemiBold"
+                                                   Foreground="{StaticResource AccentBrush}" />
+                                        <StackPanel Grid.Column="2" VerticalAlignment="Center">
+                                            <TextBlock Text="{Binding Title}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                                            <TextBlock Text="{Binding Detail}" Margin="0,4,0,0" FontSize="10"
+                                                       Foreground="{StaticResource MutedTextBrush}" />
+                                        </StackPanel>
+                                        <TextBlock Grid.Column="4" Text="{Binding Status}" VerticalAlignment="Center"
+                                                   TextAlignment="Right" TextWrapping="Wrap" FontSize="10"
+                                                   Foreground="{StaticResource MutedTextBrush}" />
+                                    </Grid>
+                                </DataTemplate>
+                            </ListBox.ItemTemplate>
+                        </ListBox>
+
+                        <Border Grid.Row="6" Background="#111A2A" CornerRadius="8" Padding="12,9">
+                            <TextBlock Text="Best complete file per video: highest compatible video + audio, MP4 preferred at equal quality. Filenames include collection index."
+                                       TextWrapping="Wrap" FontSize="10" Foreground="#A8B7CE" />
+                        </Border>
+
+                        <Grid Grid.Row="8">
+                            <StackPanel VerticalAlignment="Center">
+                                <TextBlock Text="{Binding CollectionSelectionSummary}" FontSize="11"
+                                           Foreground="{StaticResource MutedTextBrush}" />
+                                <TextBlock Text="{Binding ProgressDetail}" Margin="0,3,0,0" FontSize="10"
+                                           Foreground="{StaticResource MutedTextBrush}" />
+                            </StackPanel>
+                            <Button Style="{StaticResource PrimaryButton}" Content="Add selected to queue"
+                                    HorizontalAlignment="Right" Width="190"
+                                    Command="{Binding QueueCollectionCommand}"
+                                    AutomationProperties.Name="Add selected collection videos to queue" />
+                        </Grid>
+                    </Grid>
+                </Border>
 
                 <Border Grid.Row="8" Style="{StaticResource Card}"
                         Visibility="{Binding IsAnalyzing, Converter={StaticResource BooleanToVisibilityConverter}}">

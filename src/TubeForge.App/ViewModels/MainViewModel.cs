@@ -18,6 +18,7 @@ using TubeForge.Downloads;
 using TubeForge.Downloads.Queue;
 using TubeForge.YouTube;
 using TubeForge.YouTube.Captions;
+using TubeForge.YouTube.Collections;
 using TubeForge.YouTube.Sidecars;
 
 namespace TubeForge.App.ViewModels;
@@ -48,6 +49,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     private readonly DirectDownloadEngine _downloader;
     private readonly AdaptiveDownloadEngine _adaptiveDownloader;
     private readonly CaptionDownloadEngine _captionDownloader;
+    private readonly YouTubeCollectionResolver _collectionResolver;
     private readonly ThumbnailDownloadEngine _thumbnailDownloader;
     private readonly DownloadQueueStore _queueStore;
     private readonly TubeForgeSettingsStore _settingsStore;
@@ -108,6 +110,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     private CaptionFormatOption _selectedCaptionFormat = CaptionOutputChoices[0];
     private bool _isSavingCaption;
     private bool _isSavingSidecar;
+    private YouTubeCollectionResult? _collection;
 
     public MainViewModel() : this(applicationDataDirectory: null)
     {
@@ -128,6 +131,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         _downloader = new DirectDownloadEngine(_httpClient);
         _adaptiveDownloader = new AdaptiveDownloadEngine(_downloader);
         _captionDownloader = new CaptionDownloadEngine(_httpClient);
+        _collectionResolver = new YouTubeCollectionResolver(_httpClient);
         var sidecarHandler = new SocketsHttpHandler
         {
             AutomaticDecompression = DecompressionMethods.All,
@@ -163,6 +167,15 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         SaveMetadataCommand = new AsyncRelayCommand(
             SaveMetadataAsync,
             () => !ShowResponsibleUseNotice && !IsAnalyzing && !IsSavingSidecar && _metadata is not null);
+        SelectAllCollectionCommand = new RelayCommand(
+            () => SetCollectionSelection(isSelected: true),
+            () => !IsAnalyzing && CollectionItems.Any(item => !item.IsSelected));
+        SelectNoneCollectionCommand = new RelayCommand(
+            () => SetCollectionSelection(isSelected: false),
+            () => !IsAnalyzing && CollectionItems.Any(item => item.IsSelected));
+        QueueCollectionCommand = new AsyncRelayCommand(
+            QueueSelectedCollectionAsync,
+            () => !ShowResponsibleUseNotice && !IsAnalyzing && CollectionItems.Any(item => item.IsSelected));
         CancelAnalysisCommand = new RelayCommand(CancelAnalysis, () => IsAnalyzing);
         CancelCommand = new RelayCommand(PauseAll, () => IsDownloading);
         ShowDownloadCommand = new RelayCommand(() => ShowPage(AppPage.Download));
@@ -180,6 +193,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
 
     public ObservableCollection<QueueItemViewModel> QueueItems { get; } = [];
 
+    public ObservableCollection<CollectionItemViewModel> CollectionItems { get; } = [];
+
     public IReadOnlyList<DownloadModeOption> DownloadModes => _downloadModes;
 
     public IReadOnlyList<string> AudioProcessingOptions => AudioProcessingChoices;
@@ -193,6 +208,12 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     public AsyncRelayCommand SaveThumbnailCommand { get; }
 
     public AsyncRelayCommand SaveMetadataCommand { get; }
+
+    public RelayCommand SelectAllCollectionCommand { get; }
+
+    public RelayCommand SelectNoneCollectionCommand { get; }
+
+    public AsyncRelayCommand QueueCollectionCommand { get; }
 
     public RelayCommand CancelCommand { get; }
 
@@ -264,6 +285,18 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     public bool HasError => !string.IsNullOrWhiteSpace(ErrorMessage);
 
     public bool HasVideo => _metadata is not null;
+
+    public bool HasCollection => _collection is not null;
+
+    public string CollectionTitle => _collection?.Title ?? string.Empty;
+
+    public string CollectionSummary => _collection is null
+        ? string.Empty
+        : $"{CollectionItems.Count} videos · {_collection.PagesRead} pages" +
+          (_collection.IsTruncated ? " · bounded result" : string.Empty);
+
+    public string CollectionSelectionSummary =>
+        $"{CollectionItems.Count(item => item.IsSelected)} of {CollectionItems.Count} selected";
 
     public IReadOnlyList<CaptionTrackOption> CaptionTracks
     {
@@ -740,6 +773,13 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     {
         CancelAnalysis();
         ClearAnalysis();
+        var collectionReference = YouTubeCollectionUrlParser.Parse(UrlText);
+        if (collectionReference.IsSuccess)
+        {
+            await AnalyzeCollectionAsync(collectionReference.Value);
+            return;
+        }
+
         var parsed = YouTubeUrlParser.ParseVideoId(UrlText);
         if (!parsed.IsSuccess)
         {
@@ -808,6 +848,52 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         }
     }
 
+    private async Task AnalyzeCollectionAsync(YouTubeCollectionReference source)
+    {
+        _analysisCancellation = new CancellationTokenSource();
+        IsAnalyzing = true;
+        StatusMessage = source.Kind == YouTubeCollectionKind.Playlist
+            ? "Enumerating playlist…"
+            : "Enumerating channel videos…";
+        try
+        {
+            var result = await _collectionResolver.ResolveAsync(
+                source,
+                maximumItems: 1_000,
+                _analysisCancellation.Token);
+            if (!result.IsSuccess)
+            {
+                _diagnosticsExtractionStage = "CollectionResolutionFailed";
+                OnPropertyChanged(nameof(DiagnosticsExtractionStatus));
+                ErrorMessage = $"{result.Error!.Message} ({result.Error.Code})";
+                StatusMessage = "Collection analysis failed";
+                return;
+            }
+
+            _collection = result.Value;
+            foreach (var item in _collection.Items)
+            {
+                CollectionItems.Add(new CollectionItemViewModel(item, CollectionSelectionChanged));
+            }
+
+            _diagnosticsExtractionStage = "CollectionResolved";
+            OnPropertyChanged(nameof(DiagnosticsExtractionStatus));
+            OnPropertyChanged(nameof(HasCollection));
+            OnPropertyChanged(nameof(CollectionTitle));
+            OnPropertyChanged(nameof(CollectionSummary));
+            OnPropertyChanged(nameof(CollectionSelectionSummary));
+            StatusMessage = CollectionItems.Count > 0
+                ? "Choose collection items to queue"
+                : "Collection contains no downloadable video entries";
+            ProgressDetail = CollectionSummary;
+            RefreshCommands();
+        }
+        finally
+        {
+            IsAnalyzing = false;
+        }
+    }
+
     public async Task DownloadAsync()
     {
         if (_metadata is null || SelectedFormat is null)
@@ -856,6 +942,160 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             ProgressDetail = exception.GetType().Name;
             StatusMessage = "Download not queued";
         }
+    }
+
+    private async Task QueueSelectedCollectionAsync()
+    {
+        if (_collection is null)
+        {
+            return;
+        }
+
+        var selected = CollectionItems.Where(item => item.IsSelected).ToArray();
+        if (selected.Length == 0)
+        {
+            return;
+        }
+
+        await InitializeAsync();
+        CancelAnalysis();
+        _analysisCancellation = new CancellationTokenSource();
+        var cancellationToken = _analysisCancellation.Token;
+        IsAnalyzing = true;
+        ErrorMessage = string.Empty;
+        var queued = 0;
+        var skipped = 0;
+        var failed = 0;
+        var indexWidth = Math.Max(2, CollectionItems.Count.ToString().Length);
+        try
+        {
+            for (var itemIndex = 0; itemIndex < selected.Length; itemIndex++)
+            {
+                if (cancellationToken.IsCancellationRequested)
+                {
+                    break;
+                }
+
+                var card = selected[itemIndex];
+                StatusMessage = $"Preparing collection item {itemIndex + 1} of {selected.Length}…";
+                card.SetStatus("Resolving streams…");
+                var resolved = await _resolver.ResolveAsync(card.Item.VideoId, cancellationToken);
+                if (!resolved.IsSuccess)
+                {
+                    if (cancellationToken.IsCancellationRequested)
+                    {
+                        card.SetStatus("Cancelled");
+                        break;
+                    }
+
+                    card.SetStatus($"Failed · {resolved.Error!.Code}");
+                    failed++;
+                    continue;
+                }
+
+                var metadata = resolved.Value.Metadata;
+                if (_queueSnapshot.Items.Any(existing =>
+                        existing.VideoId.Equals(metadata.Id.Value, StringComparison.Ordinal) &&
+                        existing.Status != DownloadQueueStatus.Cancelled))
+                {
+                    card.SetStatus("Skipped · already queued");
+                    skipped++;
+                    continue;
+                }
+
+                var selection = BestCompleteFileSelection(metadata.Formats);
+                if (selection is null)
+                {
+                    card.SetStatus("Failed · no complete output");
+                    failed++;
+                    continue;
+                }
+
+                try
+                {
+                    var position = card.Item.Index ?? itemIndex + 1;
+                    var stem = $"{position.ToString($"D{indexWidth}")} - {metadata.Title}";
+                    var destination = FileNamePolicy.AvailablePath(
+                        DownloadFolder,
+                        stem,
+                        selection.RequiresMuxing
+                            ? FormatDisplay.Extension(selection.Format.Container)
+                            : FormatDisplay.OutputExtension(selection.Format),
+                        path => File.Exists(path) ||
+                                File.Exists(path + ".part") ||
+                                _queueSnapshot.Items.Any(existing => existing.DestinationPath.Equals(
+                                    path,
+                                    StringComparison.OrdinalIgnoreCase)));
+                    var queueItem = CreateQueueItem(metadata, selection, destination);
+                    var queueError = await UpsertQueueItemAsync(queueItem, cancellationToken);
+                    if (queueError is not null)
+                    {
+                        card.SetStatus($"Failed · {queueError.Code}");
+                        failed++;
+                        continue;
+                    }
+
+                    _preparedQueueWork[queueItem.Id] = new QueuedDownloadWork(metadata, selection, destination);
+                    card.SetStatus($"Queued · {Path.GetFileName(destination)}");
+                    queued++;
+                    PumpQueue();
+                }
+                catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or
+                                                  ArgumentException or NotSupportedException)
+                {
+                    card.SetStatus($"Failed · {exception.GetType().Name}");
+                    failed++;
+                }
+            }
+
+            StatusMessage = cancellationToken.IsCancellationRequested
+                ? "Collection queue preparation cancelled"
+                : $"Queued {queued} collection items";
+            ProgressDetail = $"{queued} queued · {skipped} skipped · {failed} failed";
+            if (failed > 0)
+            {
+                ErrorMessage = "Some collection items could not be prepared. Review item statuses. (Collection.PartialFailure)";
+            }
+        }
+        finally
+        {
+            IsAnalyzing = false;
+        }
+    }
+
+    private static FormatItemViewModel? BestCompleteFileSelection(IReadOnlyList<StreamFormat> formats)
+    {
+        var audio = formats
+            .Where(format => format.Kind == StreamKind.AudioOnly)
+            .OrderByDescending(format => format.Bitrate ?? 0)
+            .ThenByDescending(format => format.AudioSampleRate ?? 0)
+            .ThenBy(format => format.FormatId)
+            .ToArray();
+        var adaptiveVideos = formats
+            .Where(format => format.Kind == StreamKind.VideoOnly &&
+                             audio.Any(candidate => AdaptiveFormatSelector.AreMuxCompatible(format, candidate)))
+            .OrderByDescending(format => format.Height ?? 0)
+            .ThenByDescending(format => format.FramesPerSecond ?? 0)
+            .ThenByDescending(format => format.IsHdr)
+            .ThenByDescending(format => format.Container == MediaContainer.Mp4)
+            .ThenByDescending(format => format.Bitrate ?? 0)
+            .ThenBy(format => format.FormatId);
+        foreach (var video in adaptiveVideos)
+        {
+            var companion = audio.First(candidate => AdaptiveFormatSelector.AreMuxCompatible(video, candidate));
+            return new FormatItemViewModel(video, companion);
+        }
+
+        var progressive = formats
+            .Where(format => format.Kind == StreamKind.Progressive)
+            .OrderByDescending(format => format.Height ?? 0)
+            .ThenByDescending(format => format.FramesPerSecond ?? 0)
+            .ThenByDescending(format => format.IsHdr)
+            .ThenByDescending(format => format.Container == MediaContainer.Mp4)
+            .ThenByDescending(format => format.Bitrate ?? 0)
+            .ThenBy(format => format.FormatId)
+            .FirstOrDefault();
+        return progressive is null ? null : new FormatItemViewModel(progressive);
     }
 
     private async Task DownloadCaptionAsync()
@@ -1676,6 +1916,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     private void ClearAnalysis()
     {
         _metadata = null;
+        _collection = null;
+        CollectionItems.Clear();
         CaptionTracks = [];
         SelectedCaptionTrack = null;
         _videoTitle = string.Empty;
@@ -1694,6 +1936,28 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         DownloadActionLabel = "Add to queue";
         RebuildFormatFilters(resetSelections: true);
         NotifyVideoProperties();
+        OnPropertyChanged(nameof(HasCollection));
+        OnPropertyChanged(nameof(CollectionTitle));
+        OnPropertyChanged(nameof(CollectionSummary));
+        OnPropertyChanged(nameof(CollectionSelectionSummary));
+    }
+
+    private void SetCollectionSelection(bool isSelected)
+    {
+        foreach (var item in CollectionItems)
+        {
+            item.IsSelected = isSelected;
+        }
+
+        CollectionSelectionChanged();
+    }
+
+    private void CollectionSelectionChanged()
+    {
+        OnPropertyChanged(nameof(CollectionSelectionSummary));
+        SelectAllCollectionCommand.RaiseCanExecuteChanged();
+        SelectNoneCollectionCommand.RaiseCanExecuteChanged();
+        QueueCollectionCommand.RaiseCanExecuteChanged();
     }
 
     private void RebuildFormatFilters(bool resetSelections)
@@ -2062,6 +2326,9 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         DownloadCaptionCommand.RaiseCanExecuteChanged();
         SaveThumbnailCommand.RaiseCanExecuteChanged();
         SaveMetadataCommand.RaiseCanExecuteChanged();
+        SelectAllCollectionCommand.RaiseCanExecuteChanged();
+        SelectNoneCollectionCommand.RaiseCanExecuteChanged();
+        QueueCollectionCommand.RaiseCanExecuteChanged();
         CancelAnalysisCommand.RaiseCanExecuteChanged();
         CancelCommand.RaiseCanExecuteChanged();
     }

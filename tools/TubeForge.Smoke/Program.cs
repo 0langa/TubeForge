@@ -3,6 +3,7 @@ using System.Buffers.Binary;
 using TubeForge.Core.Media;
 using TubeForge.Core.YouTube;
 using TubeForge.YouTube;
+using TubeForge.YouTube.Collections;
 using TubeForge.YouTube.Diagnostics;
 
 if (args.Length == 2 && args[0].Equals("canary", StringComparison.OrdinalIgnoreCase))
@@ -10,11 +11,25 @@ if (args.Length == 2 && args[0].Equals("canary", StringComparison.OrdinalIgnoreC
     return await RunCanarySetAsync(args[1]);
 }
 
+if (args.Length is 2 or 3 && args[0].Equals("collection", StringComparison.OrdinalIgnoreCase))
+{
+    var maximumItems = 150;
+    if (args.Length == 3 &&
+        (!int.TryParse(args[2], out maximumItems) || maximumItems is < 1 or > 10_000))
+    {
+        Console.Error.WriteLine("Collection.InvalidLimit: maximum items must be from 1 through 10000.");
+        return 2;
+    }
+
+    return await RunCollectionAsync(args[1], maximumItems);
+}
+
 if (args.Length != 2 || !args[0].Equals("analyze", StringComparison.OrdinalIgnoreCase))
 {
     Console.Error.WriteLine("Usage:");
     Console.Error.WriteLine("  dotnet run --project tools/TubeForge.Smoke -- analyze <youtube-url>");
     Console.Error.WriteLine("  dotnet run --project tools/TubeForge.Smoke -- canary <local-url-list.txt>");
+    Console.Error.WriteLine("  dotnet run --project tools/TubeForge.Smoke -- collection <playlist-or-channel-url> [maximum-items]");
     return 2;
 }
 
@@ -361,4 +376,48 @@ static async Task<int> RunCanarySetAsync(string inputPath)
 
     Console.WriteLine($"Canaries: {videoIds.Count - failures}/{videoIds.Count} passed.");
     return failures == 0 ? 0 : 1;
+}
+
+static async Task<int> RunCollectionAsync(string input, int maximumItems)
+{
+    var parsed = YouTubeCollectionUrlParser.Parse(input);
+    if (!parsed.IsSuccess)
+    {
+        Console.Error.WriteLine($"{parsed.Error!.Code}: {parsed.Error.Message}");
+        return 2;
+    }
+
+    using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+    using var handler = new SocketsHttpHandler
+    {
+        AutomaticDecompression = DecompressionMethods.All,
+        AllowAutoRedirect = true,
+        MaxAutomaticRedirections = 5,
+        ConnectTimeout = TimeSpan.FromSeconds(10),
+        PooledConnectionLifetime = TimeSpan.FromMinutes(5)
+    };
+    using var client = new HttpClient(handler) { Timeout = Timeout.InfiniteTimeSpan };
+    var resolver = new YouTubeCollectionResolver(client);
+    var result = await resolver.ResolveAsync(parsed.Value, maximumItems, timeout.Token);
+    if (!result.IsSuccess)
+    {
+        Console.Error.WriteLine($"{result.Error!.Code}: {result.Error.Message}");
+        if (!string.IsNullOrWhiteSpace(result.Error.TechnicalDetail))
+        {
+            Console.Error.WriteLine(result.Error.TechnicalDetail);
+        }
+
+        return 1;
+    }
+
+    var data = result.Value;
+    var knownIndexes = data.Items.Count(item => item.Index is > 0);
+    var uniqueVideoIds = data.Items.Select(item => item.VideoId).Distinct().Count();
+    Console.WriteLine($"Kind: {data.Source.Kind}");
+    Console.WriteLine($"Items: {data.Items.Count}");
+    Console.WriteLine($"Pages: {data.PagesRead}");
+    Console.WriteLine($"Unique IDs: {uniqueVideoIds}");
+    Console.WriteLine($"Known indexes: {knownIndexes}");
+    Console.WriteLine($"Truncated: {data.IsTruncated}");
+    return data.Items.Count > 0 && uniqueVideoIds == data.Items.Count ? 0 : 1;
 }
