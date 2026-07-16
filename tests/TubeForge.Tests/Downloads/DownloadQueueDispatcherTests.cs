@@ -53,4 +53,47 @@ public static class DownloadQueueDispatcherTests
         var dispatcher = new DownloadQueueDispatcher();
         Assert.Throws<ArgumentException>(() => dispatcher.TryStart(Guid.Empty));
     }
+
+    [Test]
+    public static async Task ConcurrentSoakNeverExceedsGlobalLimitOrLeaksSlots()
+    {
+        const int maximumConcurrency = 4;
+        var dispatcher = new DownloadQueueDispatcher(maximumConcurrency);
+        var workers = Enumerable.Range(0, 32)
+            .Select(worker => Task.Run(() =>
+            {
+                for (var iteration = 0; iteration < 250; iteration++)
+                {
+                    var itemId = DeterministicId(worker, iteration);
+                    var spin = new SpinWait();
+                    while (!dispatcher.TryStart(itemId))
+                    {
+                        if (spin.Count > 10_000)
+                        {
+                            throw new InvalidOperationException("Dispatcher did not release a queue slot.");
+                        }
+
+                        spin.SpinOnce();
+                    }
+
+                    Assert.True(dispatcher.ActiveCount <= maximumConcurrency);
+                    Assert.True(dispatcher.IsActive(itemId));
+                    Assert.True(dispatcher.Complete(itemId));
+                }
+            }))
+            .ToArray();
+
+        await Task.WhenAll(workers);
+
+        Assert.Equal(0, dispatcher.ActiveCount);
+    }
+
+    private static Guid DeterministicId(int worker, int iteration)
+    {
+        Span<byte> bytes = stackalloc byte[16];
+        BitConverter.TryWriteBytes(bytes, worker + 1);
+        BitConverter.TryWriteBytes(bytes[4..], iteration + 1);
+        BitConverter.TryWriteBytes(bytes[8..], ((long)worker << 32) | (uint)iteration | 1L);
+        return new Guid(bytes);
+    }
 }

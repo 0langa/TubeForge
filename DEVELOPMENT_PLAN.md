@@ -387,7 +387,7 @@ Exit: best compatible WebM adaptive formats combine into seekable files.
 - [ ] Add segmented transfer behind a feature flag and prove integrity/performance.
 - [ ] Add network-change, sleep/resume, proxy, IPv4/IPv6, and slow-disk tests.
 - [x] Add disk-space forecasting and low-space recovery.
-- [ ] Add queue soak tests and crash-consistent persistence.
+- [x] Add queue soak tests and crash-consistent persistence.
 - [x] Add redacted diagnostic export and issue template.
 - [ ] Performance budget: startup, analysis latency, CPU, memory, UI frame time.
 
@@ -454,6 +454,7 @@ Order for current work:
 - 2026-07-16: Forecast destination space before each queue run. Direct transfers reserve remaining source bytes plus headroom; adaptive muxes also reserve a full output estimate. Insufficient-space failures stay retryable after cleanup.
 - 2026-07-16: Keep canary URLs in an operator-owned local file, never Git. Canary output is ordinal and aggregate-only; maintenance playbook forbids URLs, IDs, titles, channels, headers, scripts, and media in reports/fixtures.
 - 2026-07-16: Diagnostic export uses a whitelist-only JSON schema and deliberately omits all content/source/local-path fields. GitHub extractor reports require this redacted report plus explicit safety acknowledgement.
+- 2026-07-16: Queue commits flush a same-directory pending file before atomic replacement and retain the prior committed snapshot as recovery backup. Startup accepts only a fully validated primary, pending, or backup snapshot and pauses interrupted active items.
 
 ## 15. Plan maintenance
 

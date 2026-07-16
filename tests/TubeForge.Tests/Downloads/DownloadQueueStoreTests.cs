@@ -111,6 +111,98 @@ public static class DownloadQueueStoreTests
         Assert.Equal("Queue.InvalidState", result.Error?.Code);
     }
 
+    [Test]
+    public static async Task RecoversFlushedPendingStateAfterInterruptedReplacement()
+    {
+        using var directory = new TestDirectory();
+        var path = Path.Combine(directory.Path, "queue.json");
+        var store = new DownloadQueueStore(path);
+        var now = new DateTimeOffset(2026, 7, 16, 12, 0, 0, TimeSpan.Zero);
+        var original = new DownloadQueueSnapshot
+        {
+            Items = [Item(Guid.Parse("11111111-1111-1111-1111-111111111111"), DownloadQueueStatus.Queued, now)]
+        };
+        var pending = new DownloadQueueSnapshot
+        {
+            Items = [Item(Guid.Parse("22222222-2222-2222-2222-222222222222"), DownloadQueueStatus.Downloading, now)]
+        };
+
+        Assert.True((await store.SaveAsync(original)).IsSuccess);
+        Assert.True((await new DownloadQueueStore(path + ".new").SaveAsync(pending)).IsSuccess);
+        await File.WriteAllTextAsync(path, "{ interrupted replacement");
+
+        var recovered = await store.LoadAsync();
+
+        Assert.True(recovered.IsSuccess, recovered.Error?.Message);
+        Assert.Equal(1, recovered.Value.Items.Count);
+        Assert.Equal(pending.Items[0].Id, recovered.Value.Items[0].Id);
+        Assert.Equal(DownloadQueueStatus.Paused, recovered.Value.Items[0].Status);
+        Assert.Equal("{ interrupted replacement", await File.ReadAllTextAsync(path));
+    }
+
+    [Test]
+    public static async Task RecoversLastCommittedBackupWhenPrimaryAndPendingAreDamaged()
+    {
+        using var directory = new TestDirectory();
+        var path = Path.Combine(directory.Path, "queue.json");
+        var store = new DownloadQueueStore(path);
+        var now = new DateTimeOffset(2026, 7, 16, 12, 0, 0, TimeSpan.Zero);
+        var firstId = Guid.Parse("11111111-1111-1111-1111-111111111111");
+
+        Assert.True((await store.SaveAsync(new DownloadQueueSnapshot
+        {
+            Items = [Item(firstId, DownloadQueueStatus.Queued, now)]
+        })).IsSuccess);
+        Assert.True((await store.SaveAsync(new DownloadQueueSnapshot
+        {
+            Items = [Item(Guid.Parse("22222222-2222-2222-2222-222222222222"), DownloadQueueStatus.Queued, now)]
+        })).IsSuccess);
+        await File.WriteAllTextAsync(path, "{\"schemaVersion\":1,\"items\":null}");
+        await File.WriteAllTextAsync(path + ".new", "{ damaged pending");
+
+        var recovered = await store.LoadAsync();
+
+        Assert.True(recovered.IsSuccess, recovered.Error?.Message);
+        Assert.Equal(firstId, recovered.Value.Items[0].Id);
+    }
+
+    [Test]
+    public static async Task RepeatedAtomicSavesRemainReadableAndBounded()
+    {
+        using var directory = new TestDirectory();
+        var path = Path.Combine(directory.Path, "queue.json");
+        var store = new DownloadQueueStore(path);
+        var now = new DateTimeOffset(2026, 7, 16, 12, 0, 0, TimeSpan.Zero);
+
+        for (var iteration = 0; iteration < 128; iteration++)
+        {
+            var items = Enumerable.Range(0, 32)
+                .Select(index => Item(
+                    DeterministicId(iteration, index),
+                    index % 3 == 0 ? DownloadQueueStatus.Downloading : DownloadQueueStatus.Queued,
+                    now.AddSeconds(iteration)))
+                .ToArray();
+            var saved = await store.SaveAsync(new DownloadQueueSnapshot { Items = items });
+            var loaded = await store.LoadAsync();
+
+            Assert.True(saved.IsSuccess, saved.Error?.Message);
+            Assert.True(loaded.IsSuccess, loaded.Error?.Message);
+            Assert.Equal(items.Length, loaded.Value.Items.Count);
+            Assert.Equal(items[0].Id, loaded.Value.Items[0].Id);
+            Assert.True(loaded.Value.Items.All(item => item.Status != DownloadQueueStatus.Downloading));
+            Assert.False(File.Exists(path + ".new"));
+        }
+    }
+
+    private static Guid DeterministicId(int iteration, int index)
+    {
+        Span<byte> bytes = stackalloc byte[16];
+        BitConverter.TryWriteBytes(bytes, iteration + 1);
+        BitConverter.TryWriteBytes(bytes[4..], index + 1);
+        BitConverter.TryWriteBytes(bytes[8..], ((long)iteration << 32) | (uint)index | 1L);
+        return new Guid(bytes);
+    }
+
     private static DownloadQueueItem Item(
         Guid id,
         DownloadQueueStatus status,

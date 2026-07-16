@@ -36,67 +36,38 @@ public sealed class DownloadQueueStore
         {
             await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
             lockTaken = true;
-            if (!File.Exists(_path))
+            var primary = await TryLoadCandidateAsync(_path, cancellationToken).ConfigureAwait(false);
+            if (primary is { } primaryResult && primaryResult.IsSuccess)
             {
-                return Result<DownloadQueueSnapshot>.Success(new DownloadQueueSnapshot());
+                return RecoverInterruptedDownloads(primaryResult.Value);
             }
 
-            var information = new FileInfo(_path);
-            if (information.Length > MaximumFileBytes)
+            if (primary is { } failedPrimary &&
+                failedPrimary.Error?.Code is not ("Queue.Corrupt" or "Queue.InvalidState"))
             {
-                return Failure<DownloadQueueSnapshot>(
-                    "Queue.Corrupt",
-                    "The saved download queue exceeds the safe size limit.");
+                return failedPrimary;
             }
 
-            await using var stream = new FileStream(
-                _path,
-                FileMode.Open,
-                FileAccess.Read,
-                FileShare.Read,
-                bufferSize: 16 * 1024,
-                FileOptions.Asynchronous | FileOptions.SequentialScan);
-            var snapshot = await JsonSerializer.DeserializeAsync<DownloadQueueSnapshot>(
-                stream,
-                SerializerOptions,
-                cancellationToken).ConfigureAwait(false);
-            if (snapshot is null)
+            Result<DownloadQueueSnapshot>? recoveryFailure = null;
+            foreach (var recoveryPath in new[] { PendingPath, BackupPath })
             {
-                return Corrupt();
+                var recovery = await TryLoadCandidateAsync(recoveryPath, cancellationToken).ConfigureAwait(false);
+                if (recovery is { } recoveryResult && recoveryResult.IsSuccess)
+                {
+                    return RecoverInterruptedDownloads(recoveryResult.Value);
+                }
+
+                if (recovery is { } cancelledRecovery &&
+                    cancelledRecovery.Error?.Code == "Operation.Cancelled")
+                {
+                    return cancelledRecovery;
+                }
+
+                recoveryFailure ??= recovery;
             }
 
-            var validation = Validate(snapshot);
-            if (validation is not null)
-            {
-                return Result<DownloadQueueSnapshot>.Failure(validation);
-            }
-
-            var recoveredAt = DateTimeOffset.UtcNow;
-            var recovered = snapshot with
-            {
-                Items = snapshot.Items
-                    .Select(item => item.Status == DownloadQueueStatus.Downloading
-                        ? item with
-                        {
-                            Status = DownloadQueueStatus.Paused,
-                            UpdatedAtUtc = recoveredAt
-                        }
-                        : item)
-                    .ToArray()
-            };
-            return Result<DownloadQueueSnapshot>.Success(recovered);
-        }
-        catch (FileNotFoundException)
-        {
-            return Result<DownloadQueueSnapshot>.Success(new DownloadQueueSnapshot());
-        }
-        catch (DirectoryNotFoundException)
-        {
-            return Result<DownloadQueueSnapshot>.Success(new DownloadQueueSnapshot());
-        }
-        catch (JsonException)
-        {
-            return Corrupt();
+            return primary ?? recoveryFailure ??
+                Result<DownloadQueueSnapshot>.Success(new DownloadQueueSnapshot());
         }
         catch (OperationCanceledException)
         {
@@ -137,7 +108,6 @@ public sealed class DownloadQueueStore
         }
 
         var lockTaken = false;
-        var temporaryPath = _path + ".new";
         try
         {
             await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
@@ -150,7 +120,7 @@ public sealed class DownloadQueueStore
 
             Directory.CreateDirectory(directory);
             await using (var stream = new FileStream(
-                             temporaryPath,
+                             PendingPath,
                              FileMode.Create,
                              FileAccess.Write,
                              FileShare.None,
@@ -163,19 +133,29 @@ public sealed class DownloadQueueStore
                     SerializerOptions,
                     cancellationToken).ConfigureAwait(false);
                 await stream.FlushAsync(cancellationToken).ConfigureAwait(false);
+                stream.Flush(flushToDisk: true);
             }
 
-            File.Move(temporaryPath, _path, overwrite: true);
+            if (File.Exists(_path))
+            {
+                TryDelete(BackupPath);
+                File.Replace(PendingPath, _path, BackupPath, ignoreMetadataErrors: true);
+            }
+            else
+            {
+                File.Move(PendingPath, _path);
+            }
+
             return Result<bool>.Success(true);
         }
         catch (OperationCanceledException)
         {
-            TryDelete(temporaryPath);
+            TryDelete(PendingPath);
             return Cancelled<bool>();
         }
         catch (UnauthorizedAccessException exception)
         {
-            TryDelete(temporaryPath);
+            TryDelete(PendingPath);
             return Failure<bool>(
                 "Queue.WriteFailed",
                 "TubeForge cannot save the download queue.",
@@ -183,7 +163,7 @@ public sealed class DownloadQueueStore
         }
         catch (IOException exception)
         {
-            TryDelete(temporaryPath);
+            TryDelete(PendingPath);
             return Failure<bool>(
                 "Queue.WriteFailed",
                 "TubeForge cannot save the download queue.",
@@ -195,6 +175,101 @@ public sealed class DownloadQueueStore
             {
                 _gate.Release();
             }
+        }
+    }
+
+    private string PendingPath => _path + ".new";
+
+    private string BackupPath => _path + ".bak";
+
+    private static Result<DownloadQueueSnapshot> RecoverInterruptedDownloads(
+        DownloadQueueSnapshot snapshot)
+    {
+        var recoveredAt = DateTimeOffset.UtcNow;
+        var recovered = snapshot with
+        {
+            Items = snapshot.Items
+                .Select(item => item.Status == DownloadQueueStatus.Downloading
+                    ? item with
+                    {
+                        Status = DownloadQueueStatus.Paused,
+                        UpdatedAtUtc = recoveredAt
+                    }
+                    : item)
+                .ToArray()
+        };
+        return Result<DownloadQueueSnapshot>.Success(recovered);
+    }
+
+    private static async Task<Result<DownloadQueueSnapshot>?> TryLoadCandidateAsync(
+        string path,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            if (!File.Exists(path))
+            {
+                return null;
+            }
+
+            var information = new FileInfo(path);
+            if (information.Length > MaximumFileBytes)
+            {
+                return Failure<DownloadQueueSnapshot>(
+                    "Queue.Corrupt",
+                    "The saved download queue exceeds the safe size limit.");
+            }
+
+            await using var stream = new FileStream(
+                path,
+                FileMode.Open,
+                FileAccess.Read,
+                FileShare.Read,
+                bufferSize: 16 * 1024,
+                FileOptions.Asynchronous | FileOptions.SequentialScan);
+            var snapshot = await JsonSerializer.DeserializeAsync<DownloadQueueSnapshot>(
+                stream,
+                SerializerOptions,
+                cancellationToken).ConfigureAwait(false);
+            if (snapshot is null)
+            {
+                return Corrupt();
+            }
+
+            var validation = Validate(snapshot);
+            return validation is null
+                ? Result<DownloadQueueSnapshot>.Success(snapshot)
+                : Result<DownloadQueueSnapshot>.Failure(validation);
+        }
+        catch (FileNotFoundException)
+        {
+            return null;
+        }
+        catch (DirectoryNotFoundException)
+        {
+            return null;
+        }
+        catch (JsonException)
+        {
+            return Corrupt();
+        }
+        catch (OperationCanceledException)
+        {
+            return Cancelled<DownloadQueueSnapshot>();
+        }
+        catch (UnauthorizedAccessException exception)
+        {
+            return Failure<DownloadQueueSnapshot>(
+                "Queue.ReadFailed",
+                "TubeForge cannot read the saved download queue.",
+                exception.GetType().Name);
+        }
+        catch (IOException exception)
+        {
+            return Failure<DownloadQueueSnapshot>(
+                "Queue.ReadFailed",
+                "TubeForge cannot read the saved download queue.",
+                exception.GetType().Name);
         }
     }
 
