@@ -540,7 +540,11 @@ public static class YouTubeWatchPageParser
         foreach (var candidate in thumbnails.EnumerateArray())
         {
             var url = ReadString(candidate, "url");
-            if (Uri.TryCreate(url, UriKind.Absolute, out var uri) && uri.Scheme == Uri.UriSchemeHttps)
+            if (Uri.TryCreate(url, UriKind.Absolute, out var uri) &&
+                uri.Scheme == Uri.UriSchemeHttps &&
+                string.IsNullOrEmpty(uri.UserInfo) &&
+                (uri.Host.Equals("ytimg.com", StringComparison.OrdinalIgnoreCase) ||
+                 uri.Host.EndsWith(".ytimg.com", StringComparison.OrdinalIgnoreCase)))
             {
                 selected = uri;
             }

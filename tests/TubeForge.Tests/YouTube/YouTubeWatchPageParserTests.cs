@@ -17,6 +17,9 @@ public static class YouTubeWatchPageParserTests
         Assert.Equal("Fixture {video}; title", result.Value.Metadata.Title);
         Assert.Equal("Fixture channel", result.Value.Metadata.Channel);
         Assert.Equal(TimeSpan.FromSeconds(123), result.Value.Metadata.Duration);
+        Assert.Equal(
+            "https://i.ytimg.com/vi/Fixture123_/hqdefault.jpg",
+            result.Value.Metadata.ThumbnailUrl?.AbsoluteUri);
         Assert.Equal(2, result.Value.Metadata.Formats.Count);
         Assert.Equal(2, result.Value.Metadata.CaptionTracks.Count);
         Assert.Equal(1, result.Value.CipheredFormatCount);
@@ -64,5 +67,12 @@ public static class YouTubeWatchPageParserTests
             "\"videoDetails\":{\"videoId\":\"Fixture123_\",\"title\":\"Fixture\"}};</script>");
         Assert.False(unavailable.IsSuccess);
         Assert.Equal("Video.Unavailable", unavailable.Error?.Code);
+
+        var hostileThumbnail = YouTubeWatchPageParser.Parse(
+            "<script>var ytInitialPlayerResponse={\"playabilityStatus\":{\"status\":\"OK\"}," +
+            "\"videoDetails\":{\"videoId\":\"Fixture123_\",\"title\":\"Fixture\"," +
+            "\"thumbnail\":{\"thumbnails\":[{\"url\":\"https://evil.invalid/thumbnail.jpg\"}]}}};</script>");
+        Assert.True(hostileThumbnail.IsSuccess, hostileThumbnail.Error?.TechnicalDetail);
+        Assert.Equal<Uri?>(null, hostileThumbnail.Value.Metadata.ThumbnailUrl);
     }
 }

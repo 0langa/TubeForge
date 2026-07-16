@@ -18,6 +18,7 @@ using TubeForge.Downloads;
 using TubeForge.Downloads.Queue;
 using TubeForge.YouTube;
 using TubeForge.YouTube.Captions;
+using TubeForge.YouTube.Sidecars;
 
 namespace TubeForge.App.ViewModels;
 
@@ -42,10 +43,12 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     ];
 
     private readonly HttpClient _httpClient;
+    private readonly HttpClient _sidecarHttpClient;
     private readonly YouTubeMetadataResolver _resolver;
     private readonly DirectDownloadEngine _downloader;
     private readonly AdaptiveDownloadEngine _adaptiveDownloader;
     private readonly CaptionDownloadEngine _captionDownloader;
+    private readonly ThumbnailDownloadEngine _thumbnailDownloader;
     private readonly DownloadQueueStore _queueStore;
     private readonly TubeForgeSettingsStore _settingsStore;
     private readonly DownloadQueueDispatcher _queueDispatcher = new(2);
@@ -104,6 +107,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     private CaptionTrackOption? _selectedCaptionTrack;
     private CaptionFormatOption _selectedCaptionFormat = CaptionOutputChoices[0];
     private bool _isSavingCaption;
+    private bool _isSavingSidecar;
 
     public MainViewModel() : this(applicationDataDirectory: null)
     {
@@ -124,6 +128,15 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         _downloader = new DirectDownloadEngine(_httpClient);
         _adaptiveDownloader = new AdaptiveDownloadEngine(_downloader);
         _captionDownloader = new CaptionDownloadEngine(_httpClient);
+        var sidecarHandler = new SocketsHttpHandler
+        {
+            AutomaticDecompression = DecompressionMethods.All,
+            AllowAutoRedirect = false,
+            ConnectTimeout = TimeSpan.FromSeconds(10),
+            PooledConnectionLifetime = TimeSpan.FromMinutes(5)
+        };
+        _sidecarHttpClient = new HttpClient(sidecarHandler) { Timeout = TimeSpan.FromSeconds(60) };
+        _thumbnailDownloader = new ThumbnailDownloadEngine(_sidecarHttpClient);
         applicationDataDirectory ??= Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
             "TubeForge");
@@ -144,6 +157,12 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         DownloadCaptionCommand = new AsyncRelayCommand(
             DownloadCaptionAsync,
             () => !ShowResponsibleUseNotice && !IsAnalyzing && !IsSavingCaption && SelectedCaptionTrack is not null);
+        SaveThumbnailCommand = new AsyncRelayCommand(
+            SaveThumbnailAsync,
+            () => !ShowResponsibleUseNotice && !IsAnalyzing && !IsSavingSidecar && _metadata?.ThumbnailUrl is not null);
+        SaveMetadataCommand = new AsyncRelayCommand(
+            SaveMetadataAsync,
+            () => !ShowResponsibleUseNotice && !IsAnalyzing && !IsSavingSidecar && _metadata is not null);
         CancelAnalysisCommand = new RelayCommand(CancelAnalysis, () => IsAnalyzing);
         CancelCommand = new RelayCommand(PauseAll, () => IsDownloading);
         ShowDownloadCommand = new RelayCommand(() => ShowPage(AppPage.Download));
@@ -170,6 +189,10 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     public AsyncRelayCommand DownloadCommand { get; }
 
     public AsyncRelayCommand DownloadCaptionCommand { get; }
+
+    public AsyncRelayCommand SaveThumbnailCommand { get; }
+
+    public AsyncRelayCommand SaveMetadataCommand { get; }
 
     public RelayCommand CancelCommand { get; }
 
@@ -287,6 +310,18 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         private set
         {
             if (Set(ref _isSavingCaption, value))
+            {
+                RefreshCommands();
+            }
+        }
+    }
+
+    public bool IsSavingSidecar
+    {
+        get => _isSavingSidecar;
+        private set
+        {
+            if (Set(ref _isSavingSidecar, value))
             {
                 RefreshCommands();
             }
@@ -869,6 +904,91 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         }
     }
 
+    private async Task SaveThumbnailAsync()
+    {
+        if (_metadata?.ThumbnailUrl is not { } thumbnailUrl)
+        {
+            return;
+        }
+
+        IsSavingSidecar = true;
+        ErrorMessage = string.Empty;
+        try
+        {
+            var extension = ThumbnailDownloadEngine.FileExtensionFor(thumbnailUrl);
+            var destination = FileNamePolicy.AvailablePath(
+                DownloadFolder,
+                $"{_metadata.Title}.thumbnail",
+                extension,
+                path => File.Exists(path) || File.Exists(path + ".part"));
+            var result = await _thumbnailDownloader.DownloadAsync(new ThumbnailDownloadRequest
+            {
+                SourceUrl = thumbnailUrl,
+                DestinationPath = destination
+            });
+            if (!result.IsSuccess)
+            {
+                ErrorMessage = $"{result.Error!.Message} ({result.Error.Code})";
+                StatusMessage = "Thumbnail save failed";
+                return;
+            }
+
+            StatusMessage = $"Saved thumbnail: {Path.GetFileName(result.Value.DestinationPath)}";
+            ProgressDetail = $"{result.Value.MediaType} · {FormatBytes(result.Value.BytesWritten)}";
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or
+                                          ArgumentException or NotSupportedException)
+        {
+            ErrorMessage = "The thumbnail destination is invalid or unavailable. (Thumbnail.InvalidDestination)";
+            ProgressDetail = exception.GetType().Name;
+            StatusMessage = "Thumbnail save failed";
+        }
+        finally
+        {
+            IsSavingSidecar = false;
+        }
+    }
+
+    private async Task SaveMetadataAsync()
+    {
+        if (_metadata is null)
+        {
+            return;
+        }
+
+        IsSavingSidecar = true;
+        ErrorMessage = string.Empty;
+        try
+        {
+            var destination = FileNamePolicy.AvailablePath(
+                DownloadFolder,
+                $"{_metadata.Title}.info",
+                "json",
+                path => File.Exists(path) || File.Exists(path + ".part"));
+            var result = await MetadataSidecarWriter.WriteAsync(_metadata, destination);
+            if (!result.IsSuccess)
+            {
+                ErrorMessage = $"{result.Error!.Message} ({result.Error.Code})";
+                StatusMessage = "Metadata save failed";
+                return;
+            }
+
+            StatusMessage = $"Saved metadata: {Path.GetFileName(result.Value.DestinationPath)}";
+            ProgressDetail = $"JSON · {FormatBytes(result.Value.BytesWritten)} · stream URLs excluded";
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or
+                                          ArgumentException or NotSupportedException)
+        {
+            ErrorMessage = "The metadata destination is invalid or unavailable. (Sidecar.InvalidDestination)";
+            ProgressDetail = exception.GetType().Name;
+            StatusMessage = "Metadata save failed";
+        }
+        finally
+        {
+            IsSavingSidecar = false;
+        }
+    }
+
     public void Cancel() => PauseAll();
 
     public string BuildDiagnosticReport() => RedactedDiagnosticReportBuilder.Build(new DiagnosticReportInput
@@ -894,6 +1014,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     {
         CancelAnalysis();
         PauseAll();
+        _sidecarHttpClient.Dispose();
         _httpClient.Dispose();
         GC.SuppressFinalize(this);
     }
@@ -1938,6 +2059,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         AnalyzeCommand.RaiseCanExecuteChanged();
         DownloadCommand.RaiseCanExecuteChanged();
         DownloadCaptionCommand.RaiseCanExecuteChanged();
+        SaveThumbnailCommand.RaiseCanExecuteChanged();
+        SaveMetadataCommand.RaiseCanExecuteChanged();
         CancelAnalysisCommand.RaiseCanExecuteChanged();
         CancelCommand.RaiseCanExecuteChanged();
     }

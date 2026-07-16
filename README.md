@@ -17,6 +17,7 @@ Working now:
 - type-first stream selection with resolution, container, codec, FPS/HDR, bitrate, and exact-stream filters;
 - highest-quality audio + video selection with separate resumable track downloads and in-house MP4/WebM muxing, preferring MP4 on equivalent-quality choices;
 - caption-track metadata plus manual/auto language selection and atomic SRT/WebVTT sidecar saves;
+- on-demand validated thumbnail saves and stable JSON metadata sidecars without signed stream URLs;
 - resumable `.part` transfers, bounded container validation, retries, progress, cancellation, and atomic finalization;
 - opt-in segmented transfer for large files with validated parallel ranges, resumable segment state, and automatic direct-transfer fallback;
 - preflight disk-space forecasting with adaptive-mux peak-space accounting and retryable low-space failures;
