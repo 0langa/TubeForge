@@ -775,6 +775,22 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             }
 
             var work = prepared.Work;
+            var existingBytes = SelectionPartialLength(work.Destination, work.Selection);
+            var diskForecast = DiskSpacePolicy.Check(
+                work.Destination,
+                CombinedLength(work.Selection),
+                existingBytes,
+                work.Selection.RequiresMuxing);
+            if (!diskForecast.IsSuccess)
+            {
+                await CompleteQueueRunAsync(
+                    itemId,
+                    DownloadQueueStatus.Failed,
+                    diskForecast.Error,
+                    existingBytes);
+                return;
+            }
+
             var progress = new Progress<DownloadProgress>(value => UpdateQueueProgress(itemId, value));
             TubeForgeError? downloadError;
             long completedBytes;
@@ -1201,10 +1217,22 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             selection.Format.FormatId,
             selection.AudioFormat?.FormatId);
 
-    private static long? CombinedLength(FormatItemViewModel selection) =>
-        selection.Format.ContentLength is not null && selection.AudioFormat?.ContentLength is not null
-            ? checked(selection.Format.ContentLength.Value + selection.AudioFormat.ContentLength.Value)
-            : selection.AudioFormat is null ? selection.Format.ContentLength : null;
+    private static long? CombinedLength(FormatItemViewModel selection)
+    {
+        if (selection.Format.ContentLength is null || selection.AudioFormat?.ContentLength is null)
+        {
+            return selection.AudioFormat is null ? selection.Format.ContentLength : null;
+        }
+
+        try
+        {
+            return checked(selection.Format.ContentLength.Value + selection.AudioFormat.ContentLength.Value);
+        }
+        catch (OverflowException)
+        {
+            return null;
+        }
+    }
 
     private static long SelectionPartialLength(string destination, FormatItemViewModel selection)
     {
@@ -1215,7 +1243,14 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
 
         var videoPath = IntermediateTrackPath(destination, "video", selection.Format);
         var audioPath = IntermediateTrackPath(destination, "audio", selection.AudioFormat);
-        return checked(CompletedOrPartialLength(videoPath) + CompletedOrPartialLength(audioPath));
+        try
+        {
+            return checked(CompletedOrPartialLength(videoPath) + CompletedOrPartialLength(audioPath));
+        }
+        catch (OverflowException)
+        {
+            return long.MaxValue;
+        }
     }
 
     private static long CompletedOrPartialLength(string destination)

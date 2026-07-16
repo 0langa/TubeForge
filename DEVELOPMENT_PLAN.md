@@ -386,7 +386,7 @@ Exit: best compatible WebM adaptive formats combine into seekable files.
 - [ ] Maintain extraction canary set and documented update playbook.
 - [ ] Add segmented transfer behind a feature flag and prove integrity/performance.
 - [ ] Add network-change, sleep/resume, proxy, IPv4/IPv6, and slow-disk tests.
-- [ ] Add disk-space forecasting and low-space recovery.
+- [x] Add disk-space forecasting and low-space recovery.
 - [ ] Add queue soak tests and crash-consistent persistence.
 - [ ] Add redacted diagnostic export and issue template.
 - [ ] Performance budget: startup, analysis latency, CPU, memory, UI frame time.
@@ -451,6 +451,7 @@ Order for current work:
 - 2026-07-16: Persist bounded local settings atomically. Gate first use on a locally stored responsible-use acknowledgement and keep diagnostics redacted to runtime, counts, stages, and local storage paths.
 - 2026-07-16: Keep first-run acknowledgement keyboard-modal, expose explicit analysis/download cancellation, label live status/progress for assistive technology, use DPI layout rounding, and request a dark DWM title bar with the Windows 10 fallback attribute.
 - 2026-07-16: Keep deterministic MP4/WebM mutation suites and hostile size/truncation/offset fixtures in normal CI. Readers must return typed failures; muxers must never publish output or leave `.muxing` files after rejected input.
+- 2026-07-16: Forecast destination space before each queue run. Direct transfers reserve remaining source bytes plus headroom; adaptive muxes also reserve a full output estimate. Insufficient-space failures stay retryable after cleanup.
 
 ## 15. Plan maintenance
 
