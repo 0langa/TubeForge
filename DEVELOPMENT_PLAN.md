@@ -355,7 +355,7 @@ Exit: user can save best/native audio stream with truthful format labeling.
 - [x] Interleave/copy samples using bounded buffers.
 - [x] Preserve source sample tables, timestamps, sync samples, rotation, color, and audio parameters.
 - [x] Validate output structure and playback against Windows media stack.
-- [ ] Fuzz box sizes, nesting, integer overflow, truncation, and hostile input.
+- [x] Fuzz box sizes, nesting, integer overflow, truncation, and hostile input.
 
 Exit: compatible adaptive MP4 video and audio combine into a seekable file without re-encoding.
 
@@ -377,7 +377,7 @@ Exit: robust batch workflow with user-controlled content selection and bounded l
 - [x] Parse WebM tracks, clusters, timecodes, SimpleBlocks, and BlockGroups while preserving laced payloads.
 - [x] Mux compatible Opus/Vorbis audio and VP9/AV1 video without re-encoding.
 - [x] Interleave clusters by timecode, remap audio track identity, and generate new seek cues.
-- [ ] Add hostile-container fixtures and fuzz coverage.
+- [x] Add hostile-container fixtures and fuzz coverage.
 
 Exit: best compatible WebM adaptive formats combine into seekable files.
 
@@ -450,6 +450,7 @@ Order for current work:
 - 2026-07-16: Queue downloads through a tested global 1–4 transfer dispatcher. Persist only validated video/format identities and local destinations; re-resolve fresh media URLs when resuming recovered work.
 - 2026-07-16: Persist bounded local settings atomically. Gate first use on a locally stored responsible-use acknowledgement and keep diagnostics redacted to runtime, counts, stages, and local storage paths.
 - 2026-07-16: Keep first-run acknowledgement keyboard-modal, expose explicit analysis/download cancellation, label live status/progress for assistive technology, use DPI layout rounding, and request a dark DWM title bar with the Windows 10 fallback attribute.
+- 2026-07-16: Keep deterministic MP4/WebM mutation suites and hostile size/truncation/offset fixtures in normal CI. Readers must return typed failures; muxers must never publish output or leave `.muxing` files after rejected input.
 
 ## 15. Plan maintenance
 

@@ -22,7 +22,7 @@ Working now:
 - privacy-safe schema-versioned queue state that stores source identities instead of expiring media URLs;
 - local settings, first-run responsible-use acknowledgement, and redacted runtime/extraction diagnostics pages;
 - keyboard-focused navigation, screen-reader labels/live regions, DPI-aware layout rounding, and dark Windows title-bar integration;
-- dependency-free fixture/transfer test runner and sanitized live metadata smoke tool.
+- dependency-free fixture/transfer test runner with deterministic hostile-container mutation coverage, plus sanitized live smoke tools.
 
 Not finished: playlist/bulk scheduling, hostile-container fuzzing, audio transcoding/MP3, current ES6 player decipher, throttling-parameter transforms, accessibility hardening, packaging, and releases. See [DEVELOPMENT_PLAN.md](DEVELOPMENT_PLAN.md) for exact checklist state.
 
