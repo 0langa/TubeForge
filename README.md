@@ -7,7 +7,7 @@ TubeForge is an experimental, ad-free Windows desktop downloader built from scra
 
 ## Status
 
-Release candidate; no stable GitHub release published yet.
+TubeForge v1.0.0 is the first stable release.
 
 Working now:
 
@@ -34,7 +34,7 @@ Working now:
 - bounded structural classic/ES6 signature and `n` throttling transforms without executing player JavaScript;
 - reproducible portable framework-dependent and self-contained Windows x64 packaging with SHA-256 manifests.
 
-Not included: active-live capture, audio transcoding/MP3, authenticated/access-controlled media, automatic updates, or an installer. The public v1.0 release and license decision are still pending. See [DEVELOPMENT_PLAN.md](DEVELOPMENT_PLAN.md) for exact checklist state.
+Not included: active-live capture, audio transcoding/MP3, authenticated/access-controlled media, automatic updates, or an installer. See [DEVELOPMENT_PLAN.md](DEVELOPMENT_PLAN.md) for exact checklist state.
 
 ## Baseline
 
@@ -109,4 +109,4 @@ Do not include media URLs, cookies, signatures, visitor data, private video data
 
 ## License
 
-No open-source license has been selected. Public visibility does not grant permission to copy, modify, or redistribute the code. Licensing will be decided before outside contributions are accepted.
+TubeForge is available under the [MIT License](LICENSE).

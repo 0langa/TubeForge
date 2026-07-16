@@ -397,12 +397,12 @@ Exit: release-candidate reliability targets met on supported Windows versions.
 
 ### M11 — Packaging and v1.0
 
-- [ ] Choose project license before accepting outside contributions.
+- [x] Choose project license before accepting outside contributions.
 - [x] Produce framework-dependent and self-contained x64 builds.
 - [x] Add reproducible release script, checksums, and signed artifacts when certificate exists.
 - [x] Add upgrade/uninstall behavior and data-retention documentation.
 - [x] Add versioned extraction compatibility notes.
-- [ ] Complete privacy, security, responsible-use, accessibility, and threat-model reviews.
+- [x] Complete privacy, security, responsible-use, accessibility, and threat-model reviews.
 - [ ] Publish v1.0 with limitations and support policy.
 
 Exit: clean-machine installation, download smoke test, uninstall, checksum verification, and rollback pass.

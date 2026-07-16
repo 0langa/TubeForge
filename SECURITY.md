@@ -2,7 +2,13 @@
 
 ## Supported versions
 
-TubeForge has no supported release yet. Security fixes target the `main` branch during development.
+Security fixes target the latest v1 release and `main`.
+
+| Version | Supported |
+|---|---|
+| Latest 1.x | Yes |
+| Older 1.x | Upgrade first |
+| Development snapshots | Best effort |
 
 ## Reporting a vulnerability
 

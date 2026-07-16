@@ -25,4 +25,4 @@ dotnet build TubeForge.slnx --configuration Release
 dotnet run --project tests/TubeForge.Tests --configuration Release -- --all
 ```
 
-No license has been selected. Do not submit code copied from projects whose terms are incompatible or unknown.
+TubeForge is MIT-licensed. Do not submit code copied from projects whose terms are incompatible or unknown.

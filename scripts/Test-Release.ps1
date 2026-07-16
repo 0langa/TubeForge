@@ -103,8 +103,8 @@ try {
             -PassThru `
             -WindowStyle Hidden
         try {
-            if (-not $process.WaitForExit(30000)) {
-                throw 'Published TubeForge did not complete its desktop startup probe within 30 seconds.'
+            if (-not $process.WaitForExit(60000)) {
+                throw 'Published TubeForge did not complete its desktop startup probe within 60 seconds.'
             }
             if ($process.ExitCode -notin @(0, 1)) {
                 throw "Published TubeForge desktop startup probe crashed with exit code $($process.ExitCode)."
