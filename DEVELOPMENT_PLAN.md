@@ -324,13 +324,13 @@ Exit: normal user can analyze and download a progressive MP4 entirely through th
 ### M5 — Signature and throttling decipher
 
 - [x] Capture synthetic player-script shapes and expected transform plans.
-- [ ] Build tokenizer for the required JavaScript subset.
+- [x] Build tokenizer for the required JavaScript subset.
 - [x] Build constrained classic signature transform planner/evaluator with strict size and operation limits.
-- [ ] Locate signature and throttling functions structurally.
-- [ ] Cache transform plans by script hash.
+- [x] Locate signature and throttling functions structurally.
+- [x] Cache transform plans by script hash.
 - [x] Resolve supported classic `signatureCipher` transform shapes without executing JavaScript.
-- [ ] Resolve the current ES6 signature shape and `n` transformations.
-- [ ] Add mutation/fuzz tests for malformed scripts and unsupported syntax.
+- [x] Resolve the current ES6 signature shape and `n` transformations.
+- [x] Add mutation/fuzz tests for malformed scripts and unsupported syntax.
 - [x] Add sanitized extraction-stage health reporting and Android client fallback.
 
 Exit: signed public formats resolve without executing arbitrary JavaScript.

@@ -1,7 +1,6 @@
 using System.Net;
 using System.Net.Http.Headers;
 using System.Text;
-using System.Collections.Concurrent;
 using System.Text.Json;
 using TubeForge.Core.Errors;
 using TubeForge.Core.Networking;
@@ -17,7 +16,7 @@ public sealed class YouTubeMetadataResolver(HttpClient httpClient)
     private const int MaximumWatchPageCharacters = 8 * 1024 * 1024;
     private const int MaximumPlayerScriptCharacters = 6 * 1024 * 1024;
     private static readonly TimeSpan RequestTimeout = TimeSpan.FromSeconds(20);
-    private static readonly ConcurrentDictionary<string, SignatureTransformPlan> TransformCache = new();
+    private static readonly PlayerTransformCache TransformCache = new();
 
     public async Task<Result<WatchPageData>> ResolveAsync(
         YouTubeVideoId videoId,
@@ -53,10 +52,21 @@ public sealed class YouTubeMetadataResolver(HttpClient httpClient)
                 MaximumWatchPageCharacters,
                 timeoutSource.Token).ConfigureAwait(false);
             var watchResult = YouTubeWatchPageParser.Parse(html);
-            if (!watchResult.IsSuccess ||
-                watchResult.Value.Metadata.Formats.Count > 0)
+            if (!watchResult.IsSuccess)
             {
                 return watchResult;
+            }
+
+            if (watchResult.Value.Metadata.Formats.Count > 0)
+            {
+                return watchResult.Value.PlayerScriptUrl is not null &&
+                       HasThrottlingParameter(watchResult.Value)
+                    ? await TryResolvePlayerTransformsAsync(
+                        html,
+                        watchResult.Value,
+                        url,
+                        timeoutSource.Token).ConfigureAwait(false)
+                    : watchResult;
             }
 
             var clientResult = await TryResolveWithAndroidClientAsync(
@@ -74,7 +84,7 @@ public sealed class YouTubeMetadataResolver(HttpClient httpClient)
                 return watchResult;
             }
 
-            return await TryResolveCipheredFormatsAsync(
+            return await TryResolvePlayerTransformsAsync(
                 html,
                 watchResult.Value,
                 url,
@@ -215,24 +225,13 @@ public sealed class YouTubeMetadataResolver(HttpClient httpClient)
         }
     }
 
-    private async Task<Result<WatchPageData>> TryResolveCipheredFormatsAsync(
+    private async Task<Result<WatchPageData>> TryResolvePlayerTransformsAsync(
         string html,
         WatchPageData fallback,
         Uri watchUrl,
         CancellationToken cancellationToken)
     {
         var playerScriptUrl = fallback.PlayerScriptUrl!;
-        if (TransformCache.TryGetValue(playerScriptUrl.AbsolutePath, out var cachedPlan))
-        {
-            var cachedResult = ParseWithPlan(html, cachedPlan);
-            if (cachedResult.IsSuccess && cachedResult.Value.Metadata.Formats.Count > 0)
-            {
-                return cachedResult;
-            }
-
-            TransformCache.TryRemove(playerScriptUrl.AbsolutePath, out _);
-        }
-
         try
         {
             using var scriptRequest = new HttpRequestMessage(HttpMethod.Get, playerScriptUrl);
@@ -253,40 +252,76 @@ public sealed class YouTubeMetadataResolver(HttpClient httpClient)
                 scriptResponse.Content,
                 MaximumPlayerScriptCharacters,
                 cancellationToken).ConfigureAwait(false);
-            var plans = SignatureTransformExtractor.Extract(script);
+            if (TransformCache.TryGet(script, out var cachedPlans))
+            {
+                var cachedResult = ParseWithPlans(html, cachedPlans);
+                if (IsUsableTransformedResult(cachedResult, fallback))
+                {
+                    return cachedResult;
+                }
+
+                TransformCache.Remove(script);
+            }
+
+            var signatureCandidates = SignatureTransformExtractor.Extract(script);
+            var throttlingCandidates = ThrottlingTransformExtractor
+                .Extract(script, signatureCandidates)
+                .Take(4)
+                .ToArray();
             var cipher = YouTubeWatchPageParser.ExtractSignatureCiphers(html).FirstOrDefault();
             if (cipher is null)
             {
-                return WithDiagnostics(fallback, "CipherMissing", plans.Count);
+                return await TryResolveThrottledFormatsAsync(
+                    html,
+                    fallback,
+                    watchUrl,
+                    script,
+                    throttlingCandidates,
+                    cancellationToken).ConfigureAwait(false);
             }
 
             var probeAttempts = 0;
-            foreach (var plan in plans.Take(8))
+            foreach (var signaturePlan in signatureCandidates.Take(8))
             {
-                var candidate = SignatureCipherUrl.Resolve(cipher, plan);
-                if (candidate is null)
+                var signedCandidate = SignatureCipherUrl.Resolve(cipher, signaturePlan);
+                if (signedCandidate is null)
                 {
                     continue;
                 }
 
-                probeAttempts++;
-                if (!await ProbeMediaUrlAsync(candidate, watchUrl, cancellationToken).ConfigureAwait(false))
+                var nPlans = ThrottlingUrl.RequiresTransform(signedCandidate)
+                    ? throttlingCandidates.Cast<SignatureTransformPlan?>()
+                    : [null];
+                foreach (var throttlingPlan in nPlans)
                 {
-                    continue;
-                }
+                    var candidate = throttlingPlan is null
+                        ? signedCandidate
+                        : ThrottlingUrl.Resolve(signedCandidate, throttlingPlan);
+                    if (candidate is null)
+                    {
+                        continue;
+                    }
 
-                var resolved = ParseWithPlan(html, plan);
-                if (resolved.IsSuccess && resolved.Value.Metadata.Formats.Count > 0)
-                {
-                    TransformCache[playerScriptUrl.AbsolutePath] = plan;
-                    return resolved;
+                    probeAttempts++;
+                    if (!await ProbeMediaUrlAsync(candidate, watchUrl, cancellationToken).ConfigureAwait(false))
+                    {
+                        continue;
+                    }
+
+                    var plans = new PlayerTransformPlans(signaturePlan, throttlingPlan);
+                    var resolved = ParseWithPlans(html, plans);
+                    if (IsUsableTransformedResult(resolved, fallback))
+                    {
+                        TransformCache.Store(script, plans);
+                        return resolved;
+                    }
                 }
             }
 
             return WithDiagnostics(
                 fallback,
-                plans.Count == 0 ? "TransformPlanMissing" : "TransformPlanRejected",
-                plans.Count,
+                signatureCandidates.Count == 0 ? "TransformPlanMissing" : "TransformPlanRejected",
+                signatureCandidates.Count,
                 probeAttempts);
         }
         catch (ContentTooLargeException)
@@ -301,6 +336,49 @@ public sealed class YouTubeMetadataResolver(HttpClient httpClient)
         {
             return WithDiagnostics(fallback, "PlayerScriptReadFailed");
         }
+    }
+
+    private async Task<Result<WatchPageData>> TryResolveThrottledFormatsAsync(
+        string html,
+        WatchPageData fallback,
+        Uri watchUrl,
+        string script,
+        IReadOnlyList<SignatureTransformPlan> throttlingCandidates,
+        CancellationToken cancellationToken)
+    {
+        if (!HasThrottlingParameter(fallback))
+        {
+            return WithDiagnostics(fallback, "CipherMissing");
+        }
+
+        var probeAttempts = 0;
+        foreach (var throttlingPlan in throttlingCandidates)
+        {
+            var plans = new PlayerTransformPlans(null, throttlingPlan);
+            var resolved = ParseWithPlans(html, plans);
+            var candidate = resolved.IsSuccess
+                ? resolved.Value.Metadata.Formats.FirstOrDefault()?.Url
+                : null;
+            if (candidate is null)
+            {
+                continue;
+            }
+
+            probeAttempts++;
+            if (!await ProbeMediaUrlAsync(candidate, watchUrl, cancellationToken).ConfigureAwait(false))
+            {
+                continue;
+            }
+
+            TransformCache.Store(script, plans);
+            return resolved;
+        }
+
+        return WithDiagnostics(
+            fallback,
+            throttlingCandidates.Count == 0 ? "ThrottlingPlanMissing" : "ThrottlingPlanRejected",
+            throttlingCandidates.Count,
+            probeAttempts);
     }
 
     private async Task<bool> ProbeMediaUrlAsync(
@@ -325,8 +403,27 @@ public sealed class YouTubeMetadataResolver(HttpClient httpClient)
                 finalUri.Host.EndsWith(".googlevideo.com", StringComparison.OrdinalIgnoreCase));
     }
 
-    private static Result<WatchPageData> ParseWithPlan(string html, SignatureTransformPlan plan) =>
-        YouTubeWatchPageParser.Parse(html, cipher => SignatureCipherUrl.Resolve(cipher, plan));
+    private static Result<WatchPageData> ParseWithPlans(string html, PlayerTransformPlans plans)
+    {
+        Func<string, Uri?>? signatureResolver = plans.Signature is null
+            ? null
+            : cipher => SignatureCipherUrl.Resolve(cipher, plans.Signature);
+        Func<Uri, Uri?>? mediaUrlResolver = plans.Throttling is null
+            ? null
+            : url => ThrottlingUrl.Resolve(url, plans.Throttling);
+        return YouTubeWatchPageParser.Parse(html, signatureResolver, mediaUrlResolver);
+    }
+
+    private static bool IsUsableTransformedResult(
+        Result<WatchPageData> result,
+        WatchPageData fallback) =>
+        result.IsSuccess &&
+        result.Value.Metadata.Formats.Count > 0 &&
+        (fallback.CipheredFormatCount == 0 ||
+         result.Value.Metadata.Formats.Count > fallback.Metadata.Formats.Count);
+
+    private static bool HasThrottlingParameter(WatchPageData data) =>
+        data.Metadata.Formats.Any(format => ThrottlingUrl.RequiresTransform(format.Url));
 
     private static Result<WatchPageData> WithDiagnostics(
         WatchPageData fallback,

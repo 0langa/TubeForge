@@ -115,6 +115,61 @@ public static class YouTubeMetadataResolverTests
     }
 
     [Test]
+    public static async Task FetchesPlayerScriptAndResolvesThrottledDirectFormat()
+    {
+        const string watchPage = """
+            <script>
+            var ytInitialPlayerResponse={
+              "playabilityStatus":{"status":"OK"},
+              "videoDetails":{"videoId":"Fixture123_","title":"Throttle fixture","lengthSeconds":"10"},
+              "streamingData":{"formats":[{
+                "itag":22,
+                "url":"https://fixture.googlevideo.com/videoplayback?n=abcdef&itag=22",
+                "mimeType":"video/mp4; codecs=\"avc1.64001F, mp4a.40.2\"",
+                "width":1280,"height":720,"contentLength":"10"
+              }]}
+            };
+            ytcfg.set({"PLAYER_JS_URL":"/s/player/throttle-fixture/base.js"});
+            </script>
+            """;
+        const string playerScript = """
+            const OP={rv(a){a.reverse()},sl(a,b){a.splice(0,b)}};
+            const NT=(a)=>{a=a.split('');OP.sl(a,2);OP.rv(a);return a.join('')};
+            const TF=[NT];let n=url.searchParams.get('n');n=TF[0](n);url.searchParams.set('n',n);
+            """;
+        var requestCount = 0;
+        using var handler = new StubHandler(request =>
+        {
+            requestCount++;
+            if (request.RequestUri?.AbsolutePath == "/watch")
+            {
+                return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(watchPage) };
+            }
+
+            if (request.RequestUri?.AbsolutePath == "/s/player/throttle-fixture/base.js")
+            {
+                return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(playerScript) };
+            }
+
+            Assert.Equal("fixture.googlevideo.com", request.RequestUri?.Host);
+            Assert.Equal("fedc", QueryValue(request.RequestUri!, "n"));
+            return new HttpResponseMessage(HttpStatusCode.PartialContent)
+            {
+                Content = new ByteArrayContent([0])
+            };
+        });
+        using var client = new HttpClient(handler);
+        var resolver = new YouTubeMetadataResolver(client);
+        Assert.True(YouTubeVideoId.TryCreate("Fixture123_", out var videoId));
+
+        var result = await resolver.ResolveAsync(videoId);
+
+        Assert.True(result.IsSuccess, result.Error?.Message);
+        Assert.Equal("fedc", QueryValue(result.Value.Metadata.Formats.Single().Url, "n"));
+        Assert.Equal(3, requestCount);
+    }
+
+    [Test]
     public static async Task UsesVersionedAndroidClientWhenPageHasNoDirectFormats()
     {
         const string watchPage = """

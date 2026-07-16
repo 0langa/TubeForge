@@ -12,91 +12,60 @@ internal static partial class SignatureTransformExtractor
     public static IReadOnlyList<SignatureTransformPlan> Extract(string playerScript)
     {
         ArgumentNullException.ThrowIfNull(playerScript);
-        if (playerScript.Length > MaximumPlayerScriptLength)
+        if (playerScript.Length > MaximumPlayerScriptLength ||
+            !JavaScriptTokenizer.TryTokenize(playerScript, out var tokens))
         {
             return [];
         }
 
         var plans = new List<SignatureTransformPlan>();
-        var searchIndex = 0;
-        while ((searchIndex = IndexOfSplitEmpty(playerScript, searchIndex)) >= 0)
+        foreach (var function in JavaScriptFunctionLocator.FindSingleArgumentFunctions(playerScript, tokens))
         {
-            if (TryFindContainingFunction(playerScript, searchIndex, out var name, out var argument, out var body) &&
-                body.Length <= MaximumFunctionBodyLength &&
-                ContainsJoinEmpty(body, argument) &&
-                TryParseOperations(playerScript, body, argument, out var operations) &&
+            var bodyLength = function.BodyEnd - function.BodyStart;
+            if (bodyLength <= MaximumFunctionBodyLength &&
+                ContainsArrayStringCall(playerScript, tokens, function, "split") &&
+                ContainsArrayStringCall(playerScript, tokens, function, "join") &&
+                TryParseOperations(
+                    playerScript,
+                    playerScript[function.BodyStart..function.BodyEnd],
+                    function.Argument,
+                    out var operations) &&
                 operations.Count is > 0 and <= MaximumOperations)
             {
-                plans.Add(new SignatureTransformPlan(name, operations));
+                plans.Add(new SignatureTransformPlan(function.Name, operations));
             }
-
-            searchIndex += 8;
         }
 
         return plans
-            .DistinctBy(plan => string.Join(',', plan.Operations))
+            .DistinctBy(plan => plan.Name)
             .ToArray();
     }
 
-    private static bool TryFindContainingFunction(
+    private static bool ContainsArrayStringCall(
         string source,
-        int splitIndex,
-        out string name,
-        out string argument,
-        out string body)
+        IReadOnlyList<JavaScriptToken> tokens,
+        JavaScriptFunction function,
+        string method)
     {
-        name = string.Empty;
-        argument = string.Empty;
-        body = string.Empty;
-        var searchStart = Math.Max(0, splitIndex - 2_048);
-        var functionIndex = source.LastIndexOf("function(", splitIndex, splitIndex - searchStart, StringComparison.Ordinal);
-        if (functionIndex < 0)
+        for (var index = function.TokenStart; index + 5 <= function.TokenEnd; index++)
         {
-            return false;
+            if (tokens[index].Is(source, function.Argument) &&
+                tokens[index + 1].Is(source, ".") &&
+                tokens[index + 2].Is(source, method) &&
+                tokens[index + 3].Is(source, "(") &&
+                IsEmptyString(source, tokens[index + 4]) &&
+                tokens[index + 5].Is(source, ")"))
+            {
+                return true;
+            }
         }
 
-        var parameterStart = functionIndex + "function(".Length;
-        var parameterEnd = source.IndexOf(')', parameterStart);
-        if (parameterEnd < 0 || parameterEnd > splitIndex)
-        {
-            return false;
-        }
-
-        argument = source[parameterStart..parameterEnd].Trim();
-        if (!IdentifierRegex().IsMatch(argument))
-        {
-            return false;
-        }
-
-        var bodyStart = source.IndexOf('{', parameterEnd + 1);
-        if (bodyStart < 0 || bodyStart > splitIndex)
-        {
-            return false;
-        }
-
-        var bodyEnd = JavaScriptStructure.FindMatchingBrace(source, bodyStart);
-        if (bodyEnd < splitIndex || bodyEnd - bodyStart > MaximumFunctionBodyLength)
-        {
-            return false;
-        }
-
-        var nameEnd = functionIndex;
-        var equals = source.LastIndexOf('=', nameEnd - 1, Math.Min(256, nameEnd));
-        if (equals >= 0)
-        {
-            var nameStart = equals - 1;
-            while (nameStart >= 0 && IsIdentifierCharacter(source[nameStart])) nameStart--;
-            name = source[(nameStart + 1)..equals].Trim();
-        }
-
-        if (!IdentifierRegex().IsMatch(name))
-        {
-            name = $"anonymous@{functionIndex.ToString(CultureInfo.InvariantCulture)}";
-        }
-
-        body = source[(bodyStart + 1)..bodyEnd];
-        return true;
+        return false;
     }
+
+    private static bool IsEmptyString(string source, JavaScriptToken token) =>
+        token.Kind == JavaScriptTokenKind.String &&
+        (token.Is(source, "\"\"") || token.Is(source, "''"));
 
     private static bool TryParseOperations(
         string source,
@@ -107,9 +76,7 @@ internal static partial class SignatureTransformExtractor
         var parsed = new List<SignatureOperation>();
         foreach (var statement in JavaScriptStructure.TopLevelStatements(body))
         {
-            if (statement.Contains($"{argument}.split", StringComparison.Ordinal) ||
-                statement.Contains($"{argument}.join", StringComparison.Ordinal) ||
-                statement.TrimStart().StartsWith("return", StringComparison.Ordinal))
+            if (IsInitializationOrReturnStatement(statement, argument))
             {
                 continue;
             }
@@ -148,6 +115,31 @@ internal static partial class SignatureTransformExtractor
 
         operations = parsed;
         return parsed.Count > 0;
+    }
+
+    private static bool IsInitializationOrReturnStatement(string statement, string argument)
+    {
+        if (!JavaScriptTokenizer.TryTokenize(statement, out var tokens))
+        {
+            return false;
+        }
+
+        if (tokens.Count > 0 && tokens[0].Is(statement, "return"))
+        {
+            return true;
+        }
+
+        for (var index = 0; index + 2 < tokens.Count; index++)
+        {
+            if (tokens[index].Is(statement, argument) &&
+                tokens[index + 1].Is(statement, ".") &&
+                (tokens[index + 2].Is(statement, "split") || tokens[index + 2].Is(statement, "join")))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static bool TryParseDirectOperation(
@@ -239,22 +231,6 @@ internal static partial class SignatureTransformExtractor
         return false;
     }
 
-    private static int IndexOfSplitEmpty(string source, int startIndex)
-    {
-        var doubleQuoted = source.IndexOf(".split(\"\")", startIndex, StringComparison.Ordinal);
-        var singleQuoted = source.IndexOf(".split('')", startIndex, StringComparison.Ordinal);
-        if (doubleQuoted < 0) return singleQuoted;
-        if (singleQuoted < 0) return doubleQuoted;
-        return Math.Min(doubleQuoted, singleQuoted);
-    }
-
-    private static bool ContainsJoinEmpty(string body, string argument) =>
-        body.Contains($"{argument}.join(\"\")", StringComparison.Ordinal) ||
-        body.Contains($"{argument}.join('')", StringComparison.Ordinal);
-
-    private static bool IsIdentifierCharacter(char character) =>
-        char.IsAsciiLetterOrDigit(character) || character is '_' or '$';
-
     private static bool Fail(out IReadOnlyList<SignatureOperation> operations)
     {
         operations = [];
@@ -275,12 +251,9 @@ internal static partial class SignatureTransformExtractor
 
     private static Regex HelperMethodRegex(string method) => new(
         $"(?:\\b{Regex.Escape(method)}\\b|['\\\"]{Regex.Escape(method)}['\\\"])" +
-        "\\s*:\\s*function\\s*\\([^)]*\\)\\s*\\{",
+        "\\s*(?::\\s*(?:function\\s*)?)?\\([^)]*\\)\\s*(?:=>\\s*)?\\{",
         RegexOptions.CultureInvariant,
         TimeSpan.FromMilliseconds(100));
-
-    [GeneratedRegex(@"^[$A-Za-z_][$\w]*$", RegexOptions.CultureInvariant)]
-    private static partial Regex IdentifierRegex();
 
     [GeneratedRegex(@"\s+", RegexOptions.CultureInvariant)]
     private static partial Regex WhitespaceRegex();

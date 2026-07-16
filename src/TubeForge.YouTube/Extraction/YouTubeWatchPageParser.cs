@@ -14,7 +14,8 @@ public static class YouTubeWatchPageParser
 
     public static Result<WatchPageData> Parse(
         string? html,
-        Func<string, Uri?>? signatureCipherResolver = null)
+        Func<string, Uri?>? signatureCipherResolver = null,
+        Func<Uri, Uri?>? mediaUrlResolver = null)
     {
         if (string.IsNullOrWhiteSpace(html))
         {
@@ -34,7 +35,11 @@ public static class YouTubeWatchPageParser
                     MaxDepth = 64
                 });
 
-                var mapped = MapPlayerResponse(document.RootElement, html, signatureCipherResolver);
+                var mapped = MapPlayerResponse(
+                    document.RootElement,
+                    html,
+                    signatureCipherResolver,
+                    mediaUrlResolver);
                 if (mapped is not null)
                 {
                     return mapped.Value;
@@ -122,7 +127,8 @@ public static class YouTubeWatchPageParser
     private static Result<WatchPageData>? MapPlayerResponse(
         JsonElement root,
         string html,
-        Func<string, Uri?>? signatureCipherResolver)
+        Func<string, Uri?>? signatureCipherResolver,
+        Func<Uri, Uri?>? mediaUrlResolver)
     {
         if (root.ValueKind != JsonValueKind.Object ||
             !root.TryGetProperty("videoDetails", out var details) ||
@@ -188,8 +194,20 @@ public static class YouTubeWatchPageParser
         if (root.TryGetProperty("streamingData", out var streamingData) &&
             streamingData.ValueKind == JsonValueKind.Object)
         {
-            MapFormatArray(streamingData, "formats", formats, signatureCipherResolver, ref cipheredCount);
-            MapFormatArray(streamingData, "adaptiveFormats", formats, signatureCipherResolver, ref cipheredCount);
+            MapFormatArray(
+                streamingData,
+                "formats",
+                formats,
+                signatureCipherResolver,
+                mediaUrlResolver,
+                ref cipheredCount);
+            MapFormatArray(
+                streamingData,
+                "adaptiveFormats",
+                formats,
+                signatureCipherResolver,
+                mediaUrlResolver,
+                ref cipheredCount);
         }
 
         var duration = ParseDuration(ReadString(details, "lengthSeconds"));
@@ -336,6 +354,7 @@ public static class YouTubeWatchPageParser
         string propertyName,
         ICollection<StreamFormat> output,
         Func<string, Uri?>? signatureCipherResolver,
+        Func<Uri, Uri?>? mediaUrlResolver,
         ref int cipheredCount)
     {
         if (!streamingData.TryGetProperty(propertyName, out var formats) ||
@@ -363,6 +382,11 @@ public static class YouTubeWatchPageParser
                 {
                     resolvedUrl = signatureCipherResolver(cipher);
                 }
+            }
+
+            if (resolvedUrl is not null && mediaUrlResolver is not null)
+            {
+                resolvedUrl = mediaUrlResolver(resolvedUrl);
             }
 
             if (resolvedUrl is null || !TryMapFormat(element, resolvedUrl, out var format))
