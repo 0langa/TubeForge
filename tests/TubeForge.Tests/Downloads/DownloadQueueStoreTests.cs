@@ -112,6 +112,27 @@ public static class DownloadQueueStoreTests
     }
 
     [Test]
+    public static async Task PersistsMp3OutputProfileAcrossRestart()
+    {
+        using var directory = new TestDirectory();
+        var path = Path.Combine(directory.Path, "queue.json");
+        var store = new DownloadQueueStore(path);
+        var item = Item(Guid.NewGuid(), DownloadQueueStatus.Queued, DateTimeOffset.UtcNow) with
+        {
+            FormatId = 140,
+            SourceIdentity = "Fixture123_:140@mp3-320",
+            DestinationPath = Path.Combine(Path.GetTempPath(), "TubeForge.Tests", "fixture.mp3")
+        };
+
+        var save = await store.SaveAsync(new DownloadQueueSnapshot { Items = [item] });
+        Assert.True(save.IsSuccess, save.Error?.Message);
+
+        var load = await new DownloadQueueStore(path).LoadAsync();
+        Assert.True(load.IsSuccess, load.Error?.Message);
+        Assert.Equal("Fixture123_:140@mp3-320", load.Value.Items[0].SourceIdentity);
+    }
+
+    [Test]
     public static async Task RecoversFlushedPendingStateAfterInterruptedReplacement()
     {
         using var directory = new TestDirectory();

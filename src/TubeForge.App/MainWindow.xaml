@@ -385,7 +385,17 @@
                                     <TextBlock Text="PROCESSING" Style="{StaticResource FieldLabel}" />
                                     <ComboBox ItemsSource="{Binding AudioProcessingOptions}"
                                               SelectedItem="{Binding SelectedAudioProcessing}"
-                                              AutomationProperties.Name="Audio processing" />
+                                              AutomationProperties.Name="Audio processing" MinHeight="48">
+                                        <ComboBox.ItemTemplate>
+                                            <DataTemplate>
+                                                <StackPanel>
+                                                    <TextBlock Text="{Binding Label}" />
+                                                    <TextBlock Text="{Binding Description}" FontSize="10"
+                                                               Foreground="{StaticResource MutedTextBrush}" />
+                                                </StackPanel>
+                                            </DataTemplate>
+                                        </ComboBox.ItemTemplate>
+                                    </ComboBox>
                                 </StackPanel>
                             </Grid>
 

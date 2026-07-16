@@ -419,12 +419,12 @@ Exit: app, artifacts, documentation, and public repository use one recognizable 
 
 ### M13 — Native Windows audio transcoding
 
-- [ ] Add dependency-free Windows Media Foundation source-reader/sink-writer bridge.
-- [ ] Expose MP3 output at 128, 192, 256, and 320 kbps for audio-only downloads.
-- [ ] Preserve native M4A/AAC and WebM/Opus as lossless-copy choices.
-- [ ] Stage source audio, transcode to a sibling temporary file, validate output, then publish atomically.
-- [ ] Persist output profile across queue restart and include it in duplicate identity.
-- [ ] Add deterministic validation, unsupported-codec, cancellation, and cleanup tests.
+- [x] Add dependency-free Windows Media Foundation source-reader/sink-writer bridge.
+- [x] Expose MP3 output at 128, 192, 256, and 320 kbps for audio-only downloads.
+- [x] Preserve native M4A/AAC and WebM/Opus as lossless-copy choices.
+- [x] Stage source audio, transcode to a sibling temporary file, validate output, then publish atomically.
+- [x] Persist output profile across queue restart and include it in duplicate identity.
+- [x] Add deterministic validation, unsupported-codec, cancellation, and cleanup tests.
 
 Exit: supported Windows codecs convert selected public audio to playable MP3 without FFmpeg or bundled codec binaries.
 

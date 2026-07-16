@@ -18,6 +18,8 @@ using TubeForge.Core.YouTube;
 using TubeForge.Downloads;
 using TubeForge.Downloads.History;
 using TubeForge.Downloads.Queue;
+using TubeForge.Media;
+using TubeForge.Transcoding;
 using TubeForge.YouTube;
 using TubeForge.YouTube.Captions;
 using TubeForge.YouTube.Collections;
@@ -37,9 +39,13 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         new(DownloadMode.VideoOnly, "Video only", "Maximum video quality; audio not included")
     ];
 
-    private static readonly IReadOnlyList<string> AudioProcessingChoices =
+    private static readonly IReadOnlyList<AudioProcessingOption> AudioProcessingChoices =
     [
-        "Native stream · no conversion · no quality loss"
+        new(AudioOutputProfile.Native, "Native stream · no conversion", "Fastest; preserves source quality"),
+        new(AudioOutputProfile.Mp3(320), "MP3 · 320 kbps", "Highest MP3 bitrate; largest file"),
+        new(AudioOutputProfile.Mp3(256), "MP3 · 256 kbps", "High-quality MP3"),
+        new(AudioOutputProfile.Mp3(192), "MP3 · 192 kbps", "Balanced quality and size"),
+        new(AudioOutputProfile.Mp3(128), "MP3 · 128 kbps", "Smallest MP3 file")
     ];
 
     private static readonly IReadOnlyList<CaptionFormatOption> CaptionOutputChoices =
@@ -53,6 +59,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     private readonly YouTubeMetadataResolver _resolver;
     private readonly DirectDownloadEngine _downloader;
     private readonly AdaptiveDownloadEngine _adaptiveDownloader;
+    private readonly WindowsMediaFoundationTranscoder _audioTranscoder = new();
     private readonly CaptionDownloadEngine _captionDownloader;
     private readonly YouTubeCollectionResolver _collectionResolver;
     private readonly ThumbnailDownloadEngine _thumbnailDownloader;
@@ -101,7 +108,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     private FilterOption<long>? _selectedBitrate;
     private IReadOnlyList<FilterOption<AudioCodec>> _audioCodecOptions = [];
     private FilterOption<AudioCodec>? _selectedAudioCodec;
-    private string _selectedAudioProcessing = AudioProcessingChoices[0];
+    private AudioProcessingOption _selectedAudioProcessing = AudioProcessingChoices[0];
     private DownloadQueueSnapshot _queueSnapshot = new();
     private DownloadHistorySnapshot _historySnapshot = new();
     private bool _isInitialized;
@@ -216,7 +223,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
 
     public IReadOnlyList<DownloadModeOption> DownloadModes => _downloadModes;
 
-    public IReadOnlyList<string> AudioProcessingOptions => AudioProcessingChoices;
+    public IReadOnlyList<AudioProcessingOption> AudioProcessingOptions => AudioProcessingChoices;
 
     public AsyncRelayCommand AnalyzeCommand { get; }
 
@@ -632,10 +639,16 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         set => SetFilterSelection(ref _selectedAudioCodec, value);
     }
 
-    public string SelectedAudioProcessing
+    public AudioProcessingOption SelectedAudioProcessing
     {
         get => _selectedAudioProcessing;
-        set => Set(ref _selectedAudioProcessing, value);
+        set
+        {
+            if (value is not null && Set(ref _selectedAudioProcessing, value))
+            {
+                OnPropertyChanged(nameof(ModeNotice));
+            }
+        }
     }
 
     public bool HasVideoFilters => SelectedDownloadMode.Value is not DownloadMode.AudioOnly;
@@ -649,7 +662,9 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         DownloadMode.AudioVideo =>
             CombinedModeNotice(),
         DownloadMode.AudioOnly =>
-            "Native AAC/Opus save: fast and lossless. MP3 conversion stays unavailable until TubeForge has its own encoder.",
+            SelectedAudioProcessing.Value.Kind == AudioOutputKind.Native
+                ? "Native AAC/Opus: fastest path with no re-encoding or quality loss."
+                : $"MP3 {SelectedAudioProcessing.Value.BitrateKbps} kbps: Windows Media Foundation decodes and re-encodes locally; no FFmpeg.",
         DownloadMode.VideoOnly =>
             VideoOnlyModeNotice(),
         _ => string.Empty
@@ -996,9 +1011,10 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         ErrorMessage = string.Empty;
         var selection = SelectedFormat;
         var format = selection.Format;
+        var output = AudioOutputFor(selection);
         try
         {
-            var renderedName = RenderFileName(_metadata, selection, index: null, indexWidth: 2);
+            var renderedName = RenderFileName(_metadata, selection, index: null, indexWidth: 2, output);
             if (!renderedName.IsSuccess)
             {
                 ErrorMessage = $"{renderedName.Error!.Message} ({renderedName.Error.Code})";
@@ -1010,15 +1026,13 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             var destination = FileNamePolicy.AvailablePath(
                 DownloadFolder,
                 renderedName.Value,
-                selection.RequiresMuxing
-                    ? FormatDisplay.Extension(format.Container)
-                    : FormatDisplay.OutputExtension(format),
+                OutputExtension(selection, output),
                 path => File.Exists(path) ||
                         File.Exists(path + ".part") ||
                         _queueSnapshot.Items.Any(item => item.DestinationPath.Equals(path, StringComparison.OrdinalIgnoreCase)) ||
                         _historySnapshot.Entries.Any(item => item.DestinationPath.Equals(path, StringComparison.OrdinalIgnoreCase)));
             var duplicate = DownloadDuplicateDetector.Find(
-                SelectionIdentity(_metadata, selection),
+                SelectionIdentity(_metadata, selection, output),
                 destination,
                 _queueSnapshot.Items,
                 _historySnapshot.Entries);
@@ -1030,7 +1044,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                 return;
             }
 
-            var queueItem = CreateQueueItem(_metadata, selection, destination);
+            var queueItem = CreateQueueItem(_metadata, selection, destination, output);
             var queueError = await UpsertQueueItemAsync(queueItem);
             if (queueError is not null)
             {
@@ -1039,7 +1053,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                 return;
             }
 
-            _preparedQueueWork[queueItem.Id] = new QueuedDownloadWork(_metadata, selection, destination);
+            _preparedQueueWork[queueItem.Id] = new QueuedDownloadWork(_metadata, selection, destination, output);
             StatusMessage = $"Queued: {Path.GetFileName(destination)}";
             ProgressDetail = $"Global concurrency: {SelectedMaxConcurrentDownloads}";
             PumpQueue();
@@ -1453,13 +1467,13 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             }
 
             var work = prepared.Work;
-            var existingBytes = SelectionPartialLength(work.Destination, work.Selection);
-            var reservedBytes = SelectionReservedLength(work.Destination, work.Selection);
+            var existingBytes = SelectionPartialLength(work.Destination, work.Selection, work.Output);
+            var reservedBytes = SelectionReservedLength(work.Destination, work.Selection, work.Output);
             var diskForecast = DiskSpacePolicy.Check(
                 work.Destination,
-                CombinedLength(work.Selection),
+                ForecastLength(work),
                 reservedBytes,
-                work.Selection.RequiresMuxing);
+                work.Selection.RequiresMuxing || work.Output.Kind == AudioOutputKind.Mp3);
             if (!diskForecast.IsSuccess)
             {
                 await CompleteQueueRunAsync(
@@ -1476,7 +1490,38 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             using var mediaLease = await _hostRequestGate.EnterAsync(
                 work.Selection.Format.Url,
                 cancellation.Token);
-            if (work.Selection.AudioFormat is StreamFormat audioFormat)
+            if (work.Output.Kind == AudioOutputKind.Mp3)
+            {
+                var sourcePath = AudioSourcePath(work.Destination, work.Selection.Format);
+                var sourceResult = await EnsureTrackDownloadedAsync(
+                    TrackRequest(work.Metadata, work.Selection.Format, sourcePath),
+                    progress,
+                    cancellation.Token);
+                if (!sourceResult.IsSuccess)
+                {
+                    downloadError = sourceResult.Error;
+                    completedBytes = SelectionPartialLength(work.Destination, work.Selection, work.Output);
+                }
+                else
+                {
+                    StatusMessage = $"Converting to MP3 · {work.Output.BitrateKbps} kbps";
+                    var transcodeResult = await _audioTranscoder.TranscodeAsync(new AudioTranscodeRequest
+                    {
+                        SourcePath = sourcePath,
+                        DestinationPath = work.Destination,
+                        Output = work.Output
+                    }, cancellation.Token);
+                    downloadError = transcodeResult.Error;
+                    completedBytes = transcodeResult.IsSuccess
+                        ? transcodeResult.Value.BytesWritten
+                        : SelectionPartialLength(work.Destination, work.Selection, work.Output);
+                    if (transcodeResult.IsSuccess)
+                    {
+                        File.Delete(sourcePath);
+                    }
+                }
+            }
+            else if (work.Selection.AudioFormat is StreamFormat audioFormat)
             {
                 var result = await _adaptiveDownloader.DownloadAsync(new AdaptiveDownloadRequest
                 {
@@ -1492,7 +1537,9 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                     OutputContainer = work.Selection.Format.Container
                 }, progress, cancellation.Token);
                 downloadError = result.Error;
-                completedBytes = result.IsSuccess ? result.Value.BytesWritten : SelectionPartialLength(work.Destination, work.Selection);
+                completedBytes = result.IsSuccess
+                    ? result.Value.BytesWritten
+                    : SelectionPartialLength(work.Destination, work.Selection, work.Output);
             }
             else
             {
@@ -1501,7 +1548,9 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                     progress,
                     cancellation.Token);
                 downloadError = result.Error;
-                completedBytes = result.IsSuccess ? result.Value.BytesWritten : SelectionPartialLength(work.Destination, work.Selection);
+                completedBytes = result.IsSuccess
+                    ? result.Value.BytesWritten
+                    : SelectionPartialLength(work.Destination, work.Selection, work.Output);
             }
 
             if (downloadError?.Code == "Network.RateLimited")
@@ -1606,6 +1655,13 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             return (null, new TubeForgeError("Queue.InvalidSourceIdentity", "The queued source identity is invalid."));
         }
 
+        if (sourceIdentity.Output.Kind == AudioOutputKind.Mp3 && primary.Kind != StreamKind.AudioOnly)
+        {
+            return (null, new TubeForgeError(
+                "Queue.InvalidOutputProfile",
+                "The queued MP3 profile is valid only for audio-only media."));
+        }
+
         StreamFormat? audio = null;
         var audioFormatId = sourceIdentity.AudioFormatId;
         if (audioFormatId is not null)
@@ -1621,7 +1677,11 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         }
 
         var selection = new FormatItemViewModel(primary, audio);
-        var work = new QueuedDownloadWork(resolved.Value.Metadata, selection, item.DestinationPath);
+        var work = new QueuedDownloadWork(
+            resolved.Value.Metadata,
+            selection,
+            item.DestinationPath,
+            sourceIdentity.Output);
         _preparedQueueWork[itemId] = work;
         return (work, null);
     }
@@ -1661,7 +1721,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     {
         if (_preparedQueueWork.TryGetValue(itemId, out var work))
         {
-            return SelectionPartialLength(work.Destination, work.Selection);
+            return SelectionPartialLength(work.Destination, work.Selection, work.Output);
         }
 
         return _queueSnapshot.Items.FirstOrDefault(item => item.Id == itemId)?.BytesReceived;
@@ -1753,7 +1813,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         {
             Id = Guid.NewGuid(),
             VideoId = work.Metadata.Id.Value,
-            SourceIdentity = SelectionIdentity(work.Metadata, work.Selection),
+            SourceIdentity = SelectionIdentity(work.Metadata, work.Selection, work.Output),
             DisplayTitle = work.Metadata.Title,
             DestinationPath = work.Destination,
             BytesWritten = bytesWritten,
@@ -1956,13 +2016,14 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     private static DownloadQueueItem CreateQueueItem(
         VideoMetadata metadata,
         FormatItemViewModel selection,
-        string destination)
+        string destination,
+        AudioOutputProfile output = default)
     {
         var now = DateTimeOffset.UtcNow;
         var format = selection.Format;
-        var sourceIdentity = SelectionIdentity(metadata, selection);
+        var sourceIdentity = SelectionIdentity(metadata, selection, output);
         var expectedLength = CombinedLength(selection);
-        var partialLength = SelectionPartialLength(destination, selection);
+        var partialLength = SelectionPartialLength(destination, selection, output);
 
         return new DownloadQueueItem
         {
@@ -1993,31 +2054,65 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             EnableSegmentedTransfer = _settings.EnableSegmentedTransfers
         };
 
+    private async Task<Result<DownloadReceipt>> EnsureTrackDownloadedAsync(
+        DownloadRequest request,
+        IProgress<DownloadProgress>? progress,
+        CancellationToken cancellationToken)
+    {
+        if (!File.Exists(request.DestinationPath))
+        {
+            return await _downloader.DownloadAsync(request, progress, cancellationToken);
+        }
+
+        var length = new FileInfo(request.DestinationPath).Length;
+        if (request.ExpectedLength is not null && request.ExpectedLength != length)
+        {
+            return Result<DownloadReceipt>.Failure(new TubeForgeError(
+                "Media.IntermediateConflict",
+                "A completed source audio track has an unexpected size."));
+        }
+
+        var validation = MediaContainerValidator.Validate(request.DestinationPath, request.ExpectedContainer);
+        if (!validation.IsSuccess)
+        {
+            return Result<DownloadReceipt>.Failure(validation.Error!);
+        }
+
+        progress?.Report(new DownloadProgress(length, request.ExpectedLength ?? length, 0, TimeSpan.Zero));
+        return Result<DownloadReceipt>.Success(new DownloadReceipt(request.DestinationPath, length, Resumed: true));
+    }
+
     private static string IntermediateTrackPath(
         string destination,
         string role,
         StreamFormat format) =>
         destination + $".{role}-track" + FormatDisplay.OutputExtension(format);
 
-    private static string SelectionIdentity(VideoMetadata metadata, FormatItemViewModel selection) =>
+    private static string AudioSourcePath(string destination, StreamFormat format) =>
+        destination + ".source" + FormatDisplay.OutputExtension(format);
+
+    private static string SelectionIdentity(
+        VideoMetadata metadata,
+        FormatItemViewModel selection,
+        AudioOutputProfile output = default) =>
         DownloadSourceIdentity.Create(
             metadata.Id,
             selection.Format.FormatId,
-            selection.AudioFormat?.FormatId);
+            selection.AudioFormat?.FormatId,
+            output);
 
     private Result<string> RenderFileName(
         VideoMetadata metadata,
         FormatItemViewModel selection,
         int? index,
-        int indexWidth)
+        int indexWidth,
+        AudioOutputProfile output = default)
     {
         var format = selection.Format;
         var quality = format.HasVideo
             ? format.Height is > 0 ? $"{format.Height}p" : "video"
             : format.Bitrate is > 0 ? $"{Math.Round(format.Bitrate.Value / 1000d):0}kbps" : "audio";
-        var extension = selection.RequiresMuxing
-            ? FormatDisplay.Extension(format.Container)
-            : FormatDisplay.OutputExtension(format);
+        var extension = OutputExtension(selection, output);
         var template = index is not null && FileNameTemplateText == FileNameTemplate.Default
             ? "{index} - {title}"
             : FileNameTemplateText;
@@ -2042,6 +2137,40 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         _ => "duplicate output"
     };
 
+    private AudioOutputProfile AudioOutputFor(FormatItemViewModel selection) =>
+        SelectedDownloadMode.Value == DownloadMode.AudioOnly && selection.Format.Kind == StreamKind.AudioOnly
+            ? SelectedAudioProcessing.Value
+            : AudioOutputProfile.Native;
+
+    private static string OutputExtension(
+        FormatItemViewModel selection,
+        AudioOutputProfile output) =>
+        output.Kind == AudioOutputKind.Mp3
+            ? output.Extension
+            : selection.RequiresMuxing
+                ? FormatDisplay.Extension(selection.Format.Container)
+                : FormatDisplay.OutputExtension(selection.Format);
+
+    private static long? ForecastLength(QueuedDownloadWork work)
+    {
+        var sourceLength = CombinedLength(work.Selection);
+        if (work.Output.Kind != AudioOutputKind.Mp3 || work.Metadata.Duration is null)
+        {
+            return sourceLength;
+        }
+
+        try
+        {
+            var mp3Length = checked((long)Math.Ceiling(
+                work.Metadata.Duration.Value.TotalSeconds * work.Output.BitrateKbps * 1000d / 8d) + 64 * 1024);
+            return sourceLength is null ? mp3Length : Math.Max(sourceLength.Value, mp3Length);
+        }
+        catch (OverflowException)
+        {
+            return null;
+        }
+    }
+
     private static long? CombinedLength(FormatItemViewModel selection)
     {
         if (selection.Format.ContentLength is null || selection.AudioFormat?.ContentLength is null)
@@ -2059,8 +2188,16 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         }
     }
 
-    private static long SelectionPartialLength(string destination, FormatItemViewModel selection)
+    private static long SelectionPartialLength(
+        string destination,
+        FormatItemViewModel selection,
+        AudioOutputProfile output = default)
     {
+        if (output.Kind == AudioOutputKind.Mp3)
+        {
+            return CompletedOrPartialLength(AudioSourcePath(destination, selection.Format));
+        }
+
         if (selection.AudioFormat is null)
         {
             return PartialLength(destination);
@@ -2078,8 +2215,16 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         }
     }
 
-    private static long SelectionReservedLength(string destination, FormatItemViewModel selection)
+    private static long SelectionReservedLength(
+        string destination,
+        FormatItemViewModel selection,
+        AudioOutputProfile output = default)
     {
+        if (output.Kind == AudioOutputKind.Mp3)
+        {
+            return CompletedOrReservedLength(AudioSourcePath(destination, selection.Format));
+        }
+
         if (selection.AudioFormat is null)
         {
             return CompletedOrReservedLength(destination);
@@ -2780,5 +2925,6 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     private sealed record QueuedDownloadWork(
         VideoMetadata Metadata,
         FormatItemViewModel Selection,
-        string Destination);
+        string Destination,
+        AudioOutputProfile Output = default);
 }
