@@ -8,6 +8,7 @@ using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Runtime.CompilerServices;
 using TubeForge.App.Commands;
+using TubeForge.Core.Diagnostics;
 using TubeForge.Core.Errors;
 using TubeForge.Core.Files;
 using TubeForge.Core.Media;
@@ -88,6 +89,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     private TubeForgeSettings _settings;
     private bool _showResponsibleUseNotice = true;
     private string _settingsStatus = "Settings stay on this device.";
+    private string _diagnosticsStatus = "Export contains whitelisted technical state only.";
+    private string _diagnosticsExtractionStage = "NotRun";
 
     public MainViewModel()
     {
@@ -263,6 +266,12 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         private set => Set(ref _settingsStatus, value);
     }
 
+    public string DiagnosticsStatus
+    {
+        get => _diagnosticsStatus;
+        private set => Set(ref _diagnosticsStatus, value);
+    }
+
     public string ApplicationVersion =>
         Assembly.GetExecutingAssembly().GetName().Version?.ToString(3) ?? "development";
 
@@ -276,9 +285,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
 
     public string SettingsStoragePath => _settingsStore.StoragePath;
 
-    public string DiagnosticsExtractionStatus => string.IsNullOrWhiteSpace(ExtractionStatus)
-        ? "No analysis performed this session"
-        : ExtractionStatus;
+    public string DiagnosticsExtractionStatus => _diagnosticsExtractionStage;
 
     public string DiagnosticsFormatSummary => _metadata is null
         ? "No active media metadata"
@@ -614,6 +621,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         var parsed = YouTubeUrlParser.ParseVideoId(UrlText);
         if (!parsed.IsSuccess)
         {
+            _diagnosticsExtractionStage = "InputRejected";
+            OnPropertyChanged(nameof(DiagnosticsExtractionStatus));
             ErrorMessage = $"{parsed.Error!.Message} ({parsed.Error.Code})";
             StatusMessage = "URL rejected";
             return;
@@ -627,12 +636,16 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             var result = await _resolver.ResolveAsync(parsed.Value, _analysisCancellation.Token);
             if (!result.IsSuccess)
             {
+                _diagnosticsExtractionStage = "ResolutionFailed";
+                OnPropertyChanged(nameof(DiagnosticsExtractionStatus));
                 ErrorMessage = $"{result.Error!.Message} ({result.Error.Code})";
                 StatusMessage = "Analysis failed";
                 return;
             }
 
             _metadata = result.Value.Metadata;
+            _diagnosticsExtractionStage = result.Value.Diagnostics?.Stage ?? "WatchPageResolved";
+            OnPropertyChanged(nameof(DiagnosticsExtractionStatus));
             _videoTitle = _metadata.Title;
             _videoChannel = _metadata.Channel;
             _videoDuration = _metadata.Duration;
@@ -721,6 +734,25 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     }
 
     public void Cancel() => PauseAll();
+
+    public string BuildDiagnosticReport() => RedactedDiagnosticReportBuilder.Build(new DiagnosticReportInput
+    {
+        GeneratedAtUtc = DateTimeOffset.UtcNow,
+        ApplicationVersion = ApplicationVersion,
+        RuntimeDescription = RuntimeDescription,
+        ProcessArchitecture = ProcessArchitecture,
+        ExtractionStage = DiagnosticsExtractionStatus,
+        TotalFormats = _allFormats.Count,
+        MatchingOutputs = Formats.Count,
+        ActiveQueueItems = _queueSnapshot.Items.Count(item => item.Status == DownloadQueueStatus.Downloading),
+        WaitingQueueItems = _queueSnapshot.Items.Count(item => item.Status == DownloadQueueStatus.Queued),
+        PausedQueueItems = _queueSnapshot.Items.Count(item => item.Status == DownloadQueueStatus.Paused),
+        CompletedQueueItems = _queueSnapshot.Items.Count(item => item.Status == DownloadQueueStatus.Completed),
+        FailedQueueItems = _queueSnapshot.Items.Count(item => item.Status == DownloadQueueStatus.Failed),
+        CancelledQueueItems = _queueSnapshot.Items.Count(item => item.Status == DownloadQueueStatus.Cancelled)
+    });
+
+    public void SetDiagnosticsStatus(string status) => DiagnosticsStatus = status;
 
     public void Dispose()
     {

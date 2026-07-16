@@ -3,6 +3,7 @@ using System.Windows.Input;
 using System.Windows.Interop;
 using System.IO;
 using System.Runtime.InteropServices;
+using System.Text;
 using Microsoft.Win32;
 using TubeForge.App.ViewModels;
 
@@ -65,6 +66,50 @@ public partial class MainWindow : Window
         {
             _viewModel.AnalyzeCommand.Execute(null);
             e.Handled = true;
+        }
+    }
+
+    private void CopyDiagnosticsButton_OnClick(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            Clipboard.SetText(_viewModel.BuildDiagnosticReport());
+            _viewModel.SetDiagnosticsStatus("Redacted report copied to clipboard.");
+        }
+        catch (Exception exception) when (exception is ExternalException or InvalidOperationException)
+        {
+            _viewModel.SetDiagnosticsStatus($"Clipboard unavailable: {exception.GetType().Name}");
+        }
+    }
+
+    private async void ExportDiagnosticsButton_OnClick(object sender, RoutedEventArgs e)
+    {
+        var dialog = new SaveFileDialog
+        {
+            Title = "Export redacted TubeForge diagnostics",
+            FileName = $"tubeforge-diagnostics-{DateTime.UtcNow:yyyyMMdd-HHmmss}.json",
+            DefaultExt = ".json",
+            Filter = "JSON report (*.json)|*.json",
+            AddExtension = true,
+            OverwritePrompt = true
+        };
+        if (dialog.ShowDialog(this) != true)
+        {
+            return;
+        }
+
+        try
+        {
+            await File.WriteAllTextAsync(
+                dialog.FileName,
+                _viewModel.BuildDiagnosticReport(),
+                new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+            _viewModel.SetDiagnosticsStatus("Redacted report exported.");
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or
+                                          ArgumentException or NotSupportedException)
+        {
+            _viewModel.SetDiagnosticsStatus($"Export failed: {exception.GetType().Name}");
         }
     }
 

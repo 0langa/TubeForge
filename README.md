@@ -72,7 +72,7 @@ dotnet run --project src/TubeForge.App --configuration Release
 
 ## Security
 
-Do not include media URLs, cookies, signatures, visitor data, private video data, or copyrighted media when reporting problems. See [SECURITY.md](SECURITY.md). Automated redacted diagnostic export remains planned.
+Do not include media URLs, cookies, signatures, visitor data, private video data, or copyrighted media when reporting problems. Use Diagnostics → Export JSON, review it, then follow [SECURITY.md](SECURITY.md).
 
 ## License
 

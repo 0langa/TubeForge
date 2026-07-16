@@ -717,6 +717,22 @@
                         <TextBlock Text="SETTINGS" Style="{StaticResource FieldLabel}" Margin="0,14,0,5" />
                         <TextBlock Text="{Binding SettingsStoragePath}" TextWrapping="Wrap"
                                    Foreground="{StaticResource MutedTextBrush}" />
+                        <Grid Margin="0,22,0,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="10" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="{Binding DiagnosticsStatus}" VerticalAlignment="Center"
+                                       Foreground="{StaticResource MutedTextBrush}" TextWrapping="Wrap" />
+                            <Button Grid.Column="1" Style="{StaticResource SecondaryButton}" Content="Copy report"
+                                    Click="CopyDiagnosticsButton_OnClick" Padding="14,9"
+                                    AutomationProperties.Name="Copy redacted diagnostic report" />
+                            <Button Grid.Column="3" Style="{StaticResource PrimaryButton}" Content="Export JSON"
+                                    Click="ExportDiagnosticsButton_OnClick" Padding="14,9"
+                                    AutomationProperties.Name="Export redacted diagnostic report as JSON" />
+                        </Grid>
                     </StackPanel>
                 </Border>
             </Grid>

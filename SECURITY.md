@@ -19,6 +19,8 @@ Never include:
 
 Useful safe details include the commit/version, failure code, affected subsystem, sanitized reproduction structure, and whether the issue works with synthetic/local test data.
 
+Use the in-app Diagnostics export when possible. Its JSON schema is whitelist-only and excludes URLs, video IDs, titles, channels, local paths, headers, cookies, signatures, visitor data, and media. Review exported data before sharing it.
+
 ## Security boundaries
 
 - Player JavaScript must never be executed directly.

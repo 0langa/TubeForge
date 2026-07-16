@@ -388,7 +388,7 @@ Exit: best compatible WebM adaptive formats combine into seekable files.
 - [ ] Add network-change, sleep/resume, proxy, IPv4/IPv6, and slow-disk tests.
 - [x] Add disk-space forecasting and low-space recovery.
 - [ ] Add queue soak tests and crash-consistent persistence.
-- [ ] Add redacted diagnostic export and issue template.
+- [x] Add redacted diagnostic export and issue template.
 - [ ] Performance budget: startup, analysis latency, CPU, memory, UI frame time.
 
 Exit: release-candidate reliability targets met on supported Windows versions.
@@ -453,6 +453,7 @@ Order for current work:
 - 2026-07-16: Keep deterministic MP4/WebM mutation suites and hostile size/truncation/offset fixtures in normal CI. Readers must return typed failures; muxers must never publish output or leave `.muxing` files after rejected input.
 - 2026-07-16: Forecast destination space before each queue run. Direct transfers reserve remaining source bytes plus headroom; adaptive muxes also reserve a full output estimate. Insufficient-space failures stay retryable after cleanup.
 - 2026-07-16: Keep canary URLs in an operator-owned local file, never Git. Canary output is ordinal and aggregate-only; maintenance playbook forbids URLs, IDs, titles, channels, headers, scripts, and media in reports/fixtures.
+- 2026-07-16: Diagnostic export uses a whitelist-only JSON schema and deliberately omits all content/source/local-path fields. GitHub extractor reports require this redacted report plus explicit safety acknowledgement.
 
 ## 15. Plan maintenance
 
