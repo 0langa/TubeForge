@@ -7,24 +7,52 @@ TubeForge is an experimental, ad-free Windows desktop downloader built from scra
 
 ## Status
 
-Early development. No stable release yet. See [DEVELOPMENT_PLAN.md](DEVELOPMENT_PLAN.md) for scope, architecture, milestones, and current progress.
+Early functional MVP; no stable release yet.
 
-## Planned baseline
+Working now:
+
+- modern WPF analyze/download screen;
+- strict YouTube URL parsing and live public-video metadata resolution;
+- versioned Android player fallback for direct progressive, native-audio, and video-only streams;
+- truthful format/container/codec labels and collision-safe filenames;
+- resumable `.part` transfers, validators, bounded retries, progress, cancellation, and atomic finalization;
+- dependency-free fixture/transfer test runner and sanitized live metadata smoke tool.
+
+Not finished: persistent multi-item queue, adaptive audio/video muxing, current ES6 player decipher, throttling-parameter transforms, container validation, settings, packaging, and releases. See [DEVELOPMENT_PLAN.md](DEVELOPMENT_PLAN.md) for exact checklist state.
+
+## Baseline
 
 - Windows 10/11 x64
 - .NET 10 WPF desktop application
 - Public video metadata and direct progressive MP4 downloads
 - Native audio-only downloads
-- Resumable queue and in-house media container support
+- Resumable direct transfers; persistent queue and in-house media muxers remain planned
 - No ads, telemetry, accounts, or paid features
 
 ## Build
 
-The source scaffold is added in milestone M0. Required toolchain: .NET 10 SDK on Windows.
+Required toolchain: .NET 10 SDK on Windows.
+
+```powershell
+dotnet build TubeForge.slnx --configuration Release
+dotnet run --project tests/TubeForge.Tests --configuration Release -- --all
+```
+
+Opt-in live metadata smoke test (prints no media URLs):
+
+```powershell
+dotnet run --project tools/TubeForge.Smoke -- analyze "https://www.youtube.com/watch?v=VIDEO_ID"
+```
+
+Run the desktop application:
+
+```powershell
+dotnet run --project src/TubeForge.App --configuration Release
+```
 
 ## Security
 
-Do not include media URLs, cookies, signatures, visitor data, private video data, or copyrighted media when reporting problems. A dedicated security policy and redacted diagnostics workflow are planned in M0.
+Do not include media URLs, cookies, signatures, visitor data, private video data, or copyrighted media when reporting problems. See [SECURITY.md](SECURITY.md). Automated redacted diagnostic export remains planned.
 
 ## License
 

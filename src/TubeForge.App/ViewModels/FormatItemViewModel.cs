@@ -1,0 +1,51 @@
+using TubeForge.Core.Media;
+
+namespace TubeForge.App.ViewModels;
+
+public sealed record FormatItemViewModel(StreamFormat Format)
+{
+    public string Label => FormatDisplay.Label(Format);
+
+    public string TechnicalLabel => string.Join(" · ", new[]
+    {
+        Format.Kind switch
+        {
+            StreamKind.Progressive => "ready to play",
+            StreamKind.AudioOnly => "native audio",
+            StreamKind.VideoOnly => "video track only",
+            _ => "stream"
+        },
+        VideoCodecLabel(),
+        AudioCodecLabel()
+    }.Where(value => !string.IsNullOrEmpty(value)));
+
+    public string SizeLabel => Format.ContentLength is > 0
+        ? FormatSize(Format.ContentLength.Value)
+        : "size unknown";
+
+    private string VideoCodecLabel() => Format.VideoCodec switch
+    {
+        VideoCodec.H264 => "H.264",
+        VideoCodec.Vp9 => "VP9",
+        VideoCodec.Av1 => "AV1",
+        VideoCodec.Unknown => "video codec unknown",
+        _ => string.Empty
+    };
+
+    private string AudioCodecLabel() => Format.AudioCodec switch
+    {
+        AudioCodec.Aac => "AAC",
+        AudioCodec.Opus => "Opus",
+        AudioCodec.Vorbis => "Vorbis",
+        AudioCodec.Unknown => "audio codec unknown",
+        _ => string.Empty
+    };
+
+    private static string FormatSize(long bytes)
+    {
+        var megabytes = bytes / 1024d / 1024d;
+        return megabytes >= 1024
+            ? $"{megabytes / 1024:0.00} GB"
+            : $"{megabytes:0.#} MB";
+    }
+}

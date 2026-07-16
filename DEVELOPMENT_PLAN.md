@@ -258,57 +258,62 @@ Checkboxes track repository state. Each milestone ends with passing gates, updat
 ### M0 — Foundation and public project
 
 - [x] Define product boundaries, architecture, risks, and milestones.
-- [ ] Initialize Git repository with `main` branch.
-- [ ] Create public GitHub repository and push initial commit.
-- [ ] Initialize local RECALL project memory; keep `.recall/` untracked.
-- [ ] Add README, responsible-use notice, contribution rules, and security policy.
-- [ ] Scaffold solution and dependency-free test runner.
-- [ ] Add deterministic build properties and warning policy.
-- [ ] Add GitHub Actions build/test workflow using only official actions.
+- [x] Initialize Git repository with `main` branch.
+- [x] Create public GitHub repository and push initial commit.
+- [x] Initialize local RECALL project memory; keep `.recall/` untracked.
+- [x] Add README, responsible-use notice, contribution rules, and security policy.
+- [x] Scaffold solution and dependency-free test runner.
+- [x] Add deterministic build properties and warning policy.
+- [x] Add GitHub Actions build/test workflow using only official actions.
 
 Exit: fresh clone builds and tests on Windows with the documented .NET SDK.
 
 ### M1 — Input and domain foundation
 
-- [ ] Parse `youtube.com/watch`, `youtu.be`, `/shorts/`, `/live/`, and `/embed/` URLs.
-- [ ] Validate video IDs without accepting arbitrary hostnames.
-- [ ] Define video, format, codec, container, availability, and failure models.
-- [ ] Implement filename sanitization and collision policy.
-- [ ] Implement format classification, display labels, and deterministic ranking.
-- [ ] Cover edge cases and malicious inputs in unit tests.
+- [x] Parse `youtube.com/watch`, `youtu.be`, `/shorts/`, `/live/`, and `/embed/` URLs.
+- [x] Validate video IDs without accepting arbitrary hostnames.
+- [x] Define video, format, codec, container, availability, and failure models.
+- [x] Implement filename sanitization and collision policy.
+- [x] Implement format classification, display labels, and deterministic ranking.
+- [x] Cover edge cases and malicious inputs in unit tests.
 
 Exit: URL-to-video-ID and domain decisions pass exhaustive local tests.
 
 ### M2 — Metadata resolver
 
-- [ ] Build coherent YouTube HTTP session and request headers.
-- [ ] Fetch watch page with timeouts, cancellation, compression, and redirect checks.
-- [ ] Extract embedded player response and player-script URL without regex-only parsing.
-- [ ] Map metadata, thumbnails, duration, captions, playability, and streaming formats.
-- [ ] Implement internal player request using page-derived configuration.
-- [ ] Add fallback strategy orchestration and failure classification.
-- [ ] Add sanitized fixture tests and opt-in live smoke command.
+- [x] Build coherent YouTube HTTP session and request headers.
+- [x] Fetch watch page with timeouts, cancellation, compression, and bounded redirects.
+- [x] Extract embedded player response and player-script URL using balanced structural scanning.
+- [x] Map metadata, thumbnails, duration, playability, and streaming formats.
+- [ ] Map caption tracks and language metadata.
+- [x] Implement internal Android player request using page-derived public configuration.
+- [x] Add fallback strategy orchestration and typed failure classification.
+- [x] Add sanitized fixture tests and opt-in live smoke command.
 
 Exit: metadata and unsigned stream URLs resolve for maintained public fixtures and live smoke set.
 
 ### M3 — Direct-stream downloader MVP
 
-- [ ] Implement remote probe and safe target-name creation.
-- [ ] Stream a direct URL to `.part` with cancellation and progress.
-- [ ] Validate length/type and atomically finalize.
-- [ ] Implement retry classification and bounded backoff.
-- [ ] Persist queue/resume state with schema versioning.
-- [ ] Implement pause, resume, cancel, retry, and shutdown recovery.
-- [ ] Add local HTTP fault server and transfer contract tests.
+- [x] Validate the response endpoint and create a safe collision-free target name.
+- [x] Stream a direct URL to `.part` with cancellation and progress.
+- [x] Validate remote/final length and atomically finalize.
+- [x] Implement retry classification and bounded backoff.
+- [x] Persist privacy-safe resume state with schema versioning.
+- [ ] Persist the multi-item queue with schema versioning.
+- [x] Implement byte-range resume, cancel, and retry in the transfer engine.
+- [ ] Implement pause controls and application-shutdown queue recovery.
+- [x] Add deterministic HTTP handler contract tests for ranges, validators, truncation, retries, and cancellation.
+- [ ] Add a loopback HTTP fault server for socket-level integration tests.
 
 Exit: dependency-free CLI/harness downloads a progressive MP4 reliably and resumes after forced interruption.
 
 ### M4 — Modern desktop MVP
 
-- [ ] Create styled WPF shell, theme resources, typography, and icons drawn as vectors.
-- [ ] Implement paste/analyze workflow and metadata card.
-- [ ] Implement recommended format list and advanced format table.
-- [ ] Implement destination picker and collision choices.
+- [x] Create styled WPF shell, theme resources, typography, and icons drawn as vectors.
+- [x] Implement paste/analyze workflow and metadata card.
+- [x] Implement recommended and detailed format list.
+- [ ] Add advanced resolution/container/codec/FPS/HDR filters.
+- [x] Implement destination picker and automatic collision-safe naming.
 - [ ] Implement queue cards and global concurrency control.
 - [ ] Add settings, first-run responsible-use notice, and diagnostics view.
 - [ ] Complete keyboard, scaling, screen-reader, dark-mode, and cancellation review.
@@ -317,24 +322,26 @@ Exit: normal user can analyze and download a progressive MP4 entirely through th
 
 ### M5 — Signature and throttling decipher
 
-- [ ] Capture sanitized player-script shapes and expected transform plans.
+- [x] Capture synthetic player-script shapes and expected transform plans.
 - [ ] Build tokenizer for the required JavaScript subset.
-- [ ] Build constrained parser and evaluator with strict resource limits.
+- [x] Build constrained classic signature transform planner/evaluator with strict size and operation limits.
 - [ ] Locate signature and throttling functions structurally.
 - [ ] Cache transform plans by script hash.
-- [ ] Resolve `signatureCipher` and `n` transformations.
+- [x] Resolve supported classic `signatureCipher` transform shapes without executing JavaScript.
+- [ ] Resolve the current ES6 signature shape and `n` transformations.
 - [ ] Add mutation/fuzz tests for malformed scripts and unsupported syntax.
-- [ ] Add health reporting and fast fallback when player code changes.
+- [x] Add sanitized extraction-stage health reporting and Android client fallback.
 
 Exit: signed public formats resolve without executing arbitrary JavaScript.
 
 ### M6 — Native audio downloads
 
-- [ ] Identify audio-only streams, codec, bitrate, sample rate, and container.
-- [ ] Download M4A/MP4 and WebM audio without re-encoding.
-- [ ] Use correct extension and MIME/container validation.
-- [ ] Add metadata display and recommended-audio ranking.
-- [ ] Document why MP3 conversion is unavailable without transcoding.
+- [x] Identify audio-only streams, codec, bitrate, sample rate, and container.
+- [x] Download M4A/MP4 and WebM audio without re-encoding through the direct transfer engine.
+- [x] Use the correct `.m4a` or `.webm` extension and map declared MIME/container metadata.
+- [ ] Validate the downloaded container structure before finalization.
+- [x] Add metadata display and recommended-audio ranking.
+- [x] Document why MP3 conversion is unavailable without transcoding.
 
 Exit: user can save best/native audio stream with truthful format labeling.
 
@@ -433,6 +440,8 @@ Order for current work:
 - 2026-07-16: Zero third-party application dependencies is an architectural invariant, not merely a packaging goal.
 - 2026-07-16: Progressive and native-container output precede muxing; transcoding is not conflated with downloading.
 - 2026-07-16: RECALL state is local development context and must remain outside Git.
+- 2026-07-16: Use a versioned Android player profile as the primary direct-format fallback when the watch page exposes only ciphered media. Current WEB/MWEB/TV profiles returned no usable streams during live verification; the tested Android profile returned progressive, audio-only, and video-only URLs.
+- 2026-07-16: Keep the constrained classic signature planner as a guarded fallback. The current ES6 player no longer exposes the traditional split/reverse/splice shape, so current-player decipher and `n` transformation remain unfinished M5 work.
 
 ## 15. Plan maintenance
 

@@ -1,0 +1,55 @@
+using TubeForge.Core.Media;
+using TubeForge.Tests.Framework;
+using TubeForge.YouTube.Extraction;
+
+namespace TubeForge.Tests.YouTube;
+
+public static class YouTubeWatchPageParserTests
+{
+    [Test]
+    public static void MapsMetadataFormatsAndPlayerScript()
+    {
+        var html = File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "Fixtures", "watch-page-basic.html"));
+        var result = YouTubeWatchPageParser.Parse(html);
+
+        Assert.True(result.IsSuccess, result.Error?.TechnicalDetail);
+        Assert.Equal("Fixture123_", result.Value.Metadata.Id.Value);
+        Assert.Equal("Fixture {video}; title", result.Value.Metadata.Title);
+        Assert.Equal("Fixture channel", result.Value.Metadata.Channel);
+        Assert.Equal(TimeSpan.FromSeconds(123), result.Value.Metadata.Duration);
+        Assert.Equal(2, result.Value.Metadata.Formats.Count);
+        Assert.Equal(1, result.Value.CipheredFormatCount);
+        Assert.Equal(
+            "https://www.youtube.com/s/player/fixture/player_ias.vflset/en_US/base.js",
+            result.Value.PlayerScriptUrl?.AbsoluteUri);
+
+        var progressive = result.Value.Metadata.Formats.Single(format => format.FormatId == 22);
+        Assert.Equal(StreamKind.Progressive, progressive.Kind);
+        Assert.Equal(VideoCodec.H264, progressive.VideoCodec);
+        Assert.Equal(AudioCodec.Aac, progressive.AudioCodec);
+        Assert.Equal(1280, progressive.Width);
+        Assert.Equal(720, progressive.Height);
+        Assert.Equal(134_217_728L, progressive.ContentLength);
+
+        var audio = result.Value.Metadata.Formats.Single(format => format.FormatId == 251);
+        Assert.Equal(StreamKind.AudioOnly, audio.Kind);
+        Assert.Equal(MediaContainer.WebM, audio.Container);
+        Assert.Equal(AudioCodec.Opus, audio.AudioCodec);
+        Assert.Equal(48_000, audio.AudioSampleRate);
+    }
+
+    [Test]
+    public static void RejectsEmptyMalformedAndUnavailableResponses()
+    {
+        Assert.False(YouTubeWatchPageParser.Parse(null).IsSuccess);
+        Assert.False(YouTubeWatchPageParser.Parse("<html>none</html>").IsSuccess);
+        Assert.False(YouTubeWatchPageParser.Parse(
+            "<script>var ytInitialPlayerResponse={broken};</script>").IsSuccess);
+
+        var unavailable = YouTubeWatchPageParser.Parse(
+            "<script>var ytInitialPlayerResponse={\"playabilityStatus\":{\"status\":\"ERROR\",\"reason\":\"Gone\"}," +
+            "\"videoDetails\":{\"videoId\":\"Fixture123_\",\"title\":\"Fixture\"}};</script>");
+        Assert.False(unavailable.IsSuccess);
+        Assert.Equal("Video.Unavailable", unavailable.Error?.Code);
+    }
+}
