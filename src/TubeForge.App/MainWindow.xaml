@@ -60,7 +60,30 @@
                         </Button.Style>
                     </Button>
                     <Button Style="{StaticResource NavButton}" Content="□   Library" IsEnabled="False" ToolTip="Planned" />
-                    <Button Style="{StaticResource NavButton}" Content="⚙   Settings" IsEnabled="False" ToolTip="Planned" />
+                    <Button Content="⚙   Settings" Command="{Binding ShowSettingsCommand}">
+                        <Button.Style>
+                            <Style TargetType="Button" BasedOn="{StaticResource NavButton}">
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding IsSettingsPage}" Value="True">
+                                        <Setter Property="Background" Value="#1A2240" />
+                                        <Setter Property="Foreground" Value="White" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Button.Style>
+                    </Button>
+                    <Button Content="◇   Diagnostics" Command="{Binding ShowDiagnosticsCommand}">
+                        <Button.Style>
+                            <Style TargetType="Button" BasedOn="{StaticResource NavButton}">
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding IsDiagnosticsPage}" Value="True">
+                                        <Setter Property="Background" Value="#1A2240" />
+                                        <Setter Property="Foreground" Value="White" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Button.Style>
+                    </Button>
                 </StackPanel>
 
                 <Border Grid.Row="4" Background="#111A2B" BorderBrush="{StaticResource BorderBrush}"
@@ -516,5 +539,195 @@
                 </ItemsControl>
             </Grid>
         </ScrollViewer>
+
+        <ScrollViewer Grid.Column="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
+                      Visibility="{Binding IsSettingsPage, Converter={StaticResource BooleanToVisibilityConverter}}">
+            <Grid Margin="38,30,38,40" MaxWidth="1020">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="24" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="14" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="14" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+
+                <StackPanel Grid.Row="0">
+                    <TextBlock Text="Settings" FontSize="29" FontWeight="SemiBold" />
+                    <TextBlock Text="Local defaults. No account, cloud sync, or telemetry."
+                               Margin="0,7,0,0" FontSize="14" Foreground="{StaticResource MutedTextBrush}" />
+                </StackPanel>
+
+                <Border Grid.Row="2" Style="{StaticResource Card}" BorderBrush="#613143"
+                        Visibility="{Binding HasError, Converter={StaticResource BooleanToVisibilityConverter}}">
+                    <TextBlock Text="{Binding ErrorMessage}" TextWrapping="Wrap" Foreground="#FFC4CE" />
+                </Border>
+
+                <Border Grid.Row="4" Style="{StaticResource Card}">
+                    <StackPanel>
+                        <TextBlock Text="Download defaults" FontSize="17" FontWeight="SemiBold" />
+                        <TextBlock Text="Used for new queue items. Existing destinations stay unchanged."
+                                   Margin="0,5,0,0" FontSize="11" Foreground="{StaticResource MutedTextBrush}" />
+
+                        <TextBlock Text="DEFAULT DOWNLOAD FOLDER" Style="{StaticResource FieldLabel}" Margin="0,20,0,6" />
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="10" />
+                                <ColumnDefinition Width="90" />
+                            </Grid.ColumnDefinitions>
+                            <TextBox Text="{Binding DownloadFolder, UpdateSourceTrigger=PropertyChanged}"
+                                     AutomationProperties.Name="Default download folder" />
+                            <Button Grid.Column="2" Style="{StaticResource SecondaryButton}" Content="Browse"
+                                    Click="BrowseButton_OnClick" />
+                        </Grid>
+
+                        <TextBlock Text="MAXIMUM CONCURRENT DOWNLOADS" Style="{StaticResource FieldLabel}" Margin="0,18,0,6" />
+                        <ComboBox ItemsSource="{Binding MaxConcurrentDownloadOptions}"
+                                  SelectedItem="{Binding SelectedMaxConcurrentDownloads}" Width="160"
+                                  HorizontalAlignment="Left" AutomationProperties.Name="Default maximum concurrent downloads" />
+
+                        <Border Background="#0E1A2B" BorderBrush="#29405F" BorderThickness="1"
+                                CornerRadius="8" Padding="12" Margin="0,20,0,0">
+                            <StackPanel>
+                                <TextBlock Text="OUTPUT PREFERENCE" Style="{StaticResource FieldLabel}" />
+                                <TextBlock Text="MP4 preferred when video quality is equal; higher-quality WebM remains available."
+                                           Margin="0,6,0,0" TextWrapping="Wrap" Foreground="#A8B7CE" />
+                                <TextBlock Text="Tracks are muxed without re-encoding. No FFmpeg or yt-dlp."
+                                           Margin="0,4,0,0" FontSize="10" Foreground="{StaticResource MutedTextBrush}" />
+                            </StackPanel>
+                        </Border>
+
+                        <Grid Margin="0,20,0,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="160" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="{Binding SettingsStatus}" VerticalAlignment="Center"
+                                       Foreground="{StaticResource MutedTextBrush}" />
+                            <Button Grid.Column="1" Style="{StaticResource PrimaryButton}" Content="Save settings"
+                                    Command="{Binding SaveSettingsCommand}" />
+                        </Grid>
+                    </StackPanel>
+                </Border>
+
+                <Border Grid.Row="6" Style="{StaticResource Card}">
+                    <StackPanel>
+                        <TextBlock Text="Privacy and responsibility" FontSize="17" FontWeight="SemiBold" />
+                        <TextBlock Text="Settings and queue state stay in local application data. Media URLs, cookies, signatures, visitor data, and telemetry are not persisted."
+                                   Margin="0,8,0,0" TextWrapping="Wrap" Foreground="{StaticResource MutedTextBrush}" />
+                        <TextBlock Text="Download only media you own or have permission to save. TubeForge does not bypass DRM, payment, membership, or access controls."
+                                   Margin="0,7,0,0" TextWrapping="Wrap" Foreground="{StaticResource MutedTextBrush}" />
+                    </StackPanel>
+                </Border>
+            </Grid>
+        </ScrollViewer>
+
+        <ScrollViewer Grid.Column="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
+                      Visibility="{Binding IsDiagnosticsPage, Converter={StaticResource BooleanToVisibilityConverter}}">
+            <Grid Margin="38,30,38,40" MaxWidth="1020">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="24" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="14" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="14" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+
+                <StackPanel Grid.Row="0">
+                    <TextBlock Text="Diagnostics" FontSize="29" FontWeight="SemiBold" />
+                    <TextBlock Text="Local runtime and extraction health. Sensitive media URLs are never shown."
+                               Margin="0,7,0,0" FontSize="14" Foreground="{StaticResource MutedTextBrush}" />
+                </StackPanel>
+
+                <Border Grid.Row="2" Style="{StaticResource Card}" BorderBrush="#613143"
+                        Visibility="{Binding HasError, Converter={StaticResource BooleanToVisibilityConverter}}">
+                    <TextBlock Text="{Binding ErrorMessage}" TextWrapping="Wrap" Foreground="#FFC4CE" />
+                </Border>
+
+                <Border Grid.Row="4" Style="{StaticResource Card}">
+                    <StackPanel>
+                        <TextBlock Text="Runtime" FontSize="17" FontWeight="SemiBold" />
+                        <Grid Margin="0,16,0,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="180" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="10" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="10" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="10" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
+                            <TextBlock Text="TubeForge version" Foreground="{StaticResource MutedTextBrush}" />
+                            <TextBlock Grid.Column="1" Text="{Binding ApplicationVersion}" />
+                            <TextBlock Grid.Row="2" Text="Runtime" Foreground="{StaticResource MutedTextBrush}" />
+                            <TextBlock Grid.Row="2" Grid.Column="1" Text="{Binding RuntimeDescription}" />
+                            <TextBlock Grid.Row="4" Text="Architecture" Foreground="{StaticResource MutedTextBrush}" />
+                            <TextBlock Grid.Row="4" Grid.Column="1" Text="{Binding ProcessArchitecture}" />
+                            <TextBlock Grid.Row="6" Text="Dependencies" Foreground="{StaticResource MutedTextBrush}" />
+                            <TextBlock Grid.Row="6" Grid.Column="1" Text="{Binding DependencyStatus}"
+                                       Foreground="{StaticResource SuccessBrush}" />
+                        </Grid>
+                    </StackPanel>
+                </Border>
+
+                <Border Grid.Row="6" Style="{StaticResource Card}">
+                    <StackPanel>
+                        <TextBlock Text="Session and local storage" FontSize="17" FontWeight="SemiBold" />
+                        <TextBlock Text="{Binding DiagnosticsExtractionStatus}" Margin="0,14,0,0" />
+                        <TextBlock Text="{Binding DiagnosticsFormatSummary}" Margin="0,5,0,0"
+                                   Foreground="{StaticResource MutedTextBrush}" />
+                        <TextBlock Text="{Binding QueueSummary}" Margin="0,5,0,0"
+                                   Foreground="{StaticResource MutedTextBrush}" />
+
+                        <TextBlock Text="QUEUE STATE" Style="{StaticResource FieldLabel}" Margin="0,20,0,5" />
+                        <TextBlock Text="{Binding QueueStoragePath}" TextWrapping="Wrap"
+                                   Foreground="{StaticResource MutedTextBrush}" />
+                        <TextBlock Text="SETTINGS" Style="{StaticResource FieldLabel}" Margin="0,14,0,5" />
+                        <TextBlock Text="{Binding SettingsStoragePath}" TextWrapping="Wrap"
+                                   Foreground="{StaticResource MutedTextBrush}" />
+                    </StackPanel>
+                </Border>
+            </Grid>
+        </ScrollViewer>
+
+        <Border Grid.ColumnSpan="2" Background="#E6080C14" Panel.ZIndex="100"
+                Visibility="{Binding ShowResponsibleUseNotice, Converter={StaticResource BooleanToVisibilityConverter}}">
+            <Border Style="{StaticResource Card}" Width="560" HorizontalAlignment="Center" VerticalAlignment="Center"
+                    Padding="30" BorderBrush="#3A4770">
+                <StackPanel>
+                    <Border Width="52" Height="52" CornerRadius="15" Background="{StaticResource AccentBrush}"
+                            HorizontalAlignment="Left">
+                        <Viewbox Margin="13">
+                            <Path Fill="White" Data="M 2,2 L 16,9 L 2,16 Z" />
+                        </Viewbox>
+                    </Border>
+                    <TextBlock Text="Use TubeForge responsibly" FontSize="24" FontWeight="SemiBold" Margin="0,22,0,0" />
+                    <TextBlock Text="TubeForge saves public media locally without ads, tracking, or hosted conversion. You remain responsible for what you download."
+                               Margin="0,10,0,0" TextWrapping="Wrap" LineHeight="20"
+                               Foreground="{StaticResource MutedTextBrush}" />
+                    <TextBlock Text="• Download only media you own or have permission to save."
+                               Margin="0,18,0,0" TextWrapping="Wrap" />
+                    <TextBlock Text="• Follow copyright, privacy, local law, and applicable service terms."
+                               Margin="0,8,0,0" TextWrapping="Wrap" />
+                    <TextBlock Text="• TubeForge does not bypass DRM, payments, membership, or access controls."
+                               Margin="0,8,0,0" TextWrapping="Wrap" />
+                    <TextBlock Text="Acknowledgement is stored only on this device."
+                               Margin="0,18,0,0" FontSize="10" Foreground="{StaticResource MutedTextBrush}" />
+                    <TextBlock Text="{Binding ErrorMessage}" Margin="0,12,0,0" TextWrapping="Wrap"
+                               Foreground="#FFC4CE"
+                               Visibility="{Binding HasError, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                    <Button Style="{StaticResource PrimaryButton}" Content="I understand — continue"
+                            Command="{Binding AcceptResponsibleUseCommand}" Margin="0,22,0,0" />
+                </StackPanel>
+            </Border>
+        </Border>
     </Grid>
 </Window>

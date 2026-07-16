@@ -26,6 +26,8 @@ public sealed class DownloadQueueStore
         _path = Path.GetFullPath(path);
     }
 
+    public string StoragePath => _path;
+
     public async Task<Result<DownloadQueueSnapshot>> LoadAsync(
         CancellationToken cancellationToken = default)
     {

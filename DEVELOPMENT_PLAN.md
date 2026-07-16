@@ -172,10 +172,10 @@ Muxing means combining existing encoded tracks. Transcoding means decoding and r
 
 - `%LocalAppData%/TubeForge/settings.json`: user preferences.
 - `%LocalAppData%/TubeForge/queue.json`: non-sensitive queue state.
-- `%LocalAppData%/TubeForge/logs/`: bounded rolling diagnostic logs.
+- `%LocalAppData%/TubeForge/logs/`: planned bounded rolling diagnostic logs; not created yet.
 - Downloads remain in user-selected folders.
 - Writes use temporary files plus replace/rename.
-- Schemas carry a version and migration path.
+- Settings and queue schemas are versioned and fail closed on unsupported versions; migrations remain future work.
 - No authentication cookies in the first public release.
 - If cookie support is later approved, use Windows DPAPI and explicit import/clear controls; never log cookie contents.
 
@@ -316,7 +316,7 @@ Exit: dependency-free CLI/harness downloads a progressive MP4 reliably and resum
 - [x] Add advanced resolution/container/codec/FPS/HDR filters.
 - [x] Implement destination picker and automatic collision-safe naming.
 - [x] Implement queue cards and global concurrency control.
-- [ ] Add settings, first-run responsible-use notice, and diagnostics view.
+- [x] Add settings, first-run responsible-use notice, and diagnostics view.
 - [ ] Complete keyboard, scaling, screen-reader, dark-mode, and cancellation review.
 
 Exit: normal user can analyze and download a progressive MP4 entirely through the GUI.
@@ -448,6 +448,7 @@ Order for current work:
 - 2026-07-16: Support regular MP4 chunk-offset rewriting, fragmented MP4 track/fragment remapping and interleaving, and WebM cluster interleaving/cue generation. A live H.264/AAC fragmented MP4 mux passed structural validation and opened with both tracks in the Windows media stack; AV1 playback still depends on the system codec installation.
 - 2026-07-16: Prefer MP4 when video quality characteristics are equivalent, while keeping quality as the primary rank and retaining higher-quality WebM options.
 - 2026-07-16: Queue downloads through a tested global 1–4 transfer dispatcher. Persist only validated video/format identities and local destinations; re-resolve fresh media URLs when resuming recovered work.
+- 2026-07-16: Persist bounded local settings atomically. Gate first use on a locally stored responsible-use acknowledgement and keep diagnostics redacted to runtime, counts, stages, and local storage paths.
 
 ## 15. Plan maintenance
 

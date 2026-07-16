@@ -20,9 +20,10 @@ Working now:
 - resumable `.part` transfers, bounded container validation, retries, progress, cancellation, and atomic finalization;
 - queue screen with 1–4 transfer global concurrency, per-item progress/speed/ETA, pause/resume/cancel/retry/remove/reveal controls, and interrupted-download recovery;
 - privacy-safe schema-versioned queue state that stores source identities instead of expiring media URLs;
+- local settings, first-run responsible-use acknowledgement, and redacted runtime/extraction diagnostics pages;
 - dependency-free fixture/transfer test runner and sanitized live metadata smoke tool.
 
-Not finished: playlist/bulk scheduling, hostile-container fuzzing, audio transcoding/MP3, current ES6 player decipher, throttling-parameter transforms, settings/diagnostics, packaging, and releases. See [DEVELOPMENT_PLAN.md](DEVELOPMENT_PLAN.md) for exact checklist state.
+Not finished: playlist/bulk scheduling, hostile-container fuzzing, audio transcoding/MP3, current ES6 player decipher, throttling-parameter transforms, accessibility hardening, packaging, and releases. See [DEVELOPMENT_PLAN.md](DEVELOPMENT_PLAN.md) for exact checklist state.
 
 ## Baseline
 

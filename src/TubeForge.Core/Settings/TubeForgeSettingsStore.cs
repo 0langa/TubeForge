@@ -1,0 +1,221 @@
+using System.Text.Json;
+using TubeForge.Core.Errors;
+using TubeForge.Core.Results;
+
+namespace TubeForge.Core.Settings;
+
+public sealed class TubeForgeSettingsStore
+{
+    private const long MaximumFileBytes = 64 * 1024;
+    private static readonly JsonSerializerOptions SerializerOptions = new()
+    {
+        MaxDepth = 16,
+        PropertyNameCaseInsensitive = true,
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        WriteIndented = true
+    };
+
+    private readonly SemaphoreSlim _gate = new(1, 1);
+    private readonly string _path;
+
+    public TubeForgeSettingsStore(string path)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(path);
+        _path = System.IO.Path.GetFullPath(path);
+    }
+
+    public string StoragePath => _path;
+
+    public async Task<Result<TubeForgeSettings>> LoadAsync(
+        TubeForgeSettings defaults,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(defaults);
+        var defaultError = Validate(defaults);
+        if (defaultError is not null)
+        {
+            return Result<TubeForgeSettings>.Failure(defaultError);
+        }
+
+        var lockTaken = false;
+        try
+        {
+            await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+            lockTaken = true;
+            if (!File.Exists(_path))
+            {
+                return Result<TubeForgeSettings>.Success(defaults);
+            }
+
+            if (new FileInfo(_path).Length > MaximumFileBytes)
+            {
+                return Corrupt();
+            }
+
+            await using var stream = new FileStream(
+                _path,
+                FileMode.Open,
+                FileAccess.Read,
+                FileShare.Read,
+                bufferSize: 8 * 1024,
+                FileOptions.Asynchronous | FileOptions.SequentialScan);
+            var settings = await JsonSerializer.DeserializeAsync<TubeForgeSettings>(
+                stream,
+                SerializerOptions,
+                cancellationToken).ConfigureAwait(false);
+            if (settings is null)
+            {
+                return Corrupt();
+            }
+
+            var validation = Validate(settings);
+            return validation is null
+                ? Result<TubeForgeSettings>.Success(settings)
+                : Result<TubeForgeSettings>.Failure(validation);
+        }
+        catch (OperationCanceledException)
+        {
+            return Failure("Operation.Cancelled", "The settings operation was cancelled.");
+        }
+        catch (JsonException)
+        {
+            return Corrupt();
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return Failure(
+                "Settings.ReadFailed",
+                "TubeForge cannot read local settings.",
+                exception.GetType().Name);
+        }
+        finally
+        {
+            if (lockTaken)
+            {
+                _gate.Release();
+            }
+        }
+    }
+
+    public async Task<Result<bool>> SaveAsync(
+        TubeForgeSettings settings,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(settings);
+        var validation = Validate(settings);
+        if (validation is not null)
+        {
+            return Result<bool>.Failure(validation);
+        }
+
+        var lockTaken = false;
+        var temporaryPath = _path + ".new";
+        try
+        {
+            await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+            lockTaken = true;
+            var directory = System.IO.Path.GetDirectoryName(_path);
+            if (string.IsNullOrWhiteSpace(directory))
+            {
+                return Failure<bool>("Settings.InvalidPath", "The settings storage path is invalid.");
+            }
+
+            Directory.CreateDirectory(directory);
+            await using (var stream = new FileStream(
+                             temporaryPath,
+                             FileMode.Create,
+                             FileAccess.Write,
+                             FileShare.None,
+                             bufferSize: 8 * 1024,
+                             FileOptions.Asynchronous | FileOptions.WriteThrough))
+            {
+                await JsonSerializer.SerializeAsync(stream, settings, SerializerOptions, cancellationToken)
+                    .ConfigureAwait(false);
+                await stream.FlushAsync(cancellationToken).ConfigureAwait(false);
+            }
+
+            File.Move(temporaryPath, _path, overwrite: true);
+            return Result<bool>.Success(true);
+        }
+        catch (OperationCanceledException)
+        {
+            TryDelete(temporaryPath);
+            return Failure<bool>("Operation.Cancelled", "The settings operation was cancelled.");
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            TryDelete(temporaryPath);
+            return Failure<bool>(
+                "Settings.WriteFailed",
+                "TubeForge cannot save local settings.",
+                exception.GetType().Name);
+        }
+        finally
+        {
+            if (lockTaken)
+            {
+                _gate.Release();
+            }
+        }
+    }
+
+    private static TubeForgeError? Validate(TubeForgeSettings settings)
+    {
+        if (settings.SchemaVersion != TubeForgeSettings.CurrentSchemaVersion)
+        {
+            return new TubeForgeError(
+                "Settings.UnsupportedSchema",
+                "The local settings use an unsupported schema version.");
+        }
+
+        if (settings.MaximumConcurrentDownloads is < 1 or > 4 ||
+            string.IsNullOrWhiteSpace(settings.DownloadFolder) ||
+            settings.DownloadFolder.Length > 32_767 ||
+            settings.DownloadFolder.Any(char.IsControl))
+        {
+            return InvalidState();
+        }
+
+        try
+        {
+            if (!System.IO.Path.IsPathFullyQualified(settings.DownloadFolder) ||
+                System.IO.Path.GetFullPath(settings.DownloadFolder) != settings.DownloadFolder)
+            {
+                return InvalidState();
+            }
+        }
+        catch (Exception exception) when (exception is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            return InvalidState();
+        }
+
+        return null;
+    }
+
+    private static TubeForgeError InvalidState() => new(
+        "Settings.InvalidState",
+        "One or more local settings are invalid.");
+
+    private static Result<TubeForgeSettings> Corrupt() =>
+        Failure("Settings.Corrupt", "The local settings file is malformed and was left unchanged.");
+
+    private static Result<TubeForgeSettings> Failure(string code, string message, string? detail = null) =>
+        Result<TubeForgeSettings>.Failure(new TubeForgeError(code, message, detail));
+
+    private static Result<T> Failure<T>(string code, string message, string? detail = null) =>
+        Result<T>.Failure(new TubeForgeError(code, message, detail));
+
+    private static void TryDelete(string path)
+    {
+        try
+        {
+            File.Delete(path);
+        }
+        catch (IOException)
+        {
+        }
+        catch (UnauthorizedAccessException)
+        {
+        }
+    }
+}

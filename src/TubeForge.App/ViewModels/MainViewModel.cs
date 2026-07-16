@@ -4,11 +4,14 @@ using System.Diagnostics;
 using System.Net;
 using System.Net.Http;
 using System.IO;
+using System.Reflection;
+using System.Runtime.InteropServices;
 using System.Runtime.CompilerServices;
 using TubeForge.App.Commands;
 using TubeForge.Core.Errors;
 using TubeForge.Core.Files;
 using TubeForge.Core.Media;
+using TubeForge.Core.Settings;
 using TubeForge.Core.YouTube;
 using TubeForge.Downloads;
 using TubeForge.Downloads.Queue;
@@ -35,6 +38,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     private readonly DirectDownloadEngine _downloader;
     private readonly AdaptiveDownloadEngine _adaptiveDownloader;
     private readonly DownloadQueueStore _queueStore;
+    private readonly TubeForgeSettingsStore _settingsStore;
     private readonly DownloadQueueDispatcher _queueDispatcher = new(2);
     private readonly SemaphoreSlim _queueMutationLock = new(1, 1);
     private readonly Dictionary<Guid, QueuedDownloadWork> _preparedQueueWork = [];
@@ -79,8 +83,11 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     private bool _isInitialized;
     private bool _queueUnavailable;
     private string _downloadActionLabel = "Add to queue";
-    private bool _isDownloadPage = true;
+    private AppPage _activePage = AppPage.Download;
     private int _selectedMaxConcurrentDownloads = 2;
+    private TubeForgeSettings _settings;
+    private bool _showResponsibleUseNotice = true;
+    private string _settingsStatus = "Settings stay on this device.";
 
     public MainViewModel()
     {
@@ -96,19 +103,29 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         _resolver = new YouTubeMetadataResolver(_httpClient);
         _downloader = new DirectDownloadEngine(_httpClient);
         _adaptiveDownloader = new AdaptiveDownloadEngine(_downloader);
-        _queueStore = new DownloadQueueStore(Path.Combine(
+        var applicationDataDirectory = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "TubeForge",
-            "queue.json"));
+            "TubeForge");
+        _queueStore = new DownloadQueueStore(Path.Combine(applicationDataDirectory, "queue.json"));
+        _settingsStore = new TubeForgeSettingsStore(Path.Combine(applicationDataDirectory, "settings.json"));
         _downloadFolder = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
             "Downloads");
+        _settings = new TubeForgeSettings { DownloadFolder = Path.GetFullPath(_downloadFolder) };
 
-        AnalyzeCommand = new AsyncRelayCommand(AnalyzeAsync, () => !IsAnalyzing && !string.IsNullOrWhiteSpace(UrlText));
-        DownloadCommand = new AsyncRelayCommand(DownloadAsync, () => !IsAnalyzing && SelectedFormat is not null && HasVideo);
+        AnalyzeCommand = new AsyncRelayCommand(
+            AnalyzeAsync,
+            () => !ShowResponsibleUseNotice && !IsAnalyzing && !string.IsNullOrWhiteSpace(UrlText));
+        DownloadCommand = new AsyncRelayCommand(
+            DownloadAsync,
+            () => !ShowResponsibleUseNotice && !IsAnalyzing && SelectedFormat is not null && HasVideo);
         CancelCommand = new RelayCommand(PauseAll, () => IsDownloading);
-        ShowDownloadCommand = new RelayCommand(() => IsDownloadPage = true);
-        ShowQueueCommand = new RelayCommand(() => IsDownloadPage = false);
+        ShowDownloadCommand = new RelayCommand(() => ShowPage(AppPage.Download));
+        ShowQueueCommand = new RelayCommand(() => ShowPage(AppPage.Queue));
+        ShowSettingsCommand = new RelayCommand(() => ShowPage(AppPage.Settings));
+        ShowDiagnosticsCommand = new RelayCommand(() => ShowPage(AppPage.Diagnostics));
+        SaveSettingsCommand = new AsyncRelayCommand(SaveSettingsAsync);
+        AcceptResponsibleUseCommand = new AsyncRelayCommand(AcceptResponsibleUseAsync);
         ClearCompletedCommand = new AsyncRelayCommand(ClearCompletedAsync, () => QueueItems.Any(item => item.Status == DownloadQueueStatus.Completed));
     }
 
@@ -131,6 +148,14 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     public RelayCommand ShowDownloadCommand { get; }
 
     public RelayCommand ShowQueueCommand { get; }
+
+    public RelayCommand ShowSettingsCommand { get; }
+
+    public RelayCommand ShowDiagnosticsCommand { get; }
+
+    public AsyncRelayCommand SaveSettingsCommand { get; }
+
+    public AsyncRelayCommand AcceptResponsibleUseCommand { get; }
 
     public AsyncRelayCommand ClearCompletedCommand { get; }
 
@@ -206,19 +231,52 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
 
     public bool IsBusy => IsAnalyzing || IsDownloading;
 
-    public bool IsDownloadPage
+    public bool IsDownloadPage => _activePage == AppPage.Download;
+
+    public bool IsQueuePage => _activePage == AppPage.Queue;
+
+    public bool IsSettingsPage => _activePage == AppPage.Settings;
+
+    public bool IsDiagnosticsPage => _activePage == AppPage.Diagnostics;
+
+    public bool ShowResponsibleUseNotice
     {
-        get => _isDownloadPage;
-        set
+        get => _showResponsibleUseNotice;
+        private set
         {
-            if (Set(ref _isDownloadPage, value))
+            if (Set(ref _showResponsibleUseNotice, value))
             {
-                OnPropertyChanged(nameof(IsQueuePage));
+                RefreshCommands();
             }
         }
     }
 
-    public bool IsQueuePage => !IsDownloadPage;
+    public string SettingsStatus
+    {
+        get => _settingsStatus;
+        private set => Set(ref _settingsStatus, value);
+    }
+
+    public string ApplicationVersion =>
+        Assembly.GetExecutingAssembly().GetName().Version?.ToString(3) ?? "development";
+
+    public string RuntimeDescription => RuntimeInformation.FrameworkDescription;
+
+    public string ProcessArchitecture => RuntimeInformation.ProcessArchitecture.ToString();
+
+    public string DependencyStatus => "No third-party packages or bundled executables";
+
+    public string QueueStoragePath => _queueStore.StoragePath;
+
+    public string SettingsStoragePath => _settingsStore.StoragePath;
+
+    public string DiagnosticsExtractionStatus => string.IsNullOrWhiteSpace(ExtractionStatus)
+        ? "No analysis performed this session"
+        : ExtractionStatus;
+
+    public string DiagnosticsFormatSummary => _metadata is null
+        ? "No active media metadata"
+        : $"{_allFormats.Count} direct formats · {Formats.Count} matching outputs";
 
     public bool HasQueueItems => QueueItems.Count > 0;
 
@@ -399,7 +457,13 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     public string ExtractionStatus
     {
         get => _extractionStatus;
-        private set => Set(ref _extractionStatus, value);
+        private set
+        {
+            if (Set(ref _extractionStatus, value))
+            {
+                OnPropertyChanged(nameof(DiagnosticsExtractionStatus));
+            }
+        }
     }
 
     public async Task InitializeAsync()
@@ -410,6 +474,24 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         }
 
         _isInitialized = true;
+        var settingsResult = await _settingsStore.LoadAsync(_settings);
+        if (settingsResult.IsSuccess)
+        {
+            _settings = settingsResult.Value;
+            _downloadFolder = _settings.DownloadFolder;
+            OnPropertyChanged(nameof(DownloadFolder));
+            _selectedMaxConcurrentDownloads = _settings.MaximumConcurrentDownloads;
+            _queueDispatcher.MaximumConcurrency = _selectedMaxConcurrentDownloads;
+            OnPropertyChanged(nameof(SelectedMaxConcurrentDownloads));
+            ShowResponsibleUseNotice = !_settings.ResponsibleUseAccepted;
+        }
+        else
+        {
+            ErrorMessage = $"{settingsResult.Error!.Message} ({settingsResult.Error.Code})";
+            SettingsStatus = "Settings unavailable; defaults remain active.";
+            ShowResponsibleUseNotice = true;
+        }
+
         var result = await _queueStore.LoadAsync();
         if (!result.IsSuccess)
         {
@@ -431,6 +513,92 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         }
 
         PumpQueue();
+    }
+
+    private async Task SaveSettingsAsync()
+    {
+        TubeForgeSettings next;
+        try
+        {
+            if (!Path.IsPathFullyQualified(DownloadFolder))
+            {
+                throw new ArgumentException("Download folder must be an absolute path.");
+            }
+
+            next = _settings with
+            {
+                DownloadFolder = Path.GetFullPath(DownloadFolder),
+                MaximumConcurrentDownloads = SelectedMaxConcurrentDownloads
+            };
+        }
+        catch (Exception exception) when (exception is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            ErrorMessage = "The download folder setting is invalid. (Settings.InvalidState)";
+            SettingsStatus = exception.GetType().Name;
+            return;
+        }
+
+        var result = await _settingsStore.SaveAsync(next);
+        if (!result.IsSuccess)
+        {
+            ErrorMessage = $"{result.Error!.Message} ({result.Error.Code})";
+            SettingsStatus = "Settings were not saved.";
+            return;
+        }
+
+        _settings = next;
+        ErrorMessage = string.Empty;
+        SettingsStatus = "Settings saved locally.";
+    }
+
+    private async Task AcceptResponsibleUseAsync()
+    {
+        TubeForgeSettings accepted;
+        try
+        {
+            if (!Path.IsPathFullyQualified(DownloadFolder))
+            {
+                throw new ArgumentException("Download folder must be an absolute path.");
+            }
+
+            accepted = _settings with
+            {
+                DownloadFolder = Path.GetFullPath(DownloadFolder),
+                MaximumConcurrentDownloads = SelectedMaxConcurrentDownloads,
+                ResponsibleUseAccepted = true
+            };
+        }
+        catch (Exception exception) when (exception is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            ErrorMessage = "The download folder setting is invalid. (Settings.InvalidState)";
+            SettingsStatus = exception.GetType().Name;
+            return;
+        }
+
+        var result = await _settingsStore.SaveAsync(accepted);
+        if (!result.IsSuccess)
+        {
+            ErrorMessage = $"{result.Error!.Message} ({result.Error.Code})";
+            return;
+        }
+
+        _settings = accepted;
+        ShowResponsibleUseNotice = false;
+        SettingsStatus = "Responsible-use acknowledgement saved locally.";
+    }
+
+    private void ShowPage(AppPage page)
+    {
+        if (_activePage == page)
+        {
+            return;
+        }
+
+        _activePage = page;
+        OnPropertyChanged(nameof(IsDownloadPage));
+        OnPropertyChanged(nameof(IsQueuePage));
+        OnPropertyChanged(nameof(IsSettingsPage));
+        OnPropertyChanged(nameof(IsDiagnosticsPage));
     }
 
     public async Task AnalyzeAsync()
@@ -1475,6 +1643,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     {
         SelectedFormat = Formats.FirstOrDefault();
         OnPropertyChanged(nameof(FormatCountLabel));
+        OnPropertyChanged(nameof(DiagnosticsFormatSummary));
         if (_metadata is not null && !IsBusy)
         {
             StatusMessage = Formats.Count > 0
@@ -1660,6 +1829,14 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         AudioCodec.Vorbis => 2,
         _ => 3
     };
+
+    private enum AppPage
+    {
+        Download,
+        Queue,
+        Settings,
+        Diagnostics
+    }
 
     private sealed record QueuedDownloadWork(
         VideoMetadata Metadata,
