@@ -52,6 +52,12 @@ Opt-in live metadata smoke test (prints no media URLs):
 dotnet run --project tools/TubeForge.Smoke -- analyze "https://www.youtube.com/watch?v=VIDEO_ID"
 ```
 
+Run a bounded local canary set without printing URLs, IDs, titles, or channels. See [extractor playbook](docs/EXTRACTOR_PLAYBOOK.md).
+
+```powershell
+dotnet run --project tools/TubeForge.Smoke -- canary C:\private\tubeforge-canaries.txt
+```
+
 Opt-in live MP4 mux smoke test (downloads the smallest compatible H.264/AAC pair to a temporary directory, validates it with the Windows media stack, then deletes it):
 
 ```powershell

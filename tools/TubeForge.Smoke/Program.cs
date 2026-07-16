@@ -3,10 +3,18 @@ using System.Buffers.Binary;
 using TubeForge.Core.Media;
 using TubeForge.Core.YouTube;
 using TubeForge.YouTube;
+using TubeForge.YouTube.Diagnostics;
+
+if (args.Length == 2 && args[0].Equals("canary", StringComparison.OrdinalIgnoreCase))
+{
+    return await RunCanarySetAsync(args[1]);
+}
 
 if (args.Length != 2 || !args[0].Equals("analyze", StringComparison.OrdinalIgnoreCase))
 {
-    Console.Error.WriteLine("Usage: dotnet run --project tools/TubeForge.Smoke -- analyze <youtube-url>");
+    Console.Error.WriteLine("Usage:");
+    Console.Error.WriteLine("  dotnet run --project tools/TubeForge.Smoke -- analyze <youtube-url>");
+    Console.Error.WriteLine("  dotnet run --project tools/TubeForge.Smoke -- canary <local-url-list.txt>");
     return 2;
 }
 
@@ -265,4 +273,92 @@ static int VintWidth(byte firstByte, int maximum)
     }
 
     return 0;
+}
+
+static async Task<int> RunCanarySetAsync(string inputPath)
+{
+    const long maximumInputBytes = 64 * 1024;
+    string[] lines;
+    try
+    {
+        var fullPath = Path.GetFullPath(inputPath);
+        var information = new FileInfo(fullPath);
+        if (!information.Exists || information.Length is <= 0 or > maximumInputBytes)
+        {
+            Console.Error.WriteLine("Canary.InputInvalid: canary file is missing, empty, or exceeds 64 KiB.");
+            return 2;
+        }
+
+        lines = await File.ReadAllLinesAsync(fullPath);
+    }
+    catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or
+                                      ArgumentException or NotSupportedException)
+    {
+        Console.Error.WriteLine($"Canary.ReadFailed: {exception.GetType().Name}");
+        return 2;
+    }
+
+    var parsedList = CanaryListParser.Parse(lines);
+    if (!parsedList.IsSuccess)
+    {
+        Console.Error.WriteLine($"{parsedList.Error!.Code}: {parsedList.Error.Message}");
+        return 2;
+    }
+
+    using var cancellation = new CancellationTokenSource();
+    Console.CancelKeyPress += (_, eventArgs) =>
+    {
+        eventArgs.Cancel = true;
+        cancellation.Cancel();
+    };
+    using var handler = new SocketsHttpHandler
+    {
+        AutomaticDecompression = DecompressionMethods.All,
+        AllowAutoRedirect = true,
+        MaxAutomaticRedirections = 5,
+        ConnectTimeout = TimeSpan.FromSeconds(10),
+        PooledConnectionLifetime = TimeSpan.FromMinutes(5)
+    };
+    using var client = new HttpClient(handler) { Timeout = Timeout.InfiniteTimeSpan };
+    var resolver = new YouTubeMetadataResolver(client);
+    var failures = 0;
+    var videoIds = parsedList.Value;
+    for (var index = 0; index < videoIds.Count; index++)
+    {
+        if (cancellation.IsCancellationRequested)
+        {
+            Console.Error.WriteLine("Canary.Cancelled: remaining checks skipped.");
+            return 1;
+        }
+
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellation.Token);
+        timeout.CancelAfter(TimeSpan.FromSeconds(45));
+        var resolved = await resolver.ResolveAsync(videoIds[index], timeout.Token);
+        if (!resolved.IsSuccess)
+        {
+            failures++;
+            Console.WriteLine($"FAIL {index + 1}: {resolved.Error!.Code}");
+            continue;
+        }
+
+        var formats = resolved.Value.Metadata.Formats;
+        var progressive = formats.Count(format => format.Kind == StreamKind.Progressive);
+        var audio = formats.Count(format => format.Kind == StreamKind.AudioOnly);
+        var video = formats.Count(format => format.Kind == StreamKind.VideoOnly);
+        var best = AdaptiveFormatSelector.SelectBest(formats);
+        if (formats.Count == 0 || best is null)
+        {
+            failures++;
+            Console.WriteLine($"FAIL {index + 1}: Extractor.NoUsableOutput");
+            continue;
+        }
+
+        var stage = resolved.Value.Diagnostics?.Stage ?? "UnknownStage";
+        var output = best.RequiresMuxing ? best.OutputContainer.ToString() + "/mux" : "progressive";
+        Console.WriteLine(
+            $"PASS {index + 1}: stage={stage}; formats={formats.Count}; p/a/v={progressive}/{audio}/{video}; output={output}");
+    }
+
+    Console.WriteLine($"Canaries: {videoIds.Count - failures}/{videoIds.Count} passed.");
+    return failures == 0 ? 0 : 1;
 }
