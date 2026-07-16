@@ -17,6 +17,7 @@ using TubeForge.Core.YouTube;
 using TubeForge.Downloads;
 using TubeForge.Downloads.Queue;
 using TubeForge.YouTube;
+using TubeForge.YouTube.Captions;
 
 namespace TubeForge.App.ViewModels;
 
@@ -34,10 +35,17 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         "Native stream · no conversion · no quality loss"
     ];
 
+    private static readonly IReadOnlyList<CaptionFormatOption> CaptionOutputChoices =
+    [
+        new(CaptionOutputFormat.SubRip, "SRT · broad player support", "srt"),
+        new(CaptionOutputFormat.WebVtt, "WebVTT · native timed text", "vtt")
+    ];
+
     private readonly HttpClient _httpClient;
     private readonly YouTubeMetadataResolver _resolver;
     private readonly DirectDownloadEngine _downloader;
     private readonly AdaptiveDownloadEngine _adaptiveDownloader;
+    private readonly CaptionDownloadEngine _captionDownloader;
     private readonly DownloadQueueStore _queueStore;
     private readonly TubeForgeSettingsStore _settingsStore;
     private readonly DownloadQueueDispatcher _queueDispatcher = new(2);
@@ -92,6 +100,10 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     private string _settingsStatus = "Settings stay on this device.";
     private string _diagnosticsStatus = "Export contains whitelisted technical state only.";
     private string _diagnosticsExtractionStage = "NotRun";
+    private IReadOnlyList<CaptionTrackOption> _captionTracks = [];
+    private CaptionTrackOption? _selectedCaptionTrack;
+    private CaptionFormatOption _selectedCaptionFormat = CaptionOutputChoices[0];
+    private bool _isSavingCaption;
 
     public MainViewModel() : this(applicationDataDirectory: null)
     {
@@ -111,6 +123,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         _resolver = new YouTubeMetadataResolver(_httpClient);
         _downloader = new DirectDownloadEngine(_httpClient);
         _adaptiveDownloader = new AdaptiveDownloadEngine(_downloader);
+        _captionDownloader = new CaptionDownloadEngine(_httpClient);
         applicationDataDirectory ??= Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
             "TubeForge");
@@ -128,6 +141,9 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         DownloadCommand = new AsyncRelayCommand(
             DownloadAsync,
             () => !ShowResponsibleUseNotice && !IsAnalyzing && SelectedFormat is not null && HasVideo);
+        DownloadCaptionCommand = new AsyncRelayCommand(
+            DownloadCaptionAsync,
+            () => !ShowResponsibleUseNotice && !IsAnalyzing && !IsSavingCaption && SelectedCaptionTrack is not null);
         CancelAnalysisCommand = new RelayCommand(CancelAnalysis, () => IsAnalyzing);
         CancelCommand = new RelayCommand(PauseAll, () => IsDownloading);
         ShowDownloadCommand = new RelayCommand(() => ShowPage(AppPage.Download));
@@ -152,6 +168,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     public AsyncRelayCommand AnalyzeCommand { get; }
 
     public AsyncRelayCommand DownloadCommand { get; }
+
+    public AsyncRelayCommand DownloadCaptionCommand { get; }
 
     public RelayCommand CancelCommand { get; }
 
@@ -222,6 +240,58 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     public bool HasError => !string.IsNullOrWhiteSpace(ErrorMessage);
 
     public bool HasVideo => _metadata is not null;
+
+    public IReadOnlyList<CaptionTrackOption> CaptionTracks
+    {
+        get => _captionTracks;
+        private set
+        {
+            if (Set(ref _captionTracks, value))
+            {
+                OnPropertyChanged(nameof(HasCaptions));
+            }
+        }
+    }
+
+    public bool HasCaptions => CaptionTracks.Count > 0;
+
+    public CaptionTrackOption? SelectedCaptionTrack
+    {
+        get => _selectedCaptionTrack;
+        set
+        {
+            if (Set(ref _selectedCaptionTrack, value))
+            {
+                RefreshCommands();
+            }
+        }
+    }
+
+    public IReadOnlyList<CaptionFormatOption> CaptionFormats => CaptionOutputChoices;
+
+    public CaptionFormatOption SelectedCaptionFormat
+    {
+        get => _selectedCaptionFormat;
+        set
+        {
+            if (value is not null)
+            {
+                Set(ref _selectedCaptionFormat, value);
+            }
+        }
+    }
+
+    public bool IsSavingCaption
+    {
+        get => _isSavingCaption;
+        private set
+        {
+            if (Set(ref _isSavingCaption, value))
+            {
+                RefreshCommands();
+            }
+        }
+    }
 
     public bool IsAnalyzing
     {
@@ -660,6 +730,9 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             }
 
             _metadata = result.Value.Metadata;
+            CaptionTracks = _metadata.CaptionTracks.Select(track => new CaptionTrackOption(track)).ToArray();
+            SelectedCaptionTrack = CaptionTracks.FirstOrDefault(track => !track.Track.IsAutoGenerated) ??
+                                   CaptionTracks.FirstOrDefault();
             _diagnosticsExtractionStage = result.Value.Diagnostics?.Stage ?? "WatchPageResolved";
             OnPropertyChanged(nameof(DiagnosticsExtractionStatus));
             _videoTitle = _metadata.Title;
@@ -746,6 +819,53 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             ErrorMessage = "TubeForge could not prepare the queued destination. (Queue.WriteFailed)";
             ProgressDetail = exception.GetType().Name;
             StatusMessage = "Download not queued";
+        }
+    }
+
+    private async Task DownloadCaptionAsync()
+    {
+        if (_metadata is null || SelectedCaptionTrack is null)
+        {
+            return;
+        }
+
+        IsSavingCaption = true;
+        ErrorMessage = string.Empty;
+        try
+        {
+            var track = SelectedCaptionTrack.Track;
+            var kind = track.IsAutoGenerated ? " auto" : string.Empty;
+            var destination = FileNamePolicy.AvailablePath(
+                DownloadFolder,
+                $"{_metadata.Title} [{track.LanguageCode}{kind}]",
+                SelectedCaptionFormat.Extension,
+                path => File.Exists(path) || File.Exists(path + ".part"));
+            var result = await _captionDownloader.DownloadAsync(new CaptionDownloadRequest
+            {
+                SourceUrl = track.Url,
+                DestinationPath = destination,
+                OutputFormat = SelectedCaptionFormat.Value
+            });
+            if (!result.IsSuccess)
+            {
+                ErrorMessage = $"{result.Error!.Message} ({result.Error.Code})";
+                StatusMessage = "Caption save failed";
+                return;
+            }
+
+            StatusMessage = $"Saved caption: {Path.GetFileName(result.Value.DestinationPath)}";
+            ProgressDetail = $"{result.Value.CueCount} cues · {SelectedCaptionFormat.Label}";
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or
+                                          ArgumentException or NotSupportedException)
+        {
+            ErrorMessage = "The caption destination is invalid or unavailable. (Caption.InvalidDestination)";
+            ProgressDetail = exception.GetType().Name;
+            StatusMessage = "Caption save failed";
+        }
+        finally
+        {
+            IsSavingCaption = false;
         }
     }
 
@@ -1434,6 +1554,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     private void ClearAnalysis()
     {
         _metadata = null;
+        CaptionTracks = [];
+        SelectedCaptionTrack = null;
         _videoTitle = string.Empty;
         _videoChannel = string.Empty;
         _videoDuration = null;
@@ -1800,6 +1922,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         OnPropertyChanged(nameof(VideoTitle));
         OnPropertyChanged(nameof(VideoMetaLine));
         OnPropertyChanged(nameof(ThumbnailUrl));
+        OnPropertyChanged(nameof(HasCaptions));
         OnPropertyChanged(nameof(FormatCountLabel));
         RefreshCommands();
     }
@@ -1814,6 +1937,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     {
         AnalyzeCommand.RaiseCanExecuteChanged();
         DownloadCommand.RaiseCanExecuteChanged();
+        DownloadCaptionCommand.RaiseCanExecuteChanged();
         CancelAnalysisCommand.RaiseCanExecuteChanged();
         CancelCommand.RaiseCanExecuteChanged();
     }

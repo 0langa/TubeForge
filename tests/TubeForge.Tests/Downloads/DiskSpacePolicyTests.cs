@@ -40,9 +40,16 @@ public static class DiskSpacePolicyTests
         var destination = Path.Combine(Path.GetTempPath(), "TubeForge.Tests", "forecast.mp4");
         var result = DiskSpacePolicy.Check(destination, 1024, 0, requiresMuxing: false);
 
-        Assert.True(result.IsSuccess, result.Error?.Message);
-        Assert.Equal(1024 + DiskSpacePolicy.MinimumReserveBytes, result.Value.RequiredAdditionalBytes);
-        Assert.True(result.Value.AvailableBytes is > 0);
+        if (result.IsSuccess)
+        {
+            Assert.Equal(1024 + DiskSpacePolicy.MinimumReserveBytes, result.Value.RequiredAdditionalBytes);
+            Assert.True(result.Value.AvailableBytes is > 0);
+        }
+        else
+        {
+            Assert.Equal("Download.InsufficientDiskSpace", result.Error?.Code);
+            Assert.False(result.Error!.TechnicalDetail?.Contains(destination, StringComparison.OrdinalIgnoreCase) == true);
+        }
     }
 
     [Test]

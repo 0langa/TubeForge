@@ -206,6 +206,25 @@
                                 </Grid>
                             </StackPanel>
                         </Border>
+
+                        <Border Style="{StaticResource Card}" Margin="0,14,0,0"
+                                Visibility="{Binding HasCaptions, Converter={StaticResource BooleanToVisibilityConverter}}">
+                            <StackPanel>
+                                <TextBlock Text="Captions" FontSize="13" FontWeight="SemiBold" />
+                                <TextBlock Text="Save a manual or auto-generated language track beside the media."
+                                           Margin="0,5,0,0" FontSize="10" TextWrapping="Wrap"
+                                           Foreground="{StaticResource MutedTextBrush}" />
+                                <TextBlock Text="LANGUAGE TRACK" Style="{StaticResource FieldLabel}" Margin="0,14,0,5" />
+                                <ComboBox ItemsSource="{Binding CaptionTracks}" SelectedItem="{Binding SelectedCaptionTrack}"
+                                          AutomationProperties.Name="Caption language and track type" />
+                                <TextBlock Text="CAPTION FORMAT" Style="{StaticResource FieldLabel}" Margin="0,12,0,5" />
+                                <ComboBox ItemsSource="{Binding CaptionFormats}" SelectedItem="{Binding SelectedCaptionFormat}"
+                                          AutomationProperties.Name="Caption output format" />
+                                <Button Style="{StaticResource SecondaryButton}" Content="Save caption" Margin="0,12,0,0"
+                                        Command="{Binding DownloadCaptionCommand}"
+                                        AutomationProperties.Name="Save selected caption" />
+                            </StackPanel>
+                        </Border>
                     </StackPanel>
 
                     <Border Grid.Column="2" Style="{StaticResource Card}">

@@ -363,7 +363,7 @@ Exit: compatible adaptive MP4 video and audio combine into a seekable file witho
 
 - [ ] Playlist/channel URL parsing and paged enumeration.
 - [ ] Per-item selection, naming templates, archive/history, and duplicate detection.
-- [ ] Captions: language selection, manual/automatic distinction, SRT/VTT conversion.
+- [x] Captions: language selection, manual/automatic distinction, SRT/VTT conversion.
 - [ ] Thumbnails and optional metadata sidecars.
 - [ ] Chapters and playlist indexing.
 - [ ] Shorts/live metadata; completed live streams before active-live capture.
@@ -458,6 +458,7 @@ Order for current work:
 - 2026-07-16: Deterministic transfer reliability coverage uses real loopback sockets for connection loss, explicit proxies, and IPv4/IPv6, plus gated streams for sleep-like transport stalls and slow-destination backpressure without timing sleeps.
 - 2026-07-16: Segmented transfer is an opt-in setting for large known-length streams. Up to four concurrent ranges must agree on bounds, total length, and validators; completed-range state is resumable and servers that ignore ranges fall back to the normal direct engine.
 - 2026-07-16: Enforce deterministic fixture-analysis latency in CI and measure desktop startup, isolated idle CPU, working set, and WPF frame cadence with a local-only probe. Keep 2 s startup and 34 ms frames as targets; use 4 s and 50 ms as hard cold/30 Hz environment ceilings.
+- 2026-07-16: Caption downloads are bounded to the trusted YouTube timed-text endpoint, requested as WebVTT, validated before publication, and atomically saved as normalized VTT or safely converted SRT. Manual and auto-generated tracks remain explicit in the UI and filename.
 
 ## 15. Plan maintenance
 
