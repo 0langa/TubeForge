@@ -10,5 +10,7 @@ public sealed record TubeForgeSettings
 
     public int MaximumConcurrentDownloads { get; init; } = 2;
 
+    public bool EnableSegmentedTransfers { get; init; }
+
     public bool ResponsibleUseAccepted { get; init; }
 }

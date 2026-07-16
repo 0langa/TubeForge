@@ -17,6 +17,7 @@ public sealed class DirectDownloadEngine
     private readonly DownloadUriPolicy _uriPolicy;
     private readonly Func<TimeSpan, CancellationToken, Task> _delay;
     private readonly Func<string, bool, Stream> _outputStreamFactory;
+    private readonly SegmentedDownloadEngine _segmentedDownloadEngine;
 
     public DirectDownloadEngine(
         HttpClient httpClient,
@@ -36,6 +37,7 @@ public sealed class DirectDownloadEngine
         _uriPolicy = uriPolicy ?? DownloadUriPolicy.YouTubeMediaOnly;
         _delay = delay ?? Task.Delay;
         _outputStreamFactory = outputStreamFactory ?? CreateOutputStream;
+        _segmentedDownloadEngine = new SegmentedDownloadEngine(_httpClient, _uriPolicy);
     }
 
     public async Task<Result<DownloadReceipt>> DownloadAsync(
@@ -49,9 +51,20 @@ public sealed class DirectDownloadEngine
             return Result<DownloadReceipt>.Failure(validationFailure);
         }
 
+        var useSegmentedTransfer = SegmentedDownloadEngine.ShouldUse(request);
         for (var attempt = 1; attempt <= DownloadRetryPolicy.MaximumAttempts; attempt++)
         {
-            var result = await DownloadAttemptAsync(request, progress, cancellationToken).ConfigureAwait(false);
+            var result = useSegmentedTransfer
+                ? await _segmentedDownloadEngine.DownloadAttemptAsync(request, progress, cancellationToken)
+                    .ConfigureAwait(false)
+                : await DownloadAttemptAsync(request, progress, cancellationToken).ConfigureAwait(false);
+            if (!result.IsSuccess && result.Error?.Code == "Download.RangeUnsupported")
+            {
+                SegmentedDownloadEngine.Reset(request.DestinationPath);
+                useSegmentedTransfer = false;
+                result = await DownloadAttemptAsync(request, progress, cancellationToken).ConfigureAwait(false);
+            }
+
             if (result.IsSuccess ||
                 result.Error?.IsTransient != true ||
                 attempt == DownloadRetryPolicy.MaximumAttempts ||
@@ -320,7 +333,7 @@ public sealed class DirectDownloadEngine
         progress.Report(new DownloadProgress(bytesReceived, totalBytes, speed, remaining));
     }
 
-    private static Result<DownloadReceipt> FinalizeCompletedPartial(
+    internal static Result<DownloadReceipt> FinalizeCompletedPartial(
         string destinationPath,
         string partialPath,
         string statePath,
@@ -398,10 +411,18 @@ public sealed class DirectDownloadEngine
             return new TubeForgeError("Download.InvalidLength", "The expected media size is invalid.");
         }
 
+        if (request.EnableSegmentedTransfer &&
+            (request.MaximumSegments is < 2 or > 8 || request.SegmentedTransferMinimumBytes <= 0))
+        {
+            return new TubeForgeError(
+                "Download.InvalidSegmentation",
+                "The segmented transfer settings are invalid.");
+        }
+
         return null;
     }
 
-    private static Result<DownloadReceipt> HttpFailure(HttpStatusCode statusCode)
+    internal static Result<DownloadReceipt> HttpFailure(HttpStatusCode statusCode)
     {
         var transient = statusCode is HttpStatusCode.RequestTimeout or HttpStatusCode.TooManyRequests ||
                         (int)statusCode >= 500;

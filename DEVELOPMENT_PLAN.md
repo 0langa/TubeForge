@@ -384,7 +384,7 @@ Exit: best compatible WebM adaptive formats combine into seekable files.
 ### M10 — Reliability hardening
 
 - [x] Maintain extraction canary set and documented update playbook.
-- [ ] Add segmented transfer behind a feature flag and prove integrity/performance.
+- [x] Add segmented transfer behind a feature flag and prove integrity/performance.
 - [x] Add network-change, sleep/resume, proxy, IPv4/IPv6, and slow-disk tests.
 - [x] Add disk-space forecasting and low-space recovery.
 - [x] Add queue soak tests and crash-consistent persistence.
@@ -456,6 +456,7 @@ Order for current work:
 - 2026-07-16: Diagnostic export uses a whitelist-only JSON schema and deliberately omits all content/source/local-path fields. GitHub extractor reports require this redacted report plus explicit safety acknowledgement.
 - 2026-07-16: Queue commits flush a same-directory pending file before atomic replacement and retain the prior committed snapshot as recovery backup. Startup accepts only a fully validated primary, pending, or backup snapshot and pauses interrupted active items.
 - 2026-07-16: Deterministic transfer reliability coverage uses real loopback sockets for connection loss, explicit proxies, and IPv4/IPv6, plus gated streams for sleep-like transport stalls and slow-destination backpressure without timing sleeps.
+- 2026-07-16: Segmented transfer is an opt-in setting for large known-length streams. Up to four concurrent ranges must agree on bounds, total length, and validators; completed-range state is resumable and servers that ignore ranges fall back to the normal direct engine.
 
 ## 15. Plan maintenance
 

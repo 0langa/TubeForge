@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Net;
 using System.Net.Http.Headers;
@@ -341,6 +342,159 @@ public static class DirectDownloadEngineTests
         Assert.SequenceEqual(payload, await File.ReadAllBytesAsync(destination));
     }
 
+    [Test]
+    public static async Task SegmentedTransferUsesConcurrentValidatedRangesWithoutByteLoss()
+    {
+        using var directory = new TestDirectory();
+        var destination = Path.Combine(directory.Path, "segmented.mp4");
+        var payload = Enumerable.Range(0, 1024 * 1024).Select(index => (byte)(index % 239)).ToArray();
+        var allRangesStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var rangeCount = 0;
+        var active = 0;
+        var maximumActive = 0;
+        using var handler = new StubHandler(async (request, cancellationToken) =>
+        {
+            var range = request.Headers.Range?.Ranges.Single();
+            Assert.True(range?.From is not null && range.To is not null);
+            var currentActive = Interlocked.Increment(ref active);
+            UpdateMaximum(ref maximumActive, currentActive);
+            if (Interlocked.Increment(ref rangeCount) == 4)
+            {
+                allRangesStarted.SetResult();
+            }
+
+            await allRangesStarted.Task.WaitAsync(cancellationToken);
+            Interlocked.Decrement(ref active);
+            return RangeResponse(payload, range!.From!.Value, range.To!.Value, "\"segmented-v1\"");
+        });
+        using var client = new HttpClient(handler);
+        var engine = Engine(client);
+
+        var result = await engine.DownloadAsync(SegmentedRequest(destination, payload.Length));
+
+        Assert.True(result.IsSuccess, result.Error?.Message);
+        Assert.False(result.Value.Resumed);
+        Assert.Equal(4, rangeCount);
+        Assert.Equal(4, maximumActive);
+        Assert.SequenceEqual(payload, await File.ReadAllBytesAsync(destination));
+        Assert.False(File.Exists(destination + ".part"));
+        Assert.False(File.Exists(destination + ".part.segments.json"));
+    }
+
+    [Test]
+    public static async Task SegmentedTransferResumesCompletedRangesAfterTransientFailure()
+    {
+        using var directory = new TestDirectory();
+        var destination = Path.Combine(directory.Path, "segmented-resume.mp4");
+        var payload = Enumerable.Range(0, 512 * 1024).Select(index => (byte)(index % 233)).ToArray();
+        var requestsByStart = new ConcurrentDictionary<long, int>();
+        using var handler = new StubHandler((request, _) =>
+        {
+            var range = request.Headers.Range!.Ranges.Single();
+            var start = range.From!.Value;
+            var requestCount = requestsByStart.AddOrUpdate(start, 1, (_, count) => count + 1);
+            if (start > 0 && requestCount == 1)
+            {
+                return Task.FromResult(Response(HttpStatusCode.ServiceUnavailable, []));
+            }
+
+            return Task.FromResult(RangeResponse(
+                payload,
+                start,
+                range.To!.Value,
+                "\"segmented-v1\""));
+        });
+        using var client = new HttpClient(handler);
+        var engine = Engine(client);
+
+        var result = await engine.DownloadAsync(SegmentedRequest(destination, payload.Length));
+
+        Assert.True(result.IsSuccess, result.Error?.Message);
+        Assert.True(result.Value.Resumed);
+        Assert.Equal(1, requestsByStart[0]);
+        Assert.True(requestsByStart.Values.Count(value => value == 2) == 3);
+        Assert.SequenceEqual(payload, await File.ReadAllBytesAsync(destination));
+    }
+
+    [Test]
+    public static async Task SegmentedTransferFallsBackWhenRangesAreUnsupported()
+    {
+        using var directory = new TestDirectory();
+        var destination = Path.Combine(directory.Path, "segmented-fallback.mp4");
+        var payload = Encoding.ASCII.GetBytes("range-fallback-payload");
+        var rangeRequests = 0;
+        var directRequests = 0;
+        using var handler = new StubHandler((request, _) =>
+        {
+            if (request.Headers.Range is null)
+            {
+                Interlocked.Increment(ref directRequests);
+            }
+            else
+            {
+                Interlocked.Increment(ref rangeRequests);
+            }
+
+            return Task.FromResult(Response(HttpStatusCode.OK, payload));
+        });
+        using var client = new HttpClient(handler);
+        var engine = Engine(client);
+
+        var result = await engine.DownloadAsync(SegmentedRequest(destination, payload.Length));
+
+        Assert.True(result.IsSuccess, result.Error?.Message);
+        Assert.Equal(4, rangeRequests);
+        Assert.Equal(1, directRequests);
+        Assert.SequenceEqual(payload, await File.ReadAllBytesAsync(destination));
+        Assert.False(File.Exists(destination + ".part.segments.json"));
+    }
+
+    [Test]
+    public static async Task SegmentedTransferRejectsValidatorMismatchWithoutPublishingOutput()
+    {
+        using var directory = new TestDirectory();
+        var destination = Path.Combine(directory.Path, "segmented-mismatch.mp4");
+        var payload = Enumerable.Range(0, 256 * 1024).Select(index => (byte)(index % 229)).ToArray();
+        using var handler = new StubHandler((request, _) =>
+        {
+            var range = request.Headers.Range!.Ranges.Single();
+            var tag = range.From == 0 ? "\"version-a\"" : "\"version-b\"";
+            return Task.FromResult(RangeResponse(payload, range.From!.Value, range.To!.Value, tag));
+        });
+        using var client = new HttpClient(handler);
+        var engine = Engine(client);
+
+        var result = await engine.DownloadAsync(SegmentedRequest(destination, payload.Length));
+
+        Assert.False(result.IsSuccess);
+        Assert.Equal("Download.RemoteChanged", result.Error?.Code);
+        Assert.False(File.Exists(destination));
+    }
+
+    [Test]
+    public static async Task SegmentedProgressCountsCompletedRangesInsteadOfPreallocatedLength()
+    {
+        using var directory = new TestDirectory();
+        var destination = Path.Combine(directory.Path, "segmented-progress.mp4");
+        await using (var partial = new FileStream(destination + ".part", FileMode.CreateNew, FileAccess.Write))
+        {
+            partial.SetLength(100);
+        }
+
+        await SegmentedDownloadStateStore.WriteAsync(
+            destination + ".part.segments.json",
+            new SegmentedDownloadState
+            {
+                SourceIdentity = "Fixture123_:22",
+                ExpectedLength = 100,
+                SegmentCount = 4,
+                Completed = [true, false, true, false]
+            },
+            CancellationToken.None);
+
+        Assert.Equal(50L, SegmentedTransferProgress.GetCompletedBytes(destination));
+    }
+
     private static async Task DownloadFromLoopbackAsync(
         IPAddress address,
         string destination,
@@ -372,10 +526,45 @@ public static class DirectDownloadEngineTests
         ExpectedLength = expectedLength
     };
 
+    private static DownloadRequest SegmentedRequest(string destination, long expectedLength) =>
+        Request(destination, expectedLength) with
+        {
+            EnableSegmentedTransfer = true,
+            MaximumSegments = 4,
+            SegmentedTransferMinimumBytes = 1
+        };
+
     private static HttpResponseMessage Response(HttpStatusCode status, byte[] content) => new(status)
     {
         Content = new ByteArrayContent(content)
     };
+
+    private static HttpResponseMessage RangeResponse(
+        byte[] payload,
+        long from,
+        long to,
+        string entityTag)
+    {
+        var length = checked((int)(to - from + 1));
+        var content = new byte[length];
+        Buffer.BlockCopy(payload, checked((int)from), content, 0, length);
+        var response = Response(HttpStatusCode.PartialContent, content);
+        response.Content.Headers.ContentRange = new ContentRangeHeaderValue(from, to, payload.Length);
+        response.Headers.ETag = new EntityTagHeaderValue(entityTag);
+        return response;
+    }
+
+    private static void UpdateMaximum(ref int target, int candidate)
+    {
+        while (true)
+        {
+            var current = Volatile.Read(ref target);
+            if (candidate <= current || Interlocked.CompareExchange(ref target, candidate, current) == current)
+            {
+                return;
+            }
+        }
+    }
 
     private sealed class StubHandler(
         Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> responseFactory)

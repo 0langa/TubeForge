@@ -86,6 +86,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     private string _downloadActionLabel = "Add to queue";
     private AppPage _activePage = AppPage.Download;
     private int _selectedMaxConcurrentDownloads = 2;
+    private bool _enableSegmentedTransfers;
     private TubeForgeSettings _settings;
     private bool _showResponsibleUseNotice = true;
     private string _settingsStatus = "Settings stay on this device.";
@@ -319,6 +320,12 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         }
     }
 
+    public bool EnableSegmentedTransfers
+    {
+        get => _enableSegmentedTransfers;
+        set => Set(ref _enableSegmentedTransfers, value);
+    }
+
     public double DownloadFraction
     {
         get => _downloadFraction;
@@ -496,6 +503,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             _selectedMaxConcurrentDownloads = _settings.MaximumConcurrentDownloads;
             _queueDispatcher.MaximumConcurrency = _selectedMaxConcurrentDownloads;
             OnPropertyChanged(nameof(SelectedMaxConcurrentDownloads));
+            _enableSegmentedTransfers = _settings.EnableSegmentedTransfers;
+            OnPropertyChanged(nameof(EnableSegmentedTransfers));
             ShowResponsibleUseNotice = !_settings.ResponsibleUseAccepted;
         }
         else
@@ -541,7 +550,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             next = _settings with
             {
                 DownloadFolder = Path.GetFullPath(DownloadFolder),
-                MaximumConcurrentDownloads = SelectedMaxConcurrentDownloads
+                MaximumConcurrentDownloads = SelectedMaxConcurrentDownloads,
+                EnableSegmentedTransfers = EnableSegmentedTransfers
             };
         }
         catch (Exception exception) when (exception is ArgumentException or NotSupportedException or PathTooLongException)
@@ -578,6 +588,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             {
                 DownloadFolder = Path.GetFullPath(DownloadFolder),
                 MaximumConcurrentDownloads = SelectedMaxConcurrentDownloads,
+                EnableSegmentedTransfers = EnableSegmentedTransfers,
                 ResponsibleUseAccepted = true
             };
         }
@@ -808,10 +819,11 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
 
             var work = prepared.Work;
             var existingBytes = SelectionPartialLength(work.Destination, work.Selection);
+            var reservedBytes = SelectionReservedLength(work.Destination, work.Selection);
             var diskForecast = DiskSpacePolicy.Check(
                 work.Destination,
                 CombinedLength(work.Selection),
-                existingBytes,
+                reservedBytes,
                 work.Selection.RequiresMuxing);
             if (!diskForecast.IsSuccess)
             {
@@ -1225,7 +1237,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         };
     }
 
-    private static DownloadRequest TrackRequest(
+    private DownloadRequest TrackRequest(
         VideoMetadata metadata,
         StreamFormat format,
         string destination) => new()
@@ -1234,7 +1246,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             SourceIdentity = $"{metadata.Id.Value}:{format.FormatId}",
             DestinationPath = destination,
             ExpectedLength = format.ContentLength,
-            ExpectedContainer = format.Container
+            ExpectedContainer = format.Container,
+            EnableSegmentedTransfer = _settings.EnableSegmentedTransfers
         };
 
     private static string IntermediateTrackPath(
@@ -1278,6 +1291,25 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         try
         {
             return checked(CompletedOrPartialLength(videoPath) + CompletedOrPartialLength(audioPath));
+        }
+        catch (OverflowException)
+        {
+            return long.MaxValue;
+        }
+    }
+
+    private static long SelectionReservedLength(string destination, FormatItemViewModel selection)
+    {
+        if (selection.AudioFormat is null)
+        {
+            return CompletedOrReservedLength(destination);
+        }
+
+        var videoPath = IntermediateTrackPath(destination, "video", selection.Format);
+        var audioPath = IntermediateTrackPath(destination, "audio", selection.AudioFormat);
+        try
+        {
+            return checked(CompletedOrReservedLength(videoPath) + CompletedOrReservedLength(audioPath));
         }
         catch (OverflowException)
         {
@@ -1366,8 +1398,27 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     {
         try
         {
+            var segmentedBytes = SegmentedTransferProgress.GetCompletedBytes(destination);
+            if (segmentedBytes is not null)
+            {
+                return segmentedBytes.Value;
+            }
+
             var partialPath = destination + ".part";
             return File.Exists(partialPath) ? new FileInfo(partialPath).Length : 0;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return 0;
+        }
+    }
+
+    private static long CompletedOrReservedLength(string destination)
+    {
+        try
+        {
+            var path = File.Exists(destination) ? destination : destination + ".part";
+            return File.Exists(path) ? new FileInfo(path).Length : 0;
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {

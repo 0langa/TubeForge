@@ -16,6 +16,7 @@ public static class TubeForgeSettingsStoreTests
         var save = await store.SaveAsync(defaults with
         {
             MaximumConcurrentDownloads = 4,
+            EnableSegmentedTransfers = true,
             ResponsibleUseAccepted = true
         });
         var loaded = await store.LoadAsync(defaults);
@@ -25,6 +26,7 @@ public static class TubeForgeSettingsStoreTests
         Assert.True(save.IsSuccess);
         Assert.True(loaded.IsSuccess);
         Assert.Equal(4, loaded.Value.MaximumConcurrentDownloads);
+        Assert.True(loaded.Value.EnableSegmentedTransfers);
         Assert.True(loaded.Value.ResponsibleUseAccepted);
     }
 

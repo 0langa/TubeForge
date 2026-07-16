@@ -611,6 +611,16 @@
                                   SelectedItem="{Binding SelectedMaxConcurrentDownloads}" Width="160"
                                   HorizontalAlignment="Left" AutomationProperties.Name="Default maximum concurrent downloads" />
 
+                        <CheckBox IsChecked="{Binding EnableSegmentedTransfers}" Margin="0,20,0,0"
+                                  AutomationProperties.Name="Enable experimental segmented transfers">
+                            <StackPanel>
+                                <TextBlock Text="Experimental segmented transfer" FontWeight="SemiBold" />
+                                <TextBlock Text="Use up to four validated parallel byte ranges for large files. Falls back automatically when unsupported."
+                                           Margin="0,4,0,0" FontSize="11" TextWrapping="Wrap"
+                                           Foreground="{StaticResource MutedTextBrush}" />
+                            </StackPanel>
+                        </CheckBox>
+
                         <Border Background="#0E1A2B" BorderBrush="#29405F" BorderThickness="1"
                                 CornerRadius="8" Padding="12" Margin="0,20,0,0">
                             <StackPanel>

@@ -18,6 +18,7 @@ Working now:
 - highest-quality audio + video selection with separate resumable track downloads and in-house MP4/WebM muxing, preferring MP4 on equivalent-quality choices;
 - caption-track metadata, truthful format labels, and collision-safe filenames;
 - resumable `.part` transfers, bounded container validation, retries, progress, cancellation, and atomic finalization;
+- opt-in segmented transfer for large files with validated parallel ranges, resumable segment state, and automatic direct-transfer fallback;
 - preflight disk-space forecasting with adaptive-mux peak-space accounting and retryable low-space failures;
 - queue screen with 1–4 transfer global concurrency, per-item progress/speed/ETA, pause/resume/cancel/retry/remove/reveal controls, and interrupted-download recovery;
 - privacy-safe schema-versioned queue state that stores source identities instead of expiring media URLs;
