@@ -411,9 +411,9 @@ Exit: clean-machine installation, download smoke test, uninstall, checksum verif
 ### M12 — TubeForge product identity
 
 - [x] Replace generic play-button branding with a scalable TubeForge forge/play mark.
-- [ ] Apply icon to window, executable, installer, release artifacts, and repository surfaces.
-- [ ] Audit product names, descriptions, package IDs, paths, and URLs for one TubeForge identity.
-- [ ] Rename the public GitHub repository to `TubeForge` after code and release references migrate.
+- [x] Apply icon to window, executable, installer, release artifacts, and repository surfaces.
+- [x] Audit product names, descriptions, package IDs, paths, and URLs for one TubeForge identity.
+- [x] Rename the public GitHub repository to `TubeForge` after code and release references migrate.
 
 Exit: app, artifacts, documentation, and public repository use one recognizable TubeForge identity.
 
@@ -430,14 +430,14 @@ Exit: supported Windows codecs convert selected public audio to playable MP3 wit
 
 ### M14 — Installer, updater, and v1.1
 
-- [ ] Build a per-user, unelevated installer with Start Menu entry and Add/Remove Programs registration.
-- [ ] Preserve user data by default and offer explicit removal during uninstall.
-- [ ] Check GitHub stable releases on startup only when update checks are enabled.
-- [ ] Download the matching installer with strict repository, asset-name, size, SHA-256 digest, and version validation.
-- [ ] Require explicit user confirmation before applying an update; never elevate or silently execute remote content.
-- [ ] Add atomic staging, rollback, stale-file cleanup, and update/installer failure recovery.
-- [ ] Extend threat model, packaging tests, installation docs, release workflow, and support policy.
-- [ ] Publish v1.1 with installer, updater, branding, and MP3 limitations documented.
+- [x] Build a per-user, unelevated installer with Start Menu entry and Add/Remove Programs registration.
+- [x] Preserve user data by default and offer explicit removal during uninstall.
+- [x] Check GitHub stable releases on startup only when update checks are enabled.
+- [x] Download the matching installer with strict repository, asset-name, size, SHA-256 digest, and version validation.
+- [x] Require explicit user confirmation before applying an update; never elevate or silently execute remote content.
+- [x] Add atomic staging, rollback, stale-file cleanup, and update/installer failure recovery.
+- [x] Extend threat model, packaging tests, installation docs, release workflow, and support policy.
+- [x] Publish v1.1 with installer, updater, branding, and MP3 limitations documented.
 
 Exit: clean-machine install, in-app update, rollback, uninstall, MP3 conversion, checksum, and provenance smoke tests pass.
 
@@ -471,7 +471,7 @@ Order for current work:
 ## 14. Decision log
 
 - 2026-07-16: Greenfield repository targets Windows using .NET 10 and WPF because the active development environment contains the full Windows Desktop runtime and this avoids third-party UI dependencies.
-- 2026-07-16: `TubeForge` is the working product/namespace name; repository may retain the descriptive `youtube-downloader` name.
+- 2026-07-17: `TubeForge` is the product, namespace, artifact, installer, updater-policy, and public repository identity.
 - 2026-07-16: Zero third-party application dependencies is an architectural invariant, not merely a packaging goal.
 - 2026-07-16: Progressive and native-container output precede muxing; transcoding is not conflated with downloading.
 - 2026-07-16: RECALL state is local development context and must remain outside Git.

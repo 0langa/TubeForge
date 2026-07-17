@@ -23,7 +23,7 @@ Status: pass for the confirmed public, local single-user deployment model.
 - Queue/settings/history persistence is schema-validated with pending/backup crash recovery.
 - The build rejects all `PackageReference` dependencies and enables latest .NET analyzers with warnings as errors.
 - Remaining high-value review surfaces are the player parser, URL allowlists/redirect handling, container parsers/muxers, destination path handling, and release artifact integrity.
-- The repository-grounded [threat model](../youtube-downloader-threat-model.md) found no critical/high residual threat under the confirmed v1 scope; remote parser/resource and privileged release-compromise paths remain medium priorities.
+- The repository-grounded [threat model](../TUBEFORGE_THREAT_MODEL.md) found no critical/high residual threat under the confirmed v1 scope; remote parser/resource and privileged release-compromise paths remain medium priorities.
 
 The available generic security-review skill has no C#/WPF-specific reference pack, so this review is grounded in repository controls, analyzers, tests, and the project threat model rather than a language checklist.
 

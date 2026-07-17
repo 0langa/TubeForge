@@ -1,3 +1,5 @@
+# TubeForge threat model
+
 ## Executive summary
 
 TubeForge is a local single-user Windows desktop application with no hosted backend, accounts, authentication, or multi-tenancy. Its main risks are processing attacker-influenced YouTube/player/media bytes, safely constraining network destinations and filesystem writes, protecting privacy-bearing local state, and preserving release integrity. Existing allowlists, size/depth bounds, constrained non-executing JavaScript plans, atomic file publication, dependency rejection, checksums, and build attestations reduce all identified v1 threats to medium or low priority; no critical/high residual threat was found under the confirmed public single-user deployment model.
@@ -9,7 +11,8 @@ TubeForge is a local single-user Windows desktop application with no hosted back
 - Confirmed: binaries may be used by unrelated users, but each instance is local, single-user, and keeps private per-user state; no hosted service or shared database exists.
 - Data sensitivity: ordinary personal data in local titles, video IDs, destination paths, and history; no intended credentials, cookies, regulated records, or payment data.
 - Attacker-controlled inputs: pasted URLs, upstream HTML/JSON/player JavaScript/media/container/caption/thumbnail bytes, redirects, and public issue contents.
-- Open question: a future installer, auto-updater, login feature, shared-machine deployment, or elevated process would require a new threat model and could materially raise risk.
+- Confirmed: the per-user installer remains unelevated; update checks are opt-in, accept only the pinned TubeForge GitHub repository and asset policy, verify two matching SHA-256 records, and require explicit confirmation before execution.
+- Open question: a future login feature, shared-machine deployment, elevated process, silent update, or alternate update source would require a new threat model and could materially raise risk.
 
 ## System model
 
@@ -20,6 +23,8 @@ TubeForge is a local single-user Windows desktop application with no hosted back
 - YouTube extraction, collection parsing, constrained player transforms, and sidecars: `src/TubeForge.YouTube/`.
 - Direct/segmented transfer, persistence, disk policy, and adaptive orchestration: `src/TubeForge.Downloads/`.
 - In-house MP4/WebM parsers and muxers: `src/TubeForge.Media/`.
+- Repository-pinned update discovery, download, and verification: `src/TubeForge.Updates/`.
+- Per-user install, repair, update, and uninstall: `src/TubeForge.Installation/` and `src/TubeForge.Installer/`.
 - Release build, verification, CI, and provenance: `scripts/Publish-Release.ps1`, `scripts/Test-Release.ps1`, and `.github/workflows/`.
 
 ### Data flows and trust boundaries
@@ -30,7 +35,8 @@ TubeForge is a local single-user Windows desktop application with no hosted back
 - Extractors → Google media hosts: signed media URLs over HTTPS; exact `googlevideo.com` suffix allowlist and redirect revalidation.
 - Media hosts → transfer/container code: untrusted byte streams over HTTPS; length/range validation, bounded parsers, partial files, container validation, and atomic finalization.
 - Application → per-user disk: settings, queue, Library history, partial files, and completed output through Windows filesystem APIs; schema validation, backup/pending recovery, and collision-safe names.
-- Maintainer/tag → GitHub Actions → users: source, Microsoft runtime packs, ZIP artifacts, checksums, provenance attestations, and optional Authenticode signatures; constrained workflow permissions and release verification.
+- GitHub release → updater → installer: repository-pinned stable metadata and bounded assets over HTTPS; exact name/version/size policy, GitHub digest plus checksum agreement, staged download, and explicit user confirmation.
+- Maintainer/tag → GitHub Actions → users: source, Microsoft runtime packs, ZIP/installer artifacts, checksums, provenance attestations, and optional Authenticode signatures; constrained workflow permissions and release verification.
 
 #### Diagram
 
@@ -43,6 +49,9 @@ flowchart LR
   G --> D["Download and container pipeline"]
   D --> F["User filesystem"]
   A --> S["Per-user app state"]
+  R --> V["Pinned update verifier"]
+  V --> I["Unelevated installer"]
+  I --> A
   M["Maintainer tag"] --> C["GitHub Actions"]
   C --> R["Attested release assets"]
   R --> U
@@ -88,6 +97,7 @@ flowchart LR
 | Local JSON state | App startup and queue changes | Filesystem → app | Schema/depth/size validation and crash recovery | `src/TubeForge.Downloads/Queue/DownloadQueueStore.cs`; `History/DownloadHistoryStore.cs`; `src/TubeForge.Core/Settings/TubeForgeSettingsStore.cs` |
 | Diagnostics/issues | Explicit user export/share | App → user/GitHub | Whitelist-only report; local state itself is more sensitive | `src/TubeForge.Core/Diagnostics/RedactedDiagnosticReportBuilder.cs::Build` |
 | Release tag/workflow | Maintainer pushes tag | Repository → users | Build/test/checksum/attestation/release pipeline | `.github/workflows/release.yml`; `scripts/Publish-Release.ps1` |
+| Update metadata and installer | Opt-in app check or manual release download | GitHub → app → user account | Pinned repository/assets, digest/checksum agreement, bounded staging, explicit execution | `src/TubeForge.Updates/GitHubUpdateClient.cs`; `GitHubReleasePolicy.cs`; `src/TubeForge.Installation/` |
 
 ## Top abuse paths
 
@@ -98,6 +108,7 @@ flowchart LR
 5. User posts raw state or media URL while reporting a bug → identifiers, paths, or expiring signatures become public. Impact: privacy; explicit diagnostics whitelist and report guidance reduce likelihood.
 6. Maintainer token/workflow/tag is compromised → malicious artifacts are published → users trust the GitHub release. Impact: code execution as user; protected credentials, tests, SHA-256 manifests, optional Authenticode, and GitHub attestations provide prevention/detection but repository governance remains critical.
 7. Large batch plus network faults fills disk and recovery files → queue repeatedly retries/resumes → user disk/application availability degrades. Impact: local DoS; concurrency, retry, rate, disk-forecast, and state-size limits constrain it.
+8. Compromised or spoofed release metadata offers an installer → updater validates repository, stable version, exact asset name/size, API digest, and checksum manifest → mismatches fail closed before explicit execution. Impact sought: code execution as user.
 
 ## Threat model table
 
