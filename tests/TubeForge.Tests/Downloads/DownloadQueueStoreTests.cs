@@ -153,6 +153,7 @@ public static class DownloadQueueStoreTests
         var load = await new DownloadQueueStore(store.StoragePath).LoadAsync();
         Assert.True(load.IsSuccess, load.Error?.Message);
         Assert.Equal(1_536L, load.Value.Items[0].BytesReceived);
+        Assert.Equal(1_536L, load.Value.Items[0].ExpectedLength);
     }
 
     [Test]

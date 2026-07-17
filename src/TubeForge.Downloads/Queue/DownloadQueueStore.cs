@@ -189,13 +189,23 @@ public sealed class DownloadQueueStore
         var recovered = snapshot with
         {
             Items = snapshot.Items
-                .Select(item => item.Status == DownloadQueueStatus.Downloading
-                    ? item with
+                .Select(item =>
+                {
+                    if (item.Status == DownloadQueueStatus.Downloading)
                     {
-                        Status = DownloadQueueStatus.Paused,
-                        UpdatedAtUtc = recoveredAt
+                        return item with
+                        {
+                            Status = DownloadQueueStatus.Paused,
+                            UpdatedAtUtc = recoveredAt
+                        };
                     }
-                    : item)
+
+                    return item.Status == DownloadQueueStatus.Completed &&
+                           DownloadSourceIdentity.TryParse(item.SourceIdentity, out var sourceIdentity) &&
+                           sourceIdentity.Output.Kind != Core.Media.AudioOutputKind.Native
+                        ? item with { ExpectedLength = item.BytesReceived }
+                        : item;
+                })
                 .ToArray()
         };
         return Result<DownloadQueueSnapshot>.Success(recovered);

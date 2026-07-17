@@ -2531,8 +2531,18 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             return new TubeForgeError("Queue.ItemMissing", "The queued download no longer exists.");
         }
 
+        var expectedLength = item.ExpectedLength;
+        if (status == DownloadQueueStatus.Completed &&
+            completedBytes is > 0 &&
+            DownloadSourceIdentity.TryParse(item.SourceIdentity, out var sourceIdentity) &&
+            sourceIdentity.Output.Kind != AudioOutputKind.Native)
+        {
+            expectedLength = completedBytes;
+        }
+
         return await UpsertQueueItemAsync(item with
         {
+            ExpectedLength = expectedLength,
             BytesReceived = completedBytes ?? item.BytesReceived,
             Status = status,
             UpdatedAtUtc = DateTimeOffset.UtcNow,
