@@ -3,6 +3,7 @@ using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
 using TubeForge.Core.Errors;
+using TubeForge.Core.Media;
 using TubeForge.Core.Networking;
 using TubeForge.Core.Results;
 using TubeForge.Core.YouTube;
@@ -57,9 +58,10 @@ public sealed class YouTubeMetadataResolver(HttpClient httpClient)
                 return watchResult;
             }
 
-            var clientResult = await TryResolveWithAndroidClientAsync(
+            var clientResult = await TryResolveWithDirectClientsAsync(
                 html,
                 watchResult.Value,
+                url,
                 timeoutSource.Token).ConfigureAwait(false);
             if (clientResult is not null && clientResult.Metadata.Formats.Count > 0)
             {
@@ -144,13 +146,44 @@ public sealed class YouTubeMetadataResolver(HttpClient httpClient)
             Metadata = client.Metadata with { Formats = formats },
             PlayerScriptUrl = watchPage.PlayerScriptUrl ?? client.PlayerScriptUrl,
             CipheredFormatCount = Math.Max(watchPage.CipheredFormatCount, client.CipheredFormatCount),
-            Diagnostics = new ExtractionDiagnostics("AndroidClientAugmented")
+            Diagnostics = new ExtractionDiagnostics(
+                (client.Diagnostics?.Stage ?? "ClientResolved") + "+WatchPage")
         };
     }
 
-    private async Task<WatchPageData?> TryResolveWithAndroidClientAsync(
+    private async Task<WatchPageData?> TryResolveWithDirectClientsAsync(
         string html,
         WatchPageData fallback,
+        Uri watchUrl,
+        CancellationToken cancellationToken)
+    {
+        foreach (var profile in new[]
+                 {
+                     YouTubeClientProfile.AndroidVr,
+                     YouTubeClientProfile.WebEmbedded,
+                     YouTubeClientProfile.Tv,
+                     YouTubeClientProfile.Android
+                 })
+        {
+            var result = await TryResolveWithClientAsync(
+                html,
+                fallback,
+                profile,
+                cancellationToken).ConfigureAwait(false);
+            if (result is not null && result.Metadata.Formats.Count > 0 &&
+                await HasAccessibleMediaAsync(result, watchUrl, cancellationToken).ConfigureAwait(false))
+            {
+                return result;
+            }
+        }
+
+        return null;
+    }
+
+    private async Task<WatchPageData?> TryResolveWithClientAsync(
+        string html,
+        WatchPageData fallback,
+        YouTubeClientProfile profile,
         CancellationToken cancellationToken)
     {
         var apiKey = YouTubeWatchPageParser.ExtractConfigurationValue(html, "INNERTUBE_API_KEY");
@@ -160,20 +193,52 @@ public sealed class YouTubeMetadataResolver(HttpClient httpClient)
         }
 
         var visitorData = YouTubeWatchPageParser.ExtractConfigurationValue(html, "VISITOR_DATA");
-        var profile = YouTubeClientProfile.Android;
+        var client = new Dictionary<string, object?>
+        {
+            ["clientName"] = profile.Name,
+            ["clientVersion"] = profile.Version,
+            ["hl"] = "en",
+            ["gl"] = "US"
+        };
+        if (!string.IsNullOrWhiteSpace(visitorData))
+        {
+            client["visitorData"] = visitorData;
+        }
+
+        if (profile.AndroidSdkVersion is not null)
+        {
+            client["androidSdkVersion"] = profile.AndroidSdkVersion;
+        }
+
+        if (profile.DeviceMake is not null)
+        {
+            client["deviceMake"] = profile.DeviceMake;
+        }
+
+        if (profile.DeviceModel is not null)
+        {
+            client["deviceModel"] = profile.DeviceModel;
+        }
+
+        if (profile.OsName is not null)
+        {
+            client["osName"] = profile.OsName;
+        }
+
+        if (profile.OsVersion is not null)
+        {
+            client["osVersion"] = profile.OsVersion;
+        }
+
+        var context = new Dictionary<string, object?> { ["client"] = client };
+        if (profile.IsEmbedded)
+        {
+            context["thirdParty"] = new { embedUrl = "https://www.youtube.com/" };
+        }
+
         var payload = new
         {
-            context = new
-            {
-                client = new
-                {
-                    clientName = profile.Name,
-                    clientVersion = profile.Version,
-                    hl = "en",
-                    gl = "US",
-                    visitorData
-                }
-            },
+            context,
             videoId = fallback.Metadata.Id.Value,
             contentCheckOk = true,
             racyCheckOk = true
@@ -220,6 +285,9 @@ public sealed class YouTubeMetadataResolver(HttpClient httpClient)
             {
                 Metadata = parsed.Value.Metadata with
                 {
+                    Formats = parsed.Value.Metadata.Formats
+                        .Select(format => format with { HttpUserAgent = profile.UserAgent })
+                        .ToArray(),
                     ContentKind = fallback.Metadata.ContentKind,
                     LiveStartedAtUtc = fallback.Metadata.LiveStartedAtUtc,
                     LiveEndedAtUtc = fallback.Metadata.LiveEndedAtUtc,
@@ -231,7 +299,7 @@ public sealed class YouTubeMetadataResolver(HttpClient httpClient)
                         : fallback.Metadata.Chapters
                 },
                 PlayerScriptUrl = fallback.PlayerScriptUrl,
-                Diagnostics = new ExtractionDiagnostics("AndroidClientResolved")
+                Diagnostics = new ExtractionDiagnostics($"ClientResolved:{profile.Name}")
             };
         }
         catch (HttpRequestException)
@@ -246,6 +314,58 @@ public sealed class YouTubeMetadataResolver(HttpClient httpClient)
         {
             return null;
         }
+    }
+
+    private async Task<bool> HasAccessibleMediaAsync(
+        WatchPageData data,
+        Uri watchUrl,
+        CancellationToken cancellationToken)
+    {
+        var formats = data.Metadata.Formats;
+        var video = formats
+            .Where(format => format.HasVideo)
+            .OrderByDescending(format => format.Height ?? 0)
+            .ThenByDescending(format => format.Bitrate ?? 0)
+            .FirstOrDefault();
+        var audio = formats
+            .Where(format => format.Kind == StreamKind.AudioOnly)
+            .OrderByDescending(format => format.Bitrate ?? 0)
+            .FirstOrDefault();
+        var probes = new[] { video, audio }
+            .Where(format => format is not null)
+            .Cast<StreamFormat>()
+            .DistinctBy(format => format.Url)
+            .ToArray();
+        if (probes.Length == 0)
+        {
+            return false;
+        }
+
+        foreach (var format in probes)
+        {
+            var lastByte = Math.Max(0, (format.ContentLength ?? 1) - 1);
+            using var probe = new HttpRequestMessage(HttpMethod.Get, format.Url);
+            probe.Headers.UserAgent.ParseAdd(format.HttpUserAgent ??
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
+                "(KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36");
+            probe.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("*/*"));
+            probe.Headers.Range = new RangeHeaderValue(lastByte, lastByte);
+            probe.Headers.Referrer = watchUrl;
+            using var response = await httpClient.SendAsync(
+                probe,
+                HttpCompletionOption.ResponseHeadersRead,
+                cancellationToken).ConfigureAwait(false);
+            var finalUri = response.RequestMessage?.RequestUri ?? format.Url;
+            if (!response.IsSuccessStatusCode ||
+                finalUri.Scheme != Uri.UriSchemeHttps ||
+                (!finalUri.Host.Equals("googlevideo.com", StringComparison.OrdinalIgnoreCase) &&
+                 !finalUri.Host.EndsWith(".googlevideo.com", StringComparison.OrdinalIgnoreCase)))
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private async Task<Result<WatchPageData>> TryResolvePlayerTransformsAsync(

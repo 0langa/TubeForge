@@ -4,13 +4,17 @@ param(
     [ValidatePattern('^\d+\.\d+\.\d+$')]
     [string] $Version,
 
-    [string] $OutputDirectory = (Join-Path $PSScriptRoot '..\artifacts\installer')
+    [string] $OutputDirectory
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-$repoRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
+$scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
+if ([string]::IsNullOrWhiteSpace($OutputDirectory)) {
+    $OutputDirectory = Join-Path $scriptRoot '..\artifacts\installer'
+}
+$repoRoot = [IO.Path]::GetFullPath((Join-Path $scriptRoot '..'))
 $outputRoot = [IO.Path]::GetFullPath($OutputDirectory)
 $staging = Join-Path $outputRoot ".staging-$Version"
 $appDirectory = Join-Path $staging 'app'

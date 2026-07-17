@@ -102,21 +102,31 @@ if (best is not null)
     Console.WriteLine(best.RequiresMuxing
         ? $"Best A/V selection: video {best.Video.FormatId} ({best.Video.Height}p) + audio {best.Audio!.FormatId} ({best.Audio.Bitrate} bps)"
         : $"Best A/V selection: progressive {best.Video.FormatId} ({best.Video.Height}p)");
+    Console.WriteLine($"Video URL parameters: {ParameterNames(best.Video.Url)}");
     Console.WriteLine($"Video layout prefix: {await ProbeLayoutAsync(client, best.Video)}");
     if (best.Audio is not null)
     {
+        Console.WriteLine($"Audio URL parameters: {ParameterNames(best.Audio.Url)}");
         Console.WriteLine($"Audio layout prefix: {await ProbeLayoutAsync(client, best.Audio)}");
     }
 }
 
 return data.Metadata.Formats.Count > 0 ? 0 : 1;
 
+static string ParameterNames(Uri uri) => string.Join(
+    ",",
+    uri.Query.TrimStart('?')
+        .Split('&', StringSplitOptions.RemoveEmptyEntries)
+        .Select(parameter => parameter.Split('=', 2)[0])
+        .Distinct(StringComparer.Ordinal));
+
 static async Task<string> ProbeLayoutAsync(HttpClient client, StreamFormat format)
 {
     const int maximumProbeBytes = 64 * 1024;
     using var request = new HttpRequestMessage(HttpMethod.Get, format.Url);
     request.Headers.Range = new System.Net.Http.Headers.RangeHeaderValue(0, maximumProbeBytes - 1);
-    request.Headers.UserAgent.ParseAdd("Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/138.0.0.0");
+    request.Headers.UserAgent.ParseAdd(format.HttpUserAgent ??
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/138.0.0.0");
     using var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead);
     if (!response.IsSuccessStatusCode)
     {

@@ -14,6 +14,7 @@ namespace TubeForge.Downloads;
 public sealed class DirectDownloadEngine
 {
     private const int BufferSize = 128 * 1024;
+    internal const long MaximumDirectRequestBytes = 1024 * 1024;
     private readonly HttpClient _httpClient;
     private readonly DownloadUriPolicy _uriPolicy;
     private readonly Func<TimeSpan, CancellationToken, Task> _delay;
@@ -123,111 +124,205 @@ public sealed class DirectDownloadEngine
                 existingLength = 0;
             }
 
-            using var requestMessage = new HttpRequestMessage(HttpMethod.Get, request.SourceUrl);
-            requestMessage.Headers.UserAgent.ParseAdd(
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
-                "(KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36");
-            if (canResume)
-            {
-                requestMessage.Headers.Range = new RangeHeaderValue(existingLength, null);
-                if (!string.IsNullOrWhiteSpace(state!.EntityTag) &&
-                    EntityTagHeaderValue.TryParse(state.EntityTag, out var entityTag))
-                {
-                    requestMessage.Headers.IfRange = new RangeConditionHeaderValue(entityTag);
-                }
-                else if (state.LastModified is not null)
-                {
-                    requestMessage.Headers.IfRange = new RangeConditionHeaderValue(state.LastModified.Value);
-                }
-            }
-
-            using var response = await _httpClient.SendAsync(
-                requestMessage,
-                HttpCompletionOption.ResponseHeadersRead,
-                cancellationToken).ConfigureAwait(false);
-            var finalUri = response.RequestMessage?.RequestUri ?? request.SourceUrl;
-            if (!_uriPolicy.IsAllowed(finalUri))
-            {
-                return Failure(
-                    "Download.UnsafeRedirect",
-                    "The media request redirected to an untrusted location.");
-            }
-
-            if (response.StatusCode == HttpStatusCode.RequestedRangeNotSatisfiable &&
-                canResume && request.ExpectedLength == existingLength)
+            var resumedAtStart = canResume;
+            var currentLength = canResume ? existingLength : 0;
+            var expectedLength = request.ExpectedLength ?? state?.ExpectedLength;
+            var activeState = canResume ? state : null;
+            var requestNumber = 0;
+            if (expectedLength is not null && currentLength == expectedLength)
             {
                 return FinalizeCompletedPartial(
                     destinationPath,
                     partialPath,
                     statePath,
-                    existingLength,
-                    resumed: true,
+                    currentLength,
+                    resumedAtStart,
                     request.ExpectedContainer);
             }
 
-            if (!response.IsSuccessStatusCode)
+            while (true)
             {
-                return HttpFailure(response);
+                var maximumEnd = currentLength > long.MaxValue - MaximumDirectRequestBytes
+                    ? long.MaxValue
+                    : currentLength + MaximumDirectRequestBytes - 1;
+                var rangeEnd = expectedLength is long total
+                    ? Math.Min(total - 1, maximumEnd)
+                    : maximumEnd;
+                var usesRangeQuery = IsGoogleVideo(request.SourceUrl);
+                var requestUri = usesRangeQuery
+                    ? AddRangeQuery(request.SourceUrl, currentLength, rangeEnd, requestNumber++)
+                    : request.SourceUrl;
+                using var requestMessage = new HttpRequestMessage(HttpMethod.Get, requestUri);
+                requestMessage.Headers.UserAgent.ParseAdd(request.HttpUserAgent ??
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
+                    "(KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36");
+                // Googlevideo rejects full-object and open-ended GETs for some adaptive URLs.
+                // Bounded requests also keep each response recoverable after interruption.
+                if (!usesRangeQuery)
+                {
+                    requestMessage.Headers.Range = new RangeHeaderValue(currentLength, rangeEnd);
+                }
+                if (currentLength > 0 && activeState is not null)
+                {
+                    if (!string.IsNullOrWhiteSpace(activeState.EntityTag) &&
+                        EntityTagHeaderValue.TryParse(activeState.EntityTag, out var entityTag))
+                    {
+                        requestMessage.Headers.IfRange = new RangeConditionHeaderValue(entityTag);
+                    }
+                    else if (activeState.LastModified is not null)
+                    {
+                        requestMessage.Headers.IfRange = new RangeConditionHeaderValue(activeState.LastModified.Value);
+                    }
+                }
+
+                using var response = await _httpClient.SendAsync(
+                    requestMessage,
+                    HttpCompletionOption.ResponseHeadersRead,
+                    cancellationToken).ConfigureAwait(false);
+                var finalUri = response.RequestMessage?.RequestUri ?? request.SourceUrl;
+                if (!_uriPolicy.IsAllowed(finalUri))
+                {
+                    return Failure(
+                        "Download.UnsafeRedirect",
+                        "The media request redirected to an untrusted location.");
+                }
+
+                if (response.StatusCode == HttpStatusCode.RequestedRangeNotSatisfiable &&
+                    expectedLength == currentLength)
+                {
+                    return FinalizeCompletedPartial(
+                        destinationPath,
+                        partialPath,
+                        statePath,
+                        currentLength,
+                        resumedAtStart,
+                        request.ExpectedContainer);
+                }
+
+                if (!response.IsSuccessStatusCode)
+                {
+                    var failure = HttpFailure(response);
+                    return Result<DownloadReceipt>.Failure(failure.Error! with
+                    {
+                        TechnicalDetail = $"Requested media bytes {currentLength}-{rangeEnd}."
+                    });
+                }
+
+                var isPartial = response.StatusCode == HttpStatusCode.PartialContent ||
+                                usesRangeQuery && response.StatusCode == HttpStatusCode.OK;
+                var contentRange = response.Content.Headers.ContentRange;
+                if (!usesRangeQuery && response.StatusCode == HttpStatusCode.PartialContent &&
+                    (contentRange?.From != currentLength ||
+                     contentRange.To is null ||
+                     contentRange.To > rangeEnd))
+                {
+                    return Failure(
+                        "Download.RemoteChanged",
+                        "The server returned an incompatible byte range.");
+                }
+
+                if (!isPartial && currentLength > 0)
+                {
+                    // If-Range permits a changed server object to return 200 with the complete
+                    // representation. Replace the partial instead of appending that response.
+                    currentLength = 0;
+                    activeState = null;
+                }
+
+                var requestedBytes = checked(rangeEnd - currentLength + 1);
+                if (usesRangeQuery &&
+                    response.Content.Headers.ContentLength is long queryLength &&
+                    queryLength != requestedBytes)
+                {
+                    return Failure(
+                        "Download.RemoteChanged",
+                        "The media server returned an incompatible query range.");
+                }
+
+                var responseTotal = usesRangeQuery
+                    ? expectedLength
+                    : contentRange?.Length ?? DetermineTotalLength(response, currentLength);
+                if (expectedLength is not null &&
+                    responseTotal is not null &&
+                    expectedLength != responseTotal)
+                {
+                    return Failure(
+                        "Download.RemoteChanged",
+                        "The remote media size changed before the download completed.",
+                        $"Expected {expectedLength}; response reported {responseTotal}; " +
+                        $"status {(int)response.StatusCode}; range {contentRange}.");
+                }
+
+                expectedLength ??= responseTotal;
+                var nextState = new DownloadResumeState
+                {
+                    SourceIdentity = request.SourceIdentity,
+                    ExpectedLength = expectedLength,
+                    EntityTag = response.Headers.ETag?.ToString() ?? activeState?.EntityTag,
+                    LastModified = response.Content.Headers.LastModified ?? activeState?.LastModified
+                };
+                if (activeState != nextState)
+                {
+                    await DownloadResumeStore.WriteAsync(statePath, nextState, cancellationToken)
+                        .ConfigureAwait(false);
+                }
+
+                activeState = nextState;
+
+                var responseStart = currentLength;
+                var transferred = await CopyResponseAsync(
+                    response,
+                    partialPath,
+                    append: currentLength > 0,
+                    currentLength,
+                    expectedLength,
+                    progress,
+                    cancellationToken).ConfigureAwait(false);
+                currentLength = checked(currentLength + transferred);
+
+                if (response.Content.Headers.ContentLength is long responseLength &&
+                    transferred != responseLength ||
+                    usesRangeQuery && transferred != requestedBytes ||
+                    !usesRangeQuery && response.StatusCode == HttpStatusCode.PartialContent &&
+                    contentRange!.To != currentLength - 1)
+                {
+                    return Result<DownloadReceipt>.Failure(new TubeForgeError(
+                        "Download.Incomplete",
+                        "The server ended a media range before all requested bytes arrived.",
+                        $"Range started at {responseStart}; received {transferred} bytes.",
+                        IsTransient: true));
+                }
+
+                if (expectedLength is not null && currentLength > expectedLength)
+                {
+                    return Failure(
+                        "Download.RemoteChanged",
+                        "The server returned more media bytes than expected.");
+                }
+
+                if (expectedLength == currentLength ||
+                    !isPartial && expectedLength is null)
+                {
+                    return FinalizeCompletedPartial(
+                        destinationPath,
+                        partialPath,
+                        statePath,
+                        currentLength,
+                        resumedAtStart,
+                        request.ExpectedContainer);
+                }
+
+                if (!isPartial || transferred == 0)
+                {
+                    return Result<DownloadReceipt>.Failure(new TubeForgeError(
+                        "Download.Incomplete",
+                        "The server ended the transfer before all media bytes arrived.",
+                        expectedLength is null
+                            ? null
+                            : $"Expected {expectedLength} bytes; received {currentLength}.",
+                        IsTransient: true));
+                }
             }
-
-            var append = canResume && response.StatusCode == HttpStatusCode.PartialContent;
-            if (append && response.Content.Headers.ContentRange?.From != existingLength)
-            {
-                return Failure(
-                    "Download.RemoteChanged",
-                    "The server returned an incompatible resume range.");
-            }
-
-            if (!append)
-            {
-                existingLength = 0;
-            }
-
-            var totalLength = DetermineTotalLength(response, existingLength);
-            if (request.ExpectedLength is not null &&
-                totalLength is not null &&
-                request.ExpectedLength != totalLength)
-            {
-                return Failure(
-                    "Download.RemoteChanged",
-                    "The remote media size changed before the download started.");
-            }
-
-            var newState = new DownloadResumeState
-            {
-                SourceIdentity = request.SourceIdentity,
-                ExpectedLength = request.ExpectedLength ?? totalLength,
-                EntityTag = response.Headers.ETag?.ToString(),
-                LastModified = response.Content.Headers.LastModified
-            };
-            await DownloadResumeStore.WriteAsync(statePath, newState, cancellationToken).ConfigureAwait(false);
-
-            var transferred = await CopyResponseAsync(
-                response,
-                partialPath,
-                append,
-                existingLength,
-                request.ExpectedLength ?? totalLength,
-                progress,
-                cancellationToken).ConfigureAwait(false);
-            var finalLength = existingLength + transferred;
-            var expectedLength = request.ExpectedLength ?? totalLength;
-            if (expectedLength is not null && finalLength != expectedLength)
-            {
-                return Result<DownloadReceipt>.Failure(new TubeForgeError(
-                    "Download.Incomplete",
-                    "The server ended the transfer before all media bytes arrived.",
-                    $"Expected {expectedLength} bytes; received {finalLength}.",
-                    IsTransient: true));
-            }
-
-            return FinalizeCompletedPartial(
-                destinationPath,
-                partialPath,
-                statePath,
-                finalLength,
-                append,
-                request.ExpectedContainer);
         }
         catch (OperationCanceledException)
         {
@@ -360,8 +455,26 @@ public sealed class DirectDownloadEngine
         }
 
         File.Move(partialPath, destinationPath, overwrite: false);
-        File.Delete(statePath);
+        TryDeleteResumeState(statePath);
         return Result<DownloadReceipt>.Success(new DownloadReceipt(destinationPath, finalLength, resumed));
+    }
+
+    private static void TryDeleteResumeState(string path)
+    {
+        try
+        {
+            File.Delete(path);
+            File.Delete(path + ".new");
+        }
+        catch (IOException)
+        {
+            // A valid, finalized media file must not be reported as failed because a
+            // nonessential resume record is temporarily held by another process.
+        }
+        catch (UnauthorizedAccessException)
+        {
+            // Best-effort cleanup only. A future download can replace this state.
+        }
     }
 
     private static bool IsCompatible(
@@ -438,8 +551,11 @@ public sealed class DirectDownloadEngine
                 : null));
     }
 
-    private static Result<DownloadReceipt> Failure(string code, string message) =>
-        Result<DownloadReceipt>.Failure(new TubeForgeError(code, message));
+    private static Result<DownloadReceipt> Failure(
+        string code,
+        string message,
+        string? technicalDetail = null) =>
+        Result<DownloadReceipt>.Failure(new TubeForgeError(code, message, technicalDetail));
 
     private static Result<DownloadReceipt> Cancelled() =>
         Result<DownloadReceipt>.Failure(new TubeForgeError(
@@ -448,4 +564,18 @@ public sealed class DirectDownloadEngine
 
     private static bool IsDiskFull(IOException exception) =>
         (exception.HResult & 0xFFFF) is 0x27 or 0x70;
+
+    private static bool IsGoogleVideo(Uri uri) =>
+        uri.Scheme == Uri.UriSchemeHttps &&
+        (uri.Host.Equals("googlevideo.com", StringComparison.OrdinalIgnoreCase) ||
+         uri.Host.EndsWith(".googlevideo.com", StringComparison.OrdinalIgnoreCase));
+
+    private static Uri AddRangeQuery(Uri source, long from, long to, int requestNumber)
+    {
+        var separator = string.IsNullOrEmpty(source.Query) ? "?" : "&";
+        return new Uri(
+            source.AbsoluteUri + separator +
+            $"range={from}-{to}&rn={requestNumber}&rbuf=0",
+            UriKind.Absolute);
+    }
 }

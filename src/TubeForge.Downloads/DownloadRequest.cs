@@ -8,6 +8,8 @@ public sealed record DownloadRequest
 
     public required Uri SourceUrl { get; init; }
 
+    public string? HttpUserAgent { get; init; }
+
     public required string SourceIdentity { get; init; }
 
     public required string DestinationPath { get; init; }

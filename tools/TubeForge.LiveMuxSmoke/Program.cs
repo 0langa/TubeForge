@@ -81,6 +81,11 @@ try
     if (!result.IsSuccess)
     {
         Console.Error.WriteLine($"{result.Error!.Code}: {result.Error.Message}");
+        if (!string.IsNullOrWhiteSpace(result.Error.TechnicalDetail))
+        {
+            Console.Error.WriteLine(result.Error.TechnicalDetail);
+        }
+
         return 1;
     }
 
@@ -121,6 +126,7 @@ finally
 DownloadRequest Request(StreamFormat format, string destination) => new()
 {
     SourceUrl = format.Url,
+    HttpUserAgent = format.HttpUserAgent,
     SourceIdentity = $"{resolved.Value.Metadata.Id.Value}:{format.FormatId}",
     DestinationPath = destination,
     ExpectedLength = format.ContentLength,

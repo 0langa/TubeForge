@@ -175,7 +175,7 @@ public static class YouTubeMetadataResolverTests
     }
 
     [Test]
-    public static async Task UsesVersionedAndroidClientWhenPageHasNoDirectFormats()
+    public static async Task UsesTailVerifiedNoTokenClientWhenPageHasNoDirectFormats()
     {
         const string watchPage = """
             <script>
@@ -211,9 +211,20 @@ public static class YouTubeMetadataResolverTests
         using var handler = new StubHandler(request =>
         {
             requestCount++;
-            if (request.Method == HttpMethod.Get)
+            if (request.Method == HttpMethod.Get && request.RequestUri?.Host == "www.youtube.com")
             {
                 return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(watchPage) };
+            }
+
+            if (request.Method == HttpMethod.Get)
+            {
+                Assert.Equal("fixture.googlevideo.com", request.RequestUri?.Host);
+                Assert.Equal(9L, request.Headers.Range?.Ranges.Single().From);
+                Assert.True(request.Headers.UserAgent.ToString().Contains("youtube.vr.oculus", StringComparison.Ordinal));
+                return new HttpResponseMessage(HttpStatusCode.PartialContent)
+                {
+                    Content = new ByteArrayContent([0])
+                };
             }
 
             Assert.Equal(HttpMethod.Post, request.Method);
@@ -235,8 +246,8 @@ public static class YouTubeMetadataResolverTests
         Assert.Equal("en", result.Value.Metadata.CaptionTracks[0].LanguageCode);
         Assert.Equal("Android metadata", result.Value.Metadata.Title);
         Assert.Equal(VideoContentKind.Short, result.Value.Metadata.ContentKind);
-        Assert.Equal("AndroidClientResolved", result.Value.Diagnostics?.Stage);
-        Assert.Equal(2, requestCount);
+        Assert.Equal("ClientResolved:ANDROID_VR", result.Value.Diagnostics?.Stage);
+        Assert.Equal(3, requestCount);
     }
 
     [Test]
@@ -286,9 +297,23 @@ public static class YouTubeMetadataResolverTests
         using var handler = new StubHandler(request =>
         {
             requestCount++;
-            return request.Method == HttpMethod.Get
-                ? new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(watchPage) }
-                : new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(playerResponse) };
+            if (request.Method == HttpMethod.Get && request.RequestUri?.Host == "www.youtube.com")
+            {
+                return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(watchPage) };
+            }
+
+            if (request.Method == HttpMethod.Post)
+            {
+                return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(playerResponse) };
+            }
+
+            var formatId = int.Parse(QueryValue(request.RequestUri!, "itag")!);
+            var length = formatId == 401 ? 100L : 20L;
+            Assert.Equal(length - 1, request.Headers.Range?.Ranges.Single().From);
+            return new HttpResponseMessage(HttpStatusCode.PartialContent)
+            {
+                Content = new ByteArrayContent([0])
+            };
         });
         using var client = new HttpClient(handler);
         var resolver = new YouTubeMetadataResolver(client);
@@ -300,11 +325,11 @@ public static class YouTubeMetadataResolverTests
         var selection = AdaptiveFormatSelector.SelectBest(result.Value.Metadata.Formats);
         Assert.Equal(3, result.Value.Metadata.Formats.Count);
         Assert.Equal(1, result.Value.Metadata.Formats.Count(format => format.FormatId == 18));
-        Assert.Equal("AndroidClientAugmented", result.Value.Diagnostics?.Stage);
+        Assert.Equal("ClientResolved:ANDROID_VR+WatchPage", result.Value.Diagnostics?.Stage);
         Assert.True(selection?.RequiresMuxing == true);
         Assert.Equal(401, selection!.Video.FormatId);
         Assert.Equal(140, selection.Audio!.FormatId);
-        Assert.Equal(2, requestCount);
+        Assert.Equal(4, requestCount);
     }
 
     private static string? QueryValue(Uri uri, string key)

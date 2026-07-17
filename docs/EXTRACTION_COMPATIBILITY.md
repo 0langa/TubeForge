@@ -2,6 +2,16 @@
 
 YouTube is an upstream service outside TubeForge's control. Compatibility is versioned by TubeForge release and verified with synthetic fixtures plus bounded public canaries; it is not a permanent guarantee.
 
+## v1.1.6 compatibility update
+
+Validated on 2026-07-17:
+
+- tail-verified `ANDROID_VR`, embedded-web, TV, and Android client fallback order;
+- per-client user agents preserved from player resolution through direct and segmented media requests;
+- end-of-stream probes reject client URLs that expose metadata but return HTTP 403 for protected Googlevideo ranges;
+- player-style bounded Googlevideo range queries with resumable atomic output;
+- public 4K adaptive MP4 analysis, separate video/audio download, in-house muxing, and Windows playback.
+
 ## v1.0.0 compatibility baseline
 
 Validated on 2026-07-16:
@@ -13,7 +23,7 @@ Validated on 2026-07-16:
 - highest-compatible separate video + audio selection and in-house MP4/WebM muxing;
 - classic and ES6 `signatureCipher` transform shapes without JavaScript execution;
 - structurally located `n` throttling transforms from the constrained supported operation set;
-- versioned Android client fallback profile `ANDROID 20.10.38` when the watch page has no direct formats;
+- versioned Android client fallback profile when the watch page has no direct formats;
 - captions, thumbnails, chapters, and metadata sidecars exposed by the supported public responses.
 
 The live 4K canary resolved 27 formats and selected 2160p MP4 video plus AAC audio at this baseline. Canary identifiers and signed media URLs are intentionally not committed.
@@ -23,7 +33,7 @@ The live 4K canary resolved 27 formats and selected 2160p MP4 video plus AAC aud
 - account login, cookies, private videos, memberships, purchases, or DRM;
 - bypassing age, region, payment, or access controls;
 - active or upcoming live-stream capture;
-- MP3 or other transcoding/re-encoding;
+- video transcoding or re-encoding;
 - arbitrary JavaScript execution or general-purpose JavaScript evaluation;
 - formats whose container/codec combination the in-house muxers cannot represent safely.
 
