@@ -208,7 +208,7 @@ internal sealed class SegmentedDownloadEngine(HttpClient httpClient, DownloadUri
         try
         {
             using var message = new HttpRequestMessage(HttpMethod.Get, request.SourceUrl);
-            message.Headers.UserAgent.ParseAdd(
+            message.Headers.UserAgent.ParseAdd(request.HttpUserAgent ??
                 "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
                 "(KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36");
             message.Headers.Range = new RangeHeaderValue(segment.Start, segment.End);

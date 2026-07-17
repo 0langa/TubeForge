@@ -6,6 +6,8 @@ public sealed record StreamFormat
 
     public required Uri Url { get; init; }
 
+    public string? HttpUserAgent { get; init; }
+
     public required MediaContainer Container { get; init; }
 
     public required StreamKind Kind { get; init; }

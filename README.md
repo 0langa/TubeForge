@@ -9,13 +9,13 @@ TubeForge is an experimental, ad-free Windows desktop downloader built from scra
 
 ## Status
 
-TubeForge v1.1.5 is the current stable release.
+TubeForge v1.1.7 is the current stable release.
 
 Working now:
 
 - modern WPF analyze/download screen;
 - strict YouTube URL parsing and live public-video metadata resolution;
-- versioned Android player fallback for direct progressive, native-audio, and video-only streams;
+- tail-verified no-token YouTube client chain for direct progressive, native-audio, and video-only streams;
 - type-first stream selection with resolution, container, codec, FPS/HDR, bitrate, and exact-stream filters;
 - highest-quality audio + video selection with separate resumable track downloads and in-house MP4/WebM muxing, preferring MP4 on equivalent-quality choices;
 - native M4A/WebM audio saves plus dependency-free Windows Media Foundation MP3 conversion at 128, 192, 256, or 320 kbps;
@@ -101,14 +101,14 @@ dotnet run --project src/TubeForge.App --configuration Release
 Create framework-dependent and self-contained Windows x64 archives, a manifest, and SHA-256 checksums:
 
 ```powershell
-.\scripts\Publish-Release.ps1 -Version 1.1.5
-.\scripts\Test-Release.ps1 -Version 1.1.5
+.\scripts\Publish-Release.ps1 -Version 1.1.7
+.\scripts\Test-Release.ps1 -Version 1.1.7
 ```
 
 Create the self-contained per-user installer and checksum manifest:
 
 ```powershell
-.\scripts\Publish-Installer.ps1 -Version 1.1.5
+.\scripts\Publish-Installer.ps1 -Version 1.1.7
 ```
 
 Authenticode signing is optional and fails closed when a requested certificate cannot produce a valid signature. See [installation and data retention](docs/INSTALLATION.md), [extraction compatibility](docs/EXTRACTION_COMPATIBILITY.md), and the [v1 support policy](docs/SUPPORT_POLICY.md).

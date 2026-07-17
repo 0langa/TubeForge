@@ -19,7 +19,9 @@ public static class DirectDownloadEngineTests
         var payload = Encoding.ASCII.GetBytes("synthetic-media");
         using var handler = new StubHandler((request, _) =>
         {
-            Assert.True(request.Headers.Range is null);
+            var range = request.Headers.Range?.Ranges.Single();
+            Assert.Equal(0L, range?.From);
+            Assert.Equal(payload.Length - 1L, range?.To);
             var response = Response(HttpStatusCode.OK, payload);
             response.Headers.ETag = new EntityTagHeaderValue("\"fixture-v1\"");
             return Task.FromResult(response);
@@ -38,6 +40,110 @@ public static class DirectDownloadEngineTests
         Assert.False(File.Exists(destination + ".part.json"));
         Assert.Equal(payload.Length, checked((int)progress.Values[^1].BytesReceived));
         Assert.Equal(1d, progress.Values[^1].Fraction);
+    }
+
+    [Test]
+    public static async Task DownloadsLargeMediaUsingBoundedSequentialRanges()
+    {
+        using var directory = new TestDirectory();
+        var destination = Path.Combine(directory.Path, "bounded-ranges.mp4");
+        var payload = Enumerable.Range(0, checked((int)DirectDownloadEngine.MaximumDirectRequestBytes + 257))
+            .Select(index => (byte)(index % 251))
+            .ToArray();
+        var ranges = new List<(long From, long To)>();
+        using var handler = new StubHandler((request, _) =>
+        {
+            var range = request.Headers.Range?.Ranges.Single();
+            Assert.True(range?.From is not null && range.To is not null);
+            var from = range!.From!.Value;
+            var to = range.To!.Value;
+            Assert.True(to - from + 1 <= DirectDownloadEngine.MaximumDirectRequestBytes);
+            ranges.Add((from, to));
+            return Task.FromResult(RangeResponse(payload, from, to, "\"bounded-v1\""));
+        });
+        using var client = new HttpClient(handler);
+        var engine = Engine(client);
+
+        var result = await engine.DownloadAsync(Request(destination, payload.Length));
+
+        Assert.True(result.IsSuccess, result.Error?.Message);
+        Assert.Equal(2, ranges.Count);
+        Assert.Equal((0L, DirectDownloadEngine.MaximumDirectRequestBytes - 1), ranges[0]);
+        Assert.Equal((DirectDownloadEngine.MaximumDirectRequestBytes, payload.Length - 1L), ranges[1]);
+        Assert.SequenceEqual(payload, await File.ReadAllBytesAsync(destination));
+    }
+
+    [Test]
+    public static async Task DoesNotRewriteUnchangedResumeStateBetweenRanges()
+    {
+        using var directory = new TestDirectory();
+        var destination = Path.Combine(directory.Path, "stable-resume-state.mp4");
+        var statePath = destination + ".part.json";
+        var payload = Enumerable.Range(0, checked((int)DirectDownloadEngine.MaximumDirectRequestBytes + 257))
+            .Select(index => (byte)(index % 251))
+            .ToArray();
+        FileStream? stateLock = null;
+        var requests = 0;
+        using var handler = new StubHandler((request, _) =>
+        {
+            var range = request.Headers.Range!.Ranges.Single();
+            if (++requests == 2)
+            {
+                stateLock = new FileStream(statePath, FileMode.Open, FileAccess.Read, FileShare.Read);
+            }
+
+            return Task.FromResult(RangeResponse(
+                payload,
+                range.From!.Value,
+                range.To!.Value,
+                "\"stable-v1\""));
+        });
+        using var client = new HttpClient(handler);
+        var engine = Engine(client);
+
+        var result = await engine.DownloadAsync(Request(destination, payload.Length));
+        stateLock?.Dispose();
+
+        Assert.True(result.IsSuccess, result.Error?.Message);
+        Assert.Equal(2, requests);
+        Assert.SequenceEqual(payload, await File.ReadAllBytesAsync(destination));
+    }
+
+    [Test]
+    public static async Task DownloadsGoogleVideoUsingPlayerStyleQueryRangesAndClientUserAgent()
+    {
+        using var directory = new TestDirectory();
+        var destination = Path.Combine(directory.Path, "googlevideo-ranges.mp4");
+        var payload = Enumerable.Range(0, checked((int)DirectDownloadEngine.MaximumDirectRequestBytes + 257))
+            .Select(index => (byte)(index % 247))
+            .ToArray();
+        var requests = 0;
+        using var handler = new StubHandler((request, _) =>
+        {
+            Assert.True(request.Headers.Range is null);
+            Assert.True(request.Headers.UserAgent.ToString().Contains("fixture-client", StringComparison.Ordinal));
+            var rangeText = QueryValue(request.RequestUri!, "range")!;
+            var bounds = rangeText.Split('-').Select(long.Parse).ToArray();
+            Assert.Equal(requests.ToString(), QueryValue(request.RequestUri!, "rn"));
+            Assert.Equal("0", QueryValue(request.RequestUri!, "rbuf"));
+            requests++;
+            var length = checked((int)(bounds[1] - bounds[0] + 1));
+            var content = new byte[length];
+            Buffer.BlockCopy(payload, checked((int)bounds[0]), content, 0, length);
+            return Task.FromResult(Response(HttpStatusCode.OK, content));
+        });
+        using var client = new HttpClient(handler);
+        var engine = Engine(client);
+
+        var result = await engine.DownloadAsync(Request(destination, payload.Length) with
+        {
+            SourceUrl = new Uri("https://fixture.googlevideo.com/videoplayback?sig=fixture"),
+            HttpUserAgent = "fixture-client/1.0"
+        });
+
+        Assert.True(result.IsSuccess, result.Error?.Message);
+        Assert.Equal(2, requests);
+        Assert.SequenceEqual(payload, await File.ReadAllBytesAsync(destination));
     }
 
     [Test]
@@ -60,6 +166,7 @@ public static class DirectDownloadEngineTests
         {
             var range = request.Headers.Range?.Ranges.Single();
             Assert.Equal(5L, range?.From);
+            Assert.Equal(9L, range?.To);
             Assert.Equal("\"fixture-v1\"", request.Headers.IfRange?.EntityTag?.Tag);
             var response = Response(HttpStatusCode.PartialContent, Encoding.ASCII.GetBytes("56789"));
             response.Content.Headers.ContentRange = new ContentRangeHeaderValue(5, 9, 10);
@@ -459,12 +566,13 @@ public static class DirectDownloadEngineTests
         var destination = Path.Combine(directory.Path, "segmented-fallback.mp4");
         var payload = Encoding.ASCII.GetBytes("range-fallback-payload");
         var rangeRequests = 0;
-        var directRequests = 0;
+        var wholeObjectRequests = 0;
         using var handler = new StubHandler((request, _) =>
         {
-            if (request.Headers.Range is null)
+            var range = request.Headers.Range?.Ranges.Single();
+            if (range?.From == 0 && range.To == payload.Length - 1)
             {
-                Interlocked.Increment(ref directRequests);
+                Interlocked.Increment(ref wholeObjectRequests);
             }
             else
             {
@@ -480,7 +588,7 @@ public static class DirectDownloadEngineTests
 
         Assert.True(result.IsSuccess, result.Error?.Message);
         Assert.Equal(4, rangeRequests);
-        Assert.Equal(1, directRequests);
+        Assert.Equal(1, wholeObjectRequests);
         Assert.SequenceEqual(payload, await File.ReadAllBytesAsync(destination));
         Assert.False(File.Exists(destination + ".part.segments.json"));
     }
@@ -600,6 +708,20 @@ public static class DirectDownloadEngineTests
                 return;
             }
         }
+    }
+
+    private static string? QueryValue(Uri uri, string key)
+    {
+        foreach (var pair in uri.Query.TrimStart('?').Split('&'))
+        {
+            var components = pair.Split('=', 2);
+            if (Uri.UnescapeDataString(components[0]).Equals(key, StringComparison.OrdinalIgnoreCase))
+            {
+                return components.Length == 2 ? Uri.UnescapeDataString(components[1]) : string.Empty;
+            }
+        }
+
+        return null;
     }
 
     private sealed class StubHandler(

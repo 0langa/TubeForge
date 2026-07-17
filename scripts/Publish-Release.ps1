@@ -4,7 +4,7 @@ param(
     [ValidatePattern('^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$')]
     [string] $Version,
 
-    [string] $OutputDirectory = (Join-Path $PSScriptRoot '..\artifacts\release'),
+    [string] $OutputDirectory,
 
     [ValidatePattern('^[0-9A-Fa-f]{40,64}$')]
     [string] $CertificateThumbprint,
@@ -15,7 +15,11 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-$repoRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
+$scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
+if ([string]::IsNullOrWhiteSpace($OutputDirectory)) {
+    $OutputDirectory = Join-Path $scriptRoot '..\artifacts\release'
+}
+$repoRoot = [IO.Path]::GetFullPath((Join-Path $scriptRoot '..'))
 $outputRoot = [IO.Path]::GetFullPath($OutputDirectory)
 $stagingRoot = [IO.Path]::GetFullPath((Join-Path $outputRoot ".staging-$Version"))
 $project = Join-Path $repoRoot 'src\TubeForge.App\TubeForge.App.csproj'

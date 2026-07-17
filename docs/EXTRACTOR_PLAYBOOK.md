@@ -28,7 +28,8 @@ Output contains only ordinal, typed failure/stage, aggregate format counts, and 
    - `Network.*` or rate-limit response: wait and retry later.
    - `Extractor.PageChanged`: inspect bounded watch-page structure.
    - `Extractor.PlayerChanged`: inspect player-script structure; never execute script.
-   - `Extractor.NoStreams`: compare watch-page and Android fallback stages.
+   - `Extractor.NoStreams`: compare watch-page and tail-verified client fallback stages.
+   - `Network.HttpError` with HTTP 403 after successful analysis: confirm selected client passed end-of-stream probes and preserve its user agent on media requests.
    - supported metadata but missing high-quality output: inspect format classification and mux compatibility.
 4. Reproduce with smallest legally safe synthetic fixture. Record source date, expected parser behavior, and why fixture contains no copyrighted media or secrets.
 5. Patch narrow extractor stage. Unsupported syntax must fail closed.

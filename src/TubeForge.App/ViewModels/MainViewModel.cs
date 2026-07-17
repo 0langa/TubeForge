@@ -2268,6 +2268,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         string destination) => new()
         {
             SourceUrl = format.Url,
+            HttpUserAgent = format.HttpUserAgent,
             SourceIdentity = $"{metadata.Id.Value}:{format.FormatId}",
             DestinationPath = destination,
             ExpectedLength = format.ContentLength,

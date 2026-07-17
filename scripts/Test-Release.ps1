@@ -4,10 +4,15 @@ param(
     [ValidatePattern('^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$')]
     [string] $Version,
 
-    [string] $ReleaseDirectory = (Join-Path $PSScriptRoot '..\artifacts\release'),
+    [string] $ReleaseDirectory,
 
     [switch] $SkipLaunch
 )
+
+$scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
+if ([string]::IsNullOrWhiteSpace($ReleaseDirectory)) {
+    $ReleaseDirectory = Join-Path $scriptRoot '..\artifacts\release'
+}
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'

@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.1.7 - 2026-07-17
+
+- Stop rewriting unchanged resume metadata after every bounded media range.
+- Treat cleanup of a temporarily locked, nonessential resume record as best-effort after media finalization.
+- Add regression coverage for resume-record lock contention across multi-range downloads.
+- Resolve release-script default output paths after script initialization so installer and archive packaging work under Windows PowerShell.
+
+## 1.1.6 - 2026-07-17
+
+- Prefer tail-verified no-token YouTube client profiles so advertised adaptive streams remain downloadable beyond initial probe bytes.
+- Preserve client-specific user agents on media transfers and use bounded player-style Googlevideo range queries.
+- Add regression coverage for large sequential ranges, Googlevideo query ranges, client identity, and end-of-stream verification.
+- Keep signed media URLs, proof material, cookies, and account access out of persisted state.
+
 ## 1.0.0 - 2026-07-16
 
 - Modern WPF download, queue, Library, settings, and diagnostics UI.
