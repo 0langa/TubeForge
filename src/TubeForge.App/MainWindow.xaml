@@ -765,7 +765,7 @@
                                         </Border>
                                     </Grid>
 
-                                    <ProgressBar Minimum="0" Maximum="1" Value="{Binding Progress}"
+                                    <ProgressBar Minimum="0" Maximum="1" Value="{Binding Progress, Mode=OneWay}"
                                                  Margin="0,16,0,0" Height="6"
                                                  AutomationProperties.Name="Queued download progress" />
 
