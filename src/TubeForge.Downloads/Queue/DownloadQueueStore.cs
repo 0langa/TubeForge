@@ -303,7 +303,9 @@ public sealed class DownloadQueueStore
                 !IsSafeDestination(item.DestinationPath) ||
                 item.ExpectedLength is <= 0 ||
                 item.BytesReceived < 0 ||
-                item.ExpectedLength is not null && item.BytesReceived > item.ExpectedLength ||
+                item.ExpectedLength is not null &&
+                    item.BytesReceived > item.ExpectedLength &&
+                    !IsCompletedConvertedOutput(item, sourceIdentity) ||
                 !Enum.IsDefined(item.Status) ||
                 item.CreatedAtUtc == default ||
                 item.UpdatedAtUtc < item.CreatedAtUtc ||
@@ -315,6 +317,12 @@ public sealed class DownloadQueueStore
 
         return null;
     }
+
+    private static bool IsCompletedConvertedOutput(
+        DownloadQueueItem item,
+        DownloadSourceIdentity sourceIdentity) =>
+        item.Status == DownloadQueueStatus.Completed &&
+        sourceIdentity.Output.Kind != Core.Media.AudioOutputKind.Native;
 
     private static bool IsSafeText(string? value, int maximumLength) =>
         !string.IsNullOrWhiteSpace(value) &&
