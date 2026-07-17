@@ -112,6 +112,72 @@ public static class DownloadQueueStoreTests
     }
 
     [Test]
+    public static async Task PersistsMp3OutputProfileAcrossRestart()
+    {
+        using var directory = new TestDirectory();
+        var path = Path.Combine(directory.Path, "queue.json");
+        var store = new DownloadQueueStore(path);
+        var item = Item(Guid.NewGuid(), DownloadQueueStatus.Queued, DateTimeOffset.UtcNow) with
+        {
+            FormatId = 140,
+            SourceIdentity = "Fixture123_:140@mp3-320",
+            DestinationPath = Path.Combine(Path.GetTempPath(), "TubeForge.Tests", "fixture.mp3")
+        };
+
+        var save = await store.SaveAsync(new DownloadQueueSnapshot { Items = [item] });
+        Assert.True(save.IsSuccess, save.Error?.Message);
+
+        var load = await new DownloadQueueStore(path).LoadAsync();
+        Assert.True(load.IsSuccess, load.Error?.Message);
+        Assert.Equal("Fixture123_:140@mp3-320", load.Value.Items[0].SourceIdentity);
+    }
+
+    [Test]
+    public static async Task PersistsCompletedMp3WhenConvertedOutputIsLargerThanSource()
+    {
+        using var directory = new TestDirectory();
+        var store = new DownloadQueueStore(Path.Combine(directory.Path, "queue.json"));
+        var now = DateTimeOffset.UtcNow;
+        var completed = Item(Guid.NewGuid(), DownloadQueueStatus.Completed, now) with
+        {
+            FormatId = 140,
+            SourceIdentity = "Fixture123_:140@mp3-192",
+            DestinationPath = Path.Combine(Path.GetTempPath(), "TubeForge.Tests", "fixture.mp3"),
+            ExpectedLength = 1_024,
+            BytesReceived = 1_536
+        };
+
+        var save = await store.SaveAsync(new DownloadQueueSnapshot { Items = [completed] });
+
+        Assert.True(save.IsSuccess, save.Error?.Message);
+        var load = await new DownloadQueueStore(store.StoragePath).LoadAsync();
+        Assert.True(load.IsSuccess, load.Error?.Message);
+        Assert.Equal(1_536L, load.Value.Items[0].BytesReceived);
+        Assert.Equal(1_536L, load.Value.Items[0].ExpectedLength);
+    }
+
+    [Test]
+    public static async Task RejectsOversizedMp3BeforeConversionCompletes()
+    {
+        using var directory = new TestDirectory();
+        var store = new DownloadQueueStore(Path.Combine(directory.Path, "queue.json"));
+        var now = DateTimeOffset.UtcNow;
+        var downloading = Item(Guid.NewGuid(), DownloadQueueStatus.Downloading, now) with
+        {
+            FormatId = 140,
+            SourceIdentity = "Fixture123_:140@mp3-192",
+            DestinationPath = Path.Combine(Path.GetTempPath(), "TubeForge.Tests", "fixture.mp3"),
+            ExpectedLength = 1_024,
+            BytesReceived = 1_536
+        };
+
+        var save = await store.SaveAsync(new DownloadQueueSnapshot { Items = [downloading] });
+
+        Assert.False(save.IsSuccess);
+        Assert.Equal("Queue.InvalidState", save.Error?.Code);
+    }
+
+    [Test]
     public static async Task RecoversFlushedPendingStateAfterInterruptedReplacement()
     {
         using var directory = new TestDirectory();

@@ -11,6 +11,14 @@ public sealed record DownloadModeOption(
     public override string ToString() => Label;
 }
 
+public sealed record AudioProcessingOption(
+    AudioOutputProfile Value,
+    string Label,
+    string Description)
+{
+    public override string ToString() => Label;
+}
+
 public sealed record FilterOption<T>(string Label, T? Value) where T : struct
 {
     public override string ToString() => Label;

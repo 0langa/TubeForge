@@ -18,6 +18,7 @@ public static class TubeForgeSettingsStoreTests
             MaximumConcurrentDownloads = 4,
             FileNameTemplate = "{channel} - {title} [{quality}]",
             EnableSegmentedTransfers = true,
+            EnableAutomaticUpdateChecks = false,
             ResponsibleUseAccepted = true
         });
         var loaded = await store.LoadAsync(defaults);
@@ -29,6 +30,7 @@ public static class TubeForgeSettingsStoreTests
         Assert.Equal(4, loaded.Value.MaximumConcurrentDownloads);
         Assert.Equal("{channel} - {title} [{quality}]", loaded.Value.FileNameTemplate);
         Assert.True(loaded.Value.EnableSegmentedTransfers);
+        Assert.False(loaded.Value.EnableAutomaticUpdateChecks);
         Assert.True(loaded.Value.ResponsibleUseAccepted);
     }
 

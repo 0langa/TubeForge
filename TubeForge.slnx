@@ -3,15 +3,21 @@
     <Project Path="src/TubeForge.App/TubeForge.App.csproj" />
     <Project Path="src/TubeForge.Core/TubeForge.Core.csproj" />
     <Project Path="src/TubeForge.Downloads/TubeForge.Downloads.csproj" />
+    <Project Path="src/TubeForge.Installation/TubeForge.Installation.csproj" />
+    <Project Path="src/TubeForge.Installer/TubeForge.Installer.csproj" />
     <Project Path="src/TubeForge.Media/TubeForge.Media.csproj" />
+    <Project Path="src/TubeForge.Transcoding/TubeForge.Transcoding.csproj" />
+    <Project Path="src/TubeForge.Updates/TubeForge.Updates.csproj" />
     <Project Path="src/TubeForge.YouTube/TubeForge.YouTube.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/TubeForge.Tests/TubeForge.Tests.csproj" />
   </Folder>
   <Folder Name="/tools/">
+    <Project Path="tools/TubeForge.Branding/TubeForge.Branding.csproj" />
     <Project Path="tools/TubeForge.LiveMuxSmoke/TubeForge.LiveMuxSmoke.csproj" />
     <Project Path="tools/TubeForge.Performance/TubeForge.Performance.csproj" />
     <Project Path="tools/TubeForge.Smoke/TubeForge.Smoke.csproj" />
+    <Project Path="tools/TubeForge.TranscodeSmoke/TubeForge.TranscodeSmoke.csproj" />
   </Folder>
 </Solution>

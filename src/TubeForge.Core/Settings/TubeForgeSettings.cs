@@ -14,5 +14,7 @@ public sealed record TubeForgeSettings
 
     public bool EnableSegmentedTransfers { get; init; }
 
+    public bool EnableAutomaticUpdateChecks { get; init; } = true;
+
     public bool ResponsibleUseAccepted { get; init; }
 }

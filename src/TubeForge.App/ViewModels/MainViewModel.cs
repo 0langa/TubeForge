@@ -5,6 +5,7 @@ using System.Net;
 using System.Net.Http;
 using System.IO;
 using System.Reflection;
+using System.Security.Cryptography;
 using System.Runtime.InteropServices;
 using System.Runtime.CompilerServices;
 using TubeForge.App.Commands;
@@ -18,6 +19,9 @@ using TubeForge.Core.YouTube;
 using TubeForge.Downloads;
 using TubeForge.Downloads.History;
 using TubeForge.Downloads.Queue;
+using TubeForge.Media;
+using TubeForge.Transcoding;
+using TubeForge.Updates;
 using TubeForge.YouTube;
 using TubeForge.YouTube.Captions;
 using TubeForge.YouTube.Collections;
@@ -37,9 +41,13 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         new(DownloadMode.VideoOnly, "Video only", "Maximum video quality; audio not included")
     ];
 
-    private static readonly IReadOnlyList<string> AudioProcessingChoices =
+    private static readonly IReadOnlyList<AudioProcessingOption> AudioProcessingChoices =
     [
-        "Native stream · no conversion · no quality loss"
+        new(AudioOutputProfile.Native, "Native stream · no conversion", "Fastest; preserves source quality"),
+        new(AudioOutputProfile.Mp3(320), "MP3 · 320 kbps", "Highest MP3 bitrate; largest file"),
+        new(AudioOutputProfile.Mp3(256), "MP3 · 256 kbps", "High-quality MP3"),
+        new(AudioOutputProfile.Mp3(192), "MP3 · 192 kbps", "Balanced quality and size"),
+        new(AudioOutputProfile.Mp3(128), "MP3 · 128 kbps", "Smallest MP3 file")
     ];
 
     private static readonly IReadOnlyList<CaptionFormatOption> CaptionOutputChoices =
@@ -50,15 +58,19 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
 
     private readonly HttpClient _httpClient;
     private readonly HttpClient _sidecarHttpClient;
+    private readonly HttpClient _updateHttpClient;
     private readonly YouTubeMetadataResolver _resolver;
     private readonly DirectDownloadEngine _downloader;
     private readonly AdaptiveDownloadEngine _adaptiveDownloader;
+    private readonly WindowsMediaFoundationTranscoder _audioTranscoder = new();
     private readonly CaptionDownloadEngine _captionDownloader;
     private readonly YouTubeCollectionResolver _collectionResolver;
     private readonly ThumbnailDownloadEngine _thumbnailDownloader;
     private readonly DownloadQueueStore _queueStore;
     private readonly DownloadHistoryStore _historyStore;
     private readonly TubeForgeSettingsStore _settingsStore;
+    private readonly GitHubUpdateClient _updateClient;
+    private readonly string _updateDirectory;
     private readonly DownloadQueueDispatcher _queueDispatcher = new(2);
     private readonly HostRequestGate _hostRequestGate;
     private readonly RateLimitedRequestExecutor _rateLimitedRequests;
@@ -101,7 +113,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     private FilterOption<long>? _selectedBitrate;
     private IReadOnlyList<FilterOption<AudioCodec>> _audioCodecOptions = [];
     private FilterOption<AudioCodec>? _selectedAudioCodec;
-    private string _selectedAudioProcessing = AudioProcessingChoices[0];
+    private AudioProcessingOption _selectedAudioProcessing = AudioProcessingChoices[0];
     private DownloadQueueSnapshot _queueSnapshot = new();
     private DownloadHistorySnapshot _historySnapshot = new();
     private bool _isInitialized;
@@ -111,10 +123,17 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     private AppPage _activePage = AppPage.Download;
     private int _selectedMaxConcurrentDownloads = 2;
     private bool _enableSegmentedTransfers;
+    private bool _enableAutomaticUpdateChecks = true;
     private string _fileNameTemplate = FileNameTemplate.Default;
     private TubeForgeSettings _settings;
     private bool _showResponsibleUseNotice = true;
     private string _settingsStatus = "Settings stay on this device.";
+    private string _updateStatus = "TubeForge can check GitHub for verified stable releases.";
+    private bool _isCheckingForUpdate;
+    private bool _isDownloadingUpdate;
+    private double _updateDownloadFraction;
+    private UpdateRelease? _availableUpdate;
+    private UpdateDownloadReceipt? _readyUpdate;
     private string _diagnosticsStatus = "Export contains whitelisted technical state only.";
     private string _diagnosticsExtractionStage = "NotRun";
     private IReadOnlyList<CaptionTrackOption> _captionTracks = [];
@@ -155,6 +174,15 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         };
         _sidecarHttpClient = new HttpClient(sidecarHandler) { Timeout = TimeSpan.FromSeconds(60) };
         _thumbnailDownloader = new ThumbnailDownloadEngine(_sidecarHttpClient);
+        var updateHandler = new SocketsHttpHandler
+        {
+            AutomaticDecompression = DecompressionMethods.All,
+            AllowAutoRedirect = false,
+            ConnectTimeout = TimeSpan.FromSeconds(10),
+            PooledConnectionLifetime = TimeSpan.FromMinutes(5)
+        };
+        _updateHttpClient = new HttpClient(updateHandler) { Timeout = TimeSpan.FromSeconds(60) };
+        _updateClient = new GitHubUpdateClient(_updateHttpClient);
         applicationDataDirectory ??= Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
             "TubeForge");
@@ -162,6 +190,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         _queueStore = new DownloadQueueStore(Path.Combine(applicationDataDirectory, "queue.json"));
         _historyStore = new DownloadHistoryStore(Path.Combine(applicationDataDirectory, "history.json"));
         _settingsStore = new TubeForgeSettingsStore(Path.Combine(applicationDataDirectory, "settings.json"));
+        _updateDirectory = Path.Combine(applicationDataDirectory, "updates");
         _downloadFolder = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
             "Downloads");
@@ -200,6 +229,12 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         ShowDiagnosticsCommand = new RelayCommand(() => ShowPage(AppPage.Diagnostics));
         SaveSettingsCommand = new AsyncRelayCommand(SaveSettingsAsync);
         AcceptResponsibleUseCommand = new AsyncRelayCommand(AcceptResponsibleUseAsync);
+        CheckForUpdatesCommand = new AsyncRelayCommand(
+            () => CheckForUpdatesAsync(isAutomatic: false),
+            () => !ShowResponsibleUseNotice && !IsCheckingForUpdate && !IsDownloadingUpdate);
+        DownloadUpdateCommand = new AsyncRelayCommand(
+            DownloadUpdateAsync,
+            () => _availableUpdate is not null && !IsCheckingForUpdate && !IsDownloadingUpdate);
         ClearCompletedCommand = new AsyncRelayCommand(ClearCompletedAsync, () => QueueItems.Any(item => item.Status == DownloadQueueStatus.Completed));
         ClearHistoryCommand = new AsyncRelayCommand(ClearHistoryAsync, () => HistoryItems.Count > 0 || _historyUnavailable);
     }
@@ -216,7 +251,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
 
     public IReadOnlyList<DownloadModeOption> DownloadModes => _downloadModes;
 
-    public IReadOnlyList<string> AudioProcessingOptions => AudioProcessingChoices;
+    public IReadOnlyList<AudioProcessingOption> AudioProcessingOptions => AudioProcessingChoices;
 
     public AsyncRelayCommand AnalyzeCommand { get; }
 
@@ -251,6 +286,10 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     public AsyncRelayCommand SaveSettingsCommand { get; }
 
     public AsyncRelayCommand AcceptResponsibleUseCommand { get; }
+
+    public AsyncRelayCommand CheckForUpdatesCommand { get; }
+
+    public AsyncRelayCommand DownloadUpdateCommand { get; }
 
     public AsyncRelayCommand ClearCompletedCommand { get; }
 
@@ -442,6 +481,42 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         private set => Set(ref _settingsStatus, value);
     }
 
+    public string UpdateStatus
+    {
+        get => _updateStatus;
+        private set => Set(ref _updateStatus, value);
+    }
+
+    public bool IsCheckingForUpdate
+    {
+        get => _isCheckingForUpdate;
+        private set
+        {
+            if (Set(ref _isCheckingForUpdate, value)) RefreshCommands();
+        }
+    }
+
+    public bool IsDownloadingUpdate
+    {
+        get => _isDownloadingUpdate;
+        private set
+        {
+            if (Set(ref _isDownloadingUpdate, value)) RefreshCommands();
+        }
+    }
+
+    public double UpdateDownloadFraction
+    {
+        get => _updateDownloadFraction;
+        private set => Set(ref _updateDownloadFraction, value);
+    }
+
+    public bool HasUpdateAvailable => _availableUpdate is not null && _readyUpdate is null;
+
+    public bool IsUpdateReady => _readyUpdate is not null;
+
+    public string AvailableUpdateVersion => _availableUpdate?.Version.ToString(3) ?? string.Empty;
+
     public string DiagnosticsStatus
     {
         get => _diagnosticsStatus;
@@ -507,6 +582,12 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     {
         get => _enableSegmentedTransfers;
         set => Set(ref _enableSegmentedTransfers, value);
+    }
+
+    public bool EnableAutomaticUpdateChecks
+    {
+        get => _enableAutomaticUpdateChecks;
+        set => Set(ref _enableAutomaticUpdateChecks, value);
     }
 
     public string FileNameTemplateText
@@ -632,10 +713,16 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         set => SetFilterSelection(ref _selectedAudioCodec, value);
     }
 
-    public string SelectedAudioProcessing
+    public AudioProcessingOption SelectedAudioProcessing
     {
         get => _selectedAudioProcessing;
-        set => Set(ref _selectedAudioProcessing, value);
+        set
+        {
+            if (value is not null && Set(ref _selectedAudioProcessing, value))
+            {
+                OnPropertyChanged(nameof(ModeNotice));
+            }
+        }
     }
 
     public bool HasVideoFilters => SelectedDownloadMode.Value is not DownloadMode.AudioOnly;
@@ -649,7 +736,9 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         DownloadMode.AudioVideo =>
             CombinedModeNotice(),
         DownloadMode.AudioOnly =>
-            "Native AAC/Opus save: fast and lossless. MP3 conversion stays unavailable until TubeForge has its own encoder.",
+            SelectedAudioProcessing.Value.Kind == AudioOutputKind.Native
+                ? "Native AAC/Opus: fastest path with no re-encoding or quality loss."
+                : $"MP3 {SelectedAudioProcessing.Value.BitrateKbps} kbps: Windows Media Foundation decodes and re-encodes locally; no FFmpeg.",
         DownloadMode.VideoOnly =>
             VideoOnlyModeNotice(),
         _ => string.Empty
@@ -694,6 +783,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             OnPropertyChanged(nameof(SelectedMaxConcurrentDownloads));
             _enableSegmentedTransfers = _settings.EnableSegmentedTransfers;
             OnPropertyChanged(nameof(EnableSegmentedTransfers));
+            _enableAutomaticUpdateChecks = _settings.EnableAutomaticUpdateChecks;
+            OnPropertyChanged(nameof(EnableAutomaticUpdateChecks));
             _fileNameTemplate = _settings.FileNameTemplate;
             OnPropertyChanged(nameof(FileNameTemplateText));
             ShowResponsibleUseNotice = !_settings.ResponsibleUseAccepted;
@@ -743,6 +834,11 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         {
             PumpQueue();
         }
+
+        if (!ShowResponsibleUseNotice && EnableAutomaticUpdateChecks)
+        {
+            _ = CheckForUpdatesAsync(isAutomatic: true);
+        }
     }
 
     private async Task SaveSettingsAsync()
@@ -767,7 +863,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                 DownloadFolder = Path.GetFullPath(DownloadFolder),
                 MaximumConcurrentDownloads = SelectedMaxConcurrentDownloads,
                 FileNameTemplate = FileNameTemplateText,
-                EnableSegmentedTransfers = EnableSegmentedTransfers
+                EnableSegmentedTransfers = EnableSegmentedTransfers,
+                EnableAutomaticUpdateChecks = EnableAutomaticUpdateChecks
             };
         }
         catch (Exception exception) when (exception is ArgumentException or NotSupportedException or PathTooLongException)
@@ -812,6 +909,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                 MaximumConcurrentDownloads = SelectedMaxConcurrentDownloads,
                 FileNameTemplate = FileNameTemplateText,
                 EnableSegmentedTransfers = EnableSegmentedTransfers,
+                EnableAutomaticUpdateChecks = EnableAutomaticUpdateChecks,
                 ResponsibleUseAccepted = true
             };
         }
@@ -832,6 +930,10 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         _settings = accepted;
         ShowResponsibleUseNotice = false;
         SettingsStatus = "Responsible-use acknowledgement saved locally.";
+        if (EnableAutomaticUpdateChecks)
+        {
+            _ = CheckForUpdatesAsync(isAutomatic: true);
+        }
     }
 
     private void ShowPage(AppPage page)
@@ -996,9 +1098,10 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         ErrorMessage = string.Empty;
         var selection = SelectedFormat;
         var format = selection.Format;
+        var output = AudioOutputFor(selection);
         try
         {
-            var renderedName = RenderFileName(_metadata, selection, index: null, indexWidth: 2);
+            var renderedName = RenderFileName(_metadata, selection, index: null, indexWidth: 2, output);
             if (!renderedName.IsSuccess)
             {
                 ErrorMessage = $"{renderedName.Error!.Message} ({renderedName.Error.Code})";
@@ -1010,15 +1113,13 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             var destination = FileNamePolicy.AvailablePath(
                 DownloadFolder,
                 renderedName.Value,
-                selection.RequiresMuxing
-                    ? FormatDisplay.Extension(format.Container)
-                    : FormatDisplay.OutputExtension(format),
+                OutputExtension(selection, output),
                 path => File.Exists(path) ||
                         File.Exists(path + ".part") ||
                         _queueSnapshot.Items.Any(item => item.DestinationPath.Equals(path, StringComparison.OrdinalIgnoreCase)) ||
                         _historySnapshot.Entries.Any(item => item.DestinationPath.Equals(path, StringComparison.OrdinalIgnoreCase)));
             var duplicate = DownloadDuplicateDetector.Find(
-                SelectionIdentity(_metadata, selection),
+                SelectionIdentity(_metadata, selection, output),
                 destination,
                 _queueSnapshot.Items,
                 _historySnapshot.Entries);
@@ -1030,7 +1131,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                 return;
             }
 
-            var queueItem = CreateQueueItem(_metadata, selection, destination);
+            var queueItem = CreateQueueItem(_metadata, selection, destination, output);
             var queueError = await UpsertQueueItemAsync(queueItem);
             if (queueError is not null)
             {
@@ -1039,7 +1140,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                 return;
             }
 
-            _preparedQueueWork[queueItem.Id] = new QueuedDownloadWork(_metadata, selection, destination);
+            _preparedQueueWork[queueItem.Id] = new QueuedDownloadWork(_metadata, selection, destination, output);
             StatusMessage = $"Queued: {Path.GetFileName(destination)}";
             ProgressDetail = $"Global concurrency: {SelectedMaxConcurrentDownloads}";
             PumpQueue();
@@ -1399,10 +1500,141 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
 
     public void SetDiagnosticsStatus(string status) => DiagnosticsStatus = status;
 
+    public async Task<bool> StartReadyUpdateAsync()
+    {
+        var ready = _readyUpdate;
+        if (ready is null)
+        {
+            UpdateStatus = "Download and verify an update before installing it.";
+            return false;
+        }
+
+        try
+        {
+            var installerPath = Path.GetFullPath(ready.InstallerPath);
+            var expectedDirectory = Path.GetFullPath(_updateDirectory);
+            if (!string.Equals(
+                    Path.GetDirectoryName(installerPath),
+                    expectedDirectory,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                throw new IOException("Update installer escaped its staging directory.");
+            }
+
+            var info = new FileInfo(installerPath);
+            if (!info.Exists || info.Length != ready.BytesWritten)
+            {
+                throw new IOException("Update installer size changed after verification.");
+            }
+
+            await using var stream = new FileStream(
+                installerPath,
+                FileMode.Open,
+                FileAccess.Read,
+                FileShare.Read,
+                128 * 1024,
+                FileOptions.Asynchronous | FileOptions.SequentialScan);
+            var hash = Convert.ToHexString(await SHA256.HashDataAsync(stream)).ToLowerInvariant();
+            if (!hash.Equals(ready.Sha256, StringComparison.OrdinalIgnoreCase))
+            {
+                throw new IOException("Update installer hash changed after verification.");
+            }
+
+            var start = new ProcessStartInfo
+            {
+                FileName = installerPath,
+                UseShellExecute = false
+            };
+            start.ArgumentList.Add("/update");
+            start.ArgumentList.Add("/wait-pid");
+            start.ArgumentList.Add(Environment.ProcessId.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            start.ArgumentList.Add("/launch");
+            _ = Process.Start(start) ?? throw new IOException("The verified update installer did not start.");
+            UpdateStatus = $"Installing TubeForge {ready.Version.ToString(3)}…";
+            return true;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException)
+        {
+            UpdateStatus = $"Update install failed safely ({exception.GetType().Name}).";
+            return false;
+        }
+    }
+
+    private async Task CheckForUpdatesAsync(bool isAutomatic)
+    {
+        IsCheckingForUpdate = true;
+        UpdateStatus = "Checking GitHub for a verified stable release…";
+        try
+        {
+            var current = Assembly.GetExecutingAssembly().GetName().Version ?? new Version(1, 0, 0);
+            current = new Version(current.Major, current.Minor, Math.Max(0, current.Build));
+            var result = await _updateClient.CheckForUpdateAsync(current);
+            if (!result.IsSuccess)
+            {
+                UpdateStatus = isAutomatic
+                    ? "Automatic update check unavailable; use Check now to retry."
+                    : $"Update check failed safely ({result.Error!.Code}).";
+                return;
+            }
+
+            _availableUpdate = result.Value;
+            _readyUpdate = null;
+            UpdateDownloadFraction = 0;
+            UpdateStatus = _availableUpdate is null
+                ? $"TubeForge {current.ToString(3)} is up to date."
+                : $"TubeForge {_availableUpdate.Version.ToString(3)} is available and ready to download.";
+            NotifyUpdateProperties();
+        }
+        finally
+        {
+            IsCheckingForUpdate = false;
+        }
+    }
+
+    private async Task DownloadUpdateAsync()
+    {
+        var release = _availableUpdate;
+        if (release is null)
+        {
+            return;
+        }
+
+        IsDownloadingUpdate = true;
+        UpdateDownloadFraction = 0;
+        UpdateStatus = $"Downloading and verifying TubeForge {release.Version.ToString(3)}…";
+        try
+        {
+            var progress = new Progress<double>(value => UpdateDownloadFraction = value);
+            var result = await _updateClient.DownloadInstallerAsync(release, _updateDirectory, progress);
+            if (!result.IsSuccess)
+            {
+                UpdateStatus = $"Update download rejected safely ({result.Error!.Code}).";
+                return;
+            }
+
+            _readyUpdate = result.Value;
+            UpdateStatus = $"TubeForge {release.Version.ToString(3)} verified. Install when ready.";
+            NotifyUpdateProperties();
+        }
+        finally
+        {
+            IsDownloadingUpdate = false;
+        }
+    }
+
+    private void NotifyUpdateProperties()
+    {
+        OnPropertyChanged(nameof(HasUpdateAvailable));
+        OnPropertyChanged(nameof(IsUpdateReady));
+        OnPropertyChanged(nameof(AvailableUpdateVersion));
+        RefreshCommands();
+    }
+
     public void Dispose()
     {
         CancelAnalysis();
         PauseAll();
+        _updateHttpClient.Dispose();
         _sidecarHttpClient.Dispose();
         _httpClient.Dispose();
         GC.SuppressFinalize(this);
@@ -1453,13 +1685,13 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             }
 
             var work = prepared.Work;
-            var existingBytes = SelectionPartialLength(work.Destination, work.Selection);
-            var reservedBytes = SelectionReservedLength(work.Destination, work.Selection);
+            var existingBytes = SelectionPartialLength(work.Destination, work.Selection, work.Output);
+            var reservedBytes = SelectionReservedLength(work.Destination, work.Selection, work.Output);
             var diskForecast = DiskSpacePolicy.Check(
                 work.Destination,
-                CombinedLength(work.Selection),
+                ForecastLength(work),
                 reservedBytes,
-                work.Selection.RequiresMuxing);
+                work.Selection.RequiresMuxing || work.Output.Kind == AudioOutputKind.Mp3);
             if (!diskForecast.IsSuccess)
             {
                 await CompleteQueueRunAsync(
@@ -1476,7 +1708,39 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             using var mediaLease = await _hostRequestGate.EnterAsync(
                 work.Selection.Format.Url,
                 cancellation.Token);
-            if (work.Selection.AudioFormat is StreamFormat audioFormat)
+            if (work.Output.Kind == AudioOutputKind.Mp3)
+            {
+                var sourcePath = AudioSourcePath(work.Destination, work.Selection.Format);
+                var sourceResult = await EnsureTrackDownloadedAsync(
+                    TrackRequest(work.Metadata, work.Selection.Format, sourcePath),
+                    progress,
+                    cancellation.Token);
+                if (!sourceResult.IsSuccess)
+                {
+                    downloadError = sourceResult.Error;
+                    completedBytes = SelectionPartialLength(work.Destination, work.Selection, work.Output);
+                }
+                else
+                {
+                    StatusMessage = $"Converting to MP3 · {work.Output.BitrateKbps} kbps";
+                    var transcodeResult = await _audioTranscoder.TranscodeAsync(new AudioTranscodeRequest
+                    {
+                        SourcePath = sourcePath,
+                        DestinationPath = work.Destination,
+                        Output = work.Output,
+                        AllowExistingValidatedOutput = true
+                    }, cancellation.Token);
+                    downloadError = transcodeResult.Error;
+                    completedBytes = transcodeResult.IsSuccess
+                        ? transcodeResult.Value.BytesWritten
+                        : SelectionPartialLength(work.Destination, work.Selection, work.Output);
+                    if (transcodeResult.IsSuccess)
+                    {
+                        File.Delete(sourcePath);
+                    }
+                }
+            }
+            else if (work.Selection.AudioFormat is StreamFormat audioFormat)
             {
                 var result = await _adaptiveDownloader.DownloadAsync(new AdaptiveDownloadRequest
                 {
@@ -1492,7 +1756,9 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                     OutputContainer = work.Selection.Format.Container
                 }, progress, cancellation.Token);
                 downloadError = result.Error;
-                completedBytes = result.IsSuccess ? result.Value.BytesWritten : SelectionPartialLength(work.Destination, work.Selection);
+                completedBytes = result.IsSuccess
+                    ? result.Value.BytesWritten
+                    : SelectionPartialLength(work.Destination, work.Selection, work.Output);
             }
             else
             {
@@ -1501,7 +1767,9 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                     progress,
                     cancellation.Token);
                 downloadError = result.Error;
-                completedBytes = result.IsSuccess ? result.Value.BytesWritten : SelectionPartialLength(work.Destination, work.Selection);
+                completedBytes = result.IsSuccess
+                    ? result.Value.BytesWritten
+                    : SelectionPartialLength(work.Destination, work.Selection, work.Output);
             }
 
             if (downloadError?.Code == "Network.RateLimited")
@@ -1606,6 +1874,13 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             return (null, new TubeForgeError("Queue.InvalidSourceIdentity", "The queued source identity is invalid."));
         }
 
+        if (sourceIdentity.Output.Kind == AudioOutputKind.Mp3 && primary.Kind != StreamKind.AudioOnly)
+        {
+            return (null, new TubeForgeError(
+                "Queue.InvalidOutputProfile",
+                "The queued MP3 profile is valid only for audio-only media."));
+        }
+
         StreamFormat? audio = null;
         var audioFormatId = sourceIdentity.AudioFormatId;
         if (audioFormatId is not null)
@@ -1621,7 +1896,11 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         }
 
         var selection = new FormatItemViewModel(primary, audio);
-        var work = new QueuedDownloadWork(resolved.Value.Metadata, selection, item.DestinationPath);
+        var work = new QueuedDownloadWork(
+            resolved.Value.Metadata,
+            selection,
+            item.DestinationPath,
+            sourceIdentity.Output);
         _preparedQueueWork[itemId] = work;
         return (work, null);
     }
@@ -1661,7 +1940,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     {
         if (_preparedQueueWork.TryGetValue(itemId, out var work))
         {
-            return SelectionPartialLength(work.Destination, work.Selection);
+            return SelectionPartialLength(work.Destination, work.Selection, work.Output);
         }
 
         return _queueSnapshot.Items.FirstOrDefault(item => item.Id == itemId)?.BytesReceived;
@@ -1753,7 +2032,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         {
             Id = Guid.NewGuid(),
             VideoId = work.Metadata.Id.Value,
-            SourceIdentity = SelectionIdentity(work.Metadata, work.Selection),
+            SourceIdentity = SelectionIdentity(work.Metadata, work.Selection, work.Output),
             DisplayTitle = work.Metadata.Title,
             DestinationPath = work.Destination,
             BytesWritten = bytesWritten,
@@ -1915,6 +2194,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         OnPropertyChanged(nameof(QueueSummary));
         ClearCompletedCommand.RaiseCanExecuteChanged();
         CancelCommand.RaiseCanExecuteChanged();
+        CheckForUpdatesCommand.RaiseCanExecuteChanged();
+        DownloadUpdateCommand.RaiseCanExecuteChanged();
     }
 
     private void NotifyHistoryProperties()
@@ -1956,13 +2237,14 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     private static DownloadQueueItem CreateQueueItem(
         VideoMetadata metadata,
         FormatItemViewModel selection,
-        string destination)
+        string destination,
+        AudioOutputProfile output = default)
     {
         var now = DateTimeOffset.UtcNow;
         var format = selection.Format;
-        var sourceIdentity = SelectionIdentity(metadata, selection);
+        var sourceIdentity = SelectionIdentity(metadata, selection, output);
         var expectedLength = CombinedLength(selection);
-        var partialLength = SelectionPartialLength(destination, selection);
+        var partialLength = SelectionPartialLength(destination, selection, output);
 
         return new DownloadQueueItem
         {
@@ -1993,31 +2275,65 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             EnableSegmentedTransfer = _settings.EnableSegmentedTransfers
         };
 
+    private async Task<Result<DownloadReceipt>> EnsureTrackDownloadedAsync(
+        DownloadRequest request,
+        IProgress<DownloadProgress>? progress,
+        CancellationToken cancellationToken)
+    {
+        if (!File.Exists(request.DestinationPath))
+        {
+            return await _downloader.DownloadAsync(request, progress, cancellationToken);
+        }
+
+        var length = new FileInfo(request.DestinationPath).Length;
+        if (request.ExpectedLength is not null && request.ExpectedLength != length)
+        {
+            return Result<DownloadReceipt>.Failure(new TubeForgeError(
+                "Media.IntermediateConflict",
+                "A completed source audio track has an unexpected size."));
+        }
+
+        var validation = MediaContainerValidator.Validate(request.DestinationPath, request.ExpectedContainer);
+        if (!validation.IsSuccess)
+        {
+            return Result<DownloadReceipt>.Failure(validation.Error!);
+        }
+
+        progress?.Report(new DownloadProgress(length, request.ExpectedLength ?? length, 0, TimeSpan.Zero));
+        return Result<DownloadReceipt>.Success(new DownloadReceipt(request.DestinationPath, length, Resumed: true));
+    }
+
     private static string IntermediateTrackPath(
         string destination,
         string role,
         StreamFormat format) =>
         destination + $".{role}-track" + FormatDisplay.OutputExtension(format);
 
-    private static string SelectionIdentity(VideoMetadata metadata, FormatItemViewModel selection) =>
+    private static string AudioSourcePath(string destination, StreamFormat format) =>
+        destination + ".source" + FormatDisplay.OutputExtension(format);
+
+    private static string SelectionIdentity(
+        VideoMetadata metadata,
+        FormatItemViewModel selection,
+        AudioOutputProfile output = default) =>
         DownloadSourceIdentity.Create(
             metadata.Id,
             selection.Format.FormatId,
-            selection.AudioFormat?.FormatId);
+            selection.AudioFormat?.FormatId,
+            output);
 
     private Result<string> RenderFileName(
         VideoMetadata metadata,
         FormatItemViewModel selection,
         int? index,
-        int indexWidth)
+        int indexWidth,
+        AudioOutputProfile output = default)
     {
         var format = selection.Format;
         var quality = format.HasVideo
             ? format.Height is > 0 ? $"{format.Height}p" : "video"
             : format.Bitrate is > 0 ? $"{Math.Round(format.Bitrate.Value / 1000d):0}kbps" : "audio";
-        var extension = selection.RequiresMuxing
-            ? FormatDisplay.Extension(format.Container)
-            : FormatDisplay.OutputExtension(format);
+        var extension = OutputExtension(selection, output);
         var template = index is not null && FileNameTemplateText == FileNameTemplate.Default
             ? "{index} - {title}"
             : FileNameTemplateText;
@@ -2042,6 +2358,40 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         _ => "duplicate output"
     };
 
+    private AudioOutputProfile AudioOutputFor(FormatItemViewModel selection) =>
+        SelectedDownloadMode.Value == DownloadMode.AudioOnly && selection.Format.Kind == StreamKind.AudioOnly
+            ? SelectedAudioProcessing.Value
+            : AudioOutputProfile.Native;
+
+    private static string OutputExtension(
+        FormatItemViewModel selection,
+        AudioOutputProfile output) =>
+        output.Kind == AudioOutputKind.Mp3
+            ? output.Extension
+            : selection.RequiresMuxing
+                ? FormatDisplay.Extension(selection.Format.Container)
+                : FormatDisplay.OutputExtension(selection.Format);
+
+    private static long? ForecastLength(QueuedDownloadWork work)
+    {
+        var sourceLength = CombinedLength(work.Selection);
+        if (work.Output.Kind != AudioOutputKind.Mp3 || work.Metadata.Duration is null)
+        {
+            return sourceLength;
+        }
+
+        try
+        {
+            var mp3Length = checked((long)Math.Ceiling(
+                work.Metadata.Duration.Value.TotalSeconds * work.Output.BitrateKbps * 1000d / 8d) + 64 * 1024);
+            return sourceLength is null ? mp3Length : Math.Max(sourceLength.Value, mp3Length);
+        }
+        catch (OverflowException)
+        {
+            return null;
+        }
+    }
+
     private static long? CombinedLength(FormatItemViewModel selection)
     {
         if (selection.Format.ContentLength is null || selection.AudioFormat?.ContentLength is null)
@@ -2059,8 +2409,16 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         }
     }
 
-    private static long SelectionPartialLength(string destination, FormatItemViewModel selection)
+    private static long SelectionPartialLength(
+        string destination,
+        FormatItemViewModel selection,
+        AudioOutputProfile output = default)
     {
+        if (output.Kind == AudioOutputKind.Mp3)
+        {
+            return CompletedOrPartialLength(AudioSourcePath(destination, selection.Format));
+        }
+
         if (selection.AudioFormat is null)
         {
             return PartialLength(destination);
@@ -2078,8 +2436,16 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         }
     }
 
-    private static long SelectionReservedLength(string destination, FormatItemViewModel selection)
+    private static long SelectionReservedLength(
+        string destination,
+        FormatItemViewModel selection,
+        AudioOutputProfile output = default)
     {
+        if (output.Kind == AudioOutputKind.Mp3)
+        {
+            return CompletedOrReservedLength(AudioSourcePath(destination, selection.Format));
+        }
+
         if (selection.AudioFormat is null)
         {
             return CompletedOrReservedLength(destination);
@@ -2165,8 +2531,18 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             return new TubeForgeError("Queue.ItemMissing", "The queued download no longer exists.");
         }
 
+        var expectedLength = item.ExpectedLength;
+        if (status == DownloadQueueStatus.Completed &&
+            completedBytes is > 0 &&
+            DownloadSourceIdentity.TryParse(item.SourceIdentity, out var sourceIdentity) &&
+            sourceIdentity.Output.Kind != AudioOutputKind.Native)
+        {
+            expectedLength = completedBytes;
+        }
+
         return await UpsertQueueItemAsync(item with
         {
+            ExpectedLength = expectedLength,
             BytesReceived = completedBytes ?? item.BytesReceived,
             Status = status,
             UpdatedAtUtc = DateTimeOffset.UtcNow,
@@ -2780,5 +3156,6 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     private sealed record QueuedDownloadWork(
         VideoMetadata Metadata,
         FormatItemViewModel Selection,
-        string Destination);
+        string Destination,
+        AudioOutputProfile Output = default);
 }

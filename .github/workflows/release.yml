@@ -50,6 +50,12 @@ jobs:
         shell: pwsh
         run: .\scripts\Test-Release.ps1 -Version '${{ steps.version.outputs.value }}' -SkipLaunch
 
+      - name: Produce installer
+        shell: pwsh
+        run: |
+          .\scripts\Publish-Installer.ps1 -Version '${{ steps.version.outputs.value }}'
+          Get-Content artifacts/installer/SHA256SUMS.txt | Add-Content artifacts/release/SHA256SUMS.txt
+
       - name: Attest release artifacts
         uses: actions/attest@v4
         with:
@@ -57,6 +63,7 @@ jobs:
             artifacts/release/*.zip
             artifacts/release/*-manifest.json
             artifacts/release/SHA256SUMS.txt
+            artifacts/installer/*-setup.exe
 
       - name: Publish GitHub release
         shell: pwsh
@@ -67,6 +74,7 @@ jobs:
             artifacts/release/*.zip `
             artifacts/release/*-manifest.json `
             artifacts/release/SHA256SUMS.txt `
+            artifacts/installer/*-setup.exe `
             --verify-tag `
             --title "TubeForge ${{ github.ref_name }}" `
             --notes-file docs/RELEASE_NOTES.md `

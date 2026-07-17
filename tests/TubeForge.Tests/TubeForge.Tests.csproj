@@ -1,14 +1,17 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>Exe</OutputType>
-    <TargetFramework>net10.0</TargetFramework>
+    <TargetFramework>net10.0-windows</TargetFramework>
     <AssemblyName>TubeForge.Tests</AssemblyName>
     <RootNamespace>TubeForge.Tests</RootNamespace>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../../src/TubeForge.Core/TubeForge.Core.csproj" />
     <ProjectReference Include="../../src/TubeForge.Downloads/TubeForge.Downloads.csproj" />
+    <ProjectReference Include="../../src/TubeForge.Installation/TubeForge.Installation.csproj" />
     <ProjectReference Include="../../src/TubeForge.Media/TubeForge.Media.csproj" />
+    <ProjectReference Include="../../src/TubeForge.Transcoding/TubeForge.Transcoding.csproj" />
+    <ProjectReference Include="../../src/TubeForge.Updates/TubeForge.Updates.csproj" />
     <ProjectReference Include="../../src/TubeForge.YouTube/TubeForge.YouTube.csproj" />
   </ItemGroup>
   <ItemGroup>
@@ -18,6 +21,12 @@
           CopyToOutputDirectory="PreserveNewest" />
     <None Include="../../src/TubeForge.App/MainWindow.xaml"
           Link="Fixtures/MainWindow.xaml"
+          CopyToOutputDirectory="PreserveNewest" />
+    <None Include="../../assets/TubeForge.svg"
+          Link="Fixtures/TubeForge.svg"
+          CopyToOutputDirectory="PreserveNewest" />
+    <None Include="../../assets/TubeForge.ico"
+          Link="Fixtures/TubeForge.ico"
           CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

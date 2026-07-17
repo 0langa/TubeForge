@@ -189,13 +189,23 @@ public sealed class DownloadQueueStore
         var recovered = snapshot with
         {
             Items = snapshot.Items
-                .Select(item => item.Status == DownloadQueueStatus.Downloading
-                    ? item with
+                .Select(item =>
+                {
+                    if (item.Status == DownloadQueueStatus.Downloading)
                     {
-                        Status = DownloadQueueStatus.Paused,
-                        UpdatedAtUtc = recoveredAt
+                        return item with
+                        {
+                            Status = DownloadQueueStatus.Paused,
+                            UpdatedAtUtc = recoveredAt
+                        };
                     }
-                    : item)
+
+                    return item.Status == DownloadQueueStatus.Completed &&
+                           DownloadSourceIdentity.TryParse(item.SourceIdentity, out var sourceIdentity) &&
+                           sourceIdentity.Output.Kind != Core.Media.AudioOutputKind.Native
+                        ? item with { ExpectedLength = item.BytesReceived }
+                        : item;
+                })
                 .ToArray()
         };
         return Result<DownloadQueueSnapshot>.Success(recovered);
@@ -303,7 +313,9 @@ public sealed class DownloadQueueStore
                 !IsSafeDestination(item.DestinationPath) ||
                 item.ExpectedLength is <= 0 ||
                 item.BytesReceived < 0 ||
-                item.ExpectedLength is not null && item.BytesReceived > item.ExpectedLength ||
+                item.ExpectedLength is not null &&
+                    item.BytesReceived > item.ExpectedLength &&
+                    !IsCompletedConvertedOutput(item, sourceIdentity) ||
                 !Enum.IsDefined(item.Status) ||
                 item.CreatedAtUtc == default ||
                 item.UpdatedAtUtc < item.CreatedAtUtc ||
@@ -315,6 +327,12 @@ public sealed class DownloadQueueStore
 
         return null;
     }
+
+    private static bool IsCompletedConvertedOutput(
+        DownloadQueueItem item,
+        DownloadSourceIdentity sourceIdentity) =>
+        item.Status == DownloadQueueStatus.Completed &&
+        sourceIdentity.Output.Kind != Core.Media.AudioOutputKind.Native;
 
     private static bool IsSafeText(string? value, int maximumLength) =>
         !string.IsNullOrWhiteSpace(value) &&

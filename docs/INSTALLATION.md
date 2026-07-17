@@ -1,10 +1,11 @@
 # Installation, upgrades, and removal
 
-TubeForge v1 uses portable ZIP distributions. It does not write an installer registry entry, add a Windows service, or modify `PATH`.
+TubeForge v1.1 provides a recommended per-user installer and portable ZIP distributions. Neither option adds a Windows service or modifies `PATH`.
 
 ## Choose a build
 
-- `self-contained`: recommended. Includes the .NET 10 Windows Desktop runtime and does not require a separate runtime installation.
+- `setup.exe`: recommended. Installs the self-contained app for the current user, adds a Start Menu shortcut, and registers TubeForge in Add/Remove Programs without elevation.
+- `self-contained`: recommended portable option. Includes the .NET 10 Windows Desktop runtime and does not require a separate runtime installation.
 - `framework-dependent`: smaller. Requires the x64 .NET 10 Windows Desktop Runtime already installed.
 
 Both builds target Windows 10/11 x64. Extract the whole archive; do not run `TubeForge.exe` from inside the ZIP.
@@ -13,39 +14,40 @@ The self-contained release build restores only the exact Microsoft .NET runtime 
 
 ## Verify and install
 
-Keep the downloaded ZIP and `SHA256SUMS.txt` in the same directory. In PowerShell:
+Keep the downloaded installer or ZIP and `SHA256SUMS.txt` in the same directory. In PowerShell:
 
 ```powershell
-$version = '1.0.0'
-$name = "TubeForge-$version-win-x64-self-contained.zip"
+$version = '1.1.5'
+$name = "TubeForge-$version-win-x64-setup.exe"
 $expected = (Get-Content .\SHA256SUMS.txt | Where-Object { $_ -match "  $([regex]::Escape($name))$" }).Split(' ')[0]
 $actual = (Get-FileHash -LiteralPath ".\$name" -Algorithm SHA256).Hash
 if ($actual -cne $expected) { throw 'TubeForge checksum mismatch.' }
 ```
 
-Extract to a versioned directory such as:
+Run the verified setup executable. The default per-user installation directory is:
 
 ```text
-%LOCALAPPDATA%\Programs\TubeForge\1.0.0\
+%LOCALAPPDATA%\Programs\TubeForge\
 ```
 
-Then run `TubeForge.exe`. Windows may warn for an unsigned build. Check the release manifest field `authenticodeSigned`; do not assume an unsigned artifact is signed.
+Portable users can instead extract a complete ZIP to a versioned directory and run `TubeForge.exe`. Windows may warn for an unsigned build. Check the release manifest field `authenticodeSigned`; do not assume an unsigned artifact is signed.
 
 GitHub-hosted release artifacts also have signed build-provenance attestations. Online verification requires GitHub CLI:
 
 ```powershell
-gh attestation verify ".\$name" -R 0langa/youtube-downloader
+gh attestation verify ".\$name" -R 0langa/TubeForge
 ```
 
 ## Upgrade and rollback
 
 1. Let active downloads finish or pause them, then close TubeForge.
-2. Verify the new archive checksum.
-3. Extract the new version into a new sibling directory. Never overwrite a running installation in place.
-4. Start the new version. Existing local settings, queue, and Library are reused from `%LOCALAPPDATA%\TubeForge`.
-5. Keep the prior application directory until the new version has completed one analyze/download smoke test.
+2. Use Settings to check for an update, or download the new installer from the official release.
+3. TubeForge verifies the repository, version, asset name, size, GitHub digest, and matching SHA-256 manifest before offering to run an update.
+4. Confirm installation explicitly. Existing local settings, queue, and Library are reused from `%LOCALAPPDATA%\TubeForge`.
 
-Rollback by closing TubeForge and starting `TubeForge.exe` from the previous version directory. A release that changes a persistence schema must document downgrade compatibility in its release notes. v1.0 uses schema version 1 for settings, queue, and Library history.
+Portable users should verify and extract the new archive to a sibling directory. Keep the prior portable directory until the new version has completed an analyze/download smoke test.
+
+Portable rollback uses the previous version directory. Installer rollback requires reinstalling a previously verified setup asset. A release that changes a persistence schema must document downgrade compatibility in its release notes. v1.1 uses schema version 1 for settings, queue, and Library history.
 
 ## Local data and retention
 
@@ -60,7 +62,7 @@ Signed media URLs, cookies, credentials, and downloaded media are not stored in 
 
 ## Uninstall
 
-First close TubeForge. Remove the versioned application directories to uninstall the program. This leaves local state and downloaded files intact.
+First close TubeForge. Use Add/Remove Programs or the TubeForge uninstaller in the installation directory. User data and downloaded files are preserved by default; the uninstaller offers an explicit local-data removal choice. Portable users can remove their extracted application directory.
 
 Inspect retained state before deleting it:
 
