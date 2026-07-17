@@ -38,6 +38,22 @@ public sealed class WindowsMediaFoundationTranscoder
         {
             Trace("start");
             cancellationToken.ThrowIfCancellationRequested();
+            if (File.Exists(destination))
+            {
+                var recovered = Mp3FileValidator.Validate(destination);
+                if (!recovered.IsSuccess)
+                {
+                    return Result<AudioTranscodeReceipt>.Failure(recovered.Error!);
+                }
+
+                return Result<AudioTranscodeReceipt>.Success(new AudioTranscodeReceipt(
+                    destination,
+                    new FileInfo(destination).Length,
+                    request.Output.BitrateKbps,
+                    Channels: 0,
+                    SampleRate: 0));
+            }
+
             TryDelete(temporary);
 
             var initializeResult = MediaFoundationNative.CoInitializeEx(
@@ -206,7 +222,8 @@ public sealed class WindowsMediaFoundationTranscoder
         {
             var source = Path.GetFullPath(request.SourcePath);
             var destination = Path.GetFullPath(request.DestinationPath);
-            if (!File.Exists(source) || File.Exists(destination) ||
+            if (!File.Exists(source) ||
+                File.Exists(destination) && !request.AllowExistingValidatedOutput ||
                 source.Equals(destination, StringComparison.OrdinalIgnoreCase) ||
                 !string.Equals(Path.GetExtension(destination), ".mp3", StringComparison.OrdinalIgnoreCase) ||
                 string.IsNullOrWhiteSpace(Path.GetDirectoryName(destination)))

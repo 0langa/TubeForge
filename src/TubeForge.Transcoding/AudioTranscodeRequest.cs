@@ -9,6 +9,8 @@ public sealed record AudioTranscodeRequest
     public required string DestinationPath { get; init; }
 
     public required AudioOutputProfile Output { get; init; }
+
+    public bool AllowExistingValidatedOutput { get; init; }
 }
 
 public sealed record AudioTranscodeReceipt(

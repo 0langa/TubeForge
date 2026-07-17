@@ -1727,7 +1727,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                     {
                         SourcePath = sourcePath,
                         DestinationPath = work.Destination,
-                        Output = work.Output
+                        Output = work.Output,
+                        AllowExistingValidatedOutput = true
                     }, cancellation.Token);
                     downloadError = transcodeResult.Error;
                     completedBytes = transcodeResult.IsSuccess

@@ -68,6 +68,40 @@ public static class WindowsMediaFoundationTranscoderTests
     }
 
     [Test]
+    public static async Task RecoversValidatedOutputPublishedBeforeQueueCheckpoint()
+    {
+        var directory = CreateTemporaryDirectory();
+        try
+        {
+            var source = Path.Combine(directory, "source.wav");
+            var destination = Path.Combine(directory, "output.mp3");
+            WriteWave(source, TimeSpan.FromMilliseconds(350));
+            var transcoder = new WindowsMediaFoundationTranscoder();
+            var request = new AudioTranscodeRequest
+            {
+                SourcePath = source,
+                DestinationPath = destination,
+                Output = AudioOutputProfile.Mp3(192),
+                AllowExistingValidatedOutput = true
+            };
+            var initial = await transcoder.TranscodeAsync(request);
+            Assert.True(initial.IsSuccess, initial.Error?.Message);
+            var originalBytes = await File.ReadAllBytesAsync(destination);
+
+            var recovered = await transcoder.TranscodeAsync(request);
+
+            Assert.True(recovered.IsSuccess, recovered.Error?.Message);
+            Assert.Equal(originalBytes.LongLength, recovered.Value.BytesWritten);
+            Assert.SequenceEqual(originalBytes, await File.ReadAllBytesAsync(destination));
+            Assert.False(File.Exists(destination + ".transcoding.mp3"));
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Test]
     public static void ValidatorRejectsNonMp3Bytes()
     {
         var path = Path.Combine(Path.GetTempPath(), $"tubeforge-invalid-{Guid.NewGuid():N}.mp3");
