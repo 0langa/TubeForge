@@ -16,6 +16,11 @@ public static class YouTubeMetadataResolverTests
             Path.Combine(AppContext.BaseDirectory, "Fixtures", "watch-page-basic.html"));
         using var handler = new StubHandler(request =>
         {
+            if (request.Method == HttpMethod.Post || request.RequestUri?.AbsolutePath != "/watch")
+            {
+                return new HttpResponseMessage(HttpStatusCode.NotFound);
+            }
+
             Assert.Equal("www.youtube.com", request.RequestUri?.Host);
             Assert.Equal("Fixture123_", QueryValue(request.RequestUri!, "v"));
             Assert.True(request.Headers.UserAgent.Count > 0);
@@ -231,6 +236,74 @@ public static class YouTubeMetadataResolverTests
         Assert.Equal("Android metadata", result.Value.Metadata.Title);
         Assert.Equal(VideoContentKind.Short, result.Value.Metadata.ContentKind);
         Assert.Equal("AndroidClientResolved", result.Value.Diagnostics?.Stage);
+        Assert.Equal(2, requestCount);
+    }
+
+    [Test]
+    public static async Task AugmentsLowProgressiveWatchFormatWithHighestAdaptiveClientPair()
+    {
+        const string watchPage = """
+            <script>
+            var ytInitialPlayerResponse={
+              "playabilityStatus":{"status":"OK"},
+              "videoDetails":{"videoId":"Fixture123_","title":"Watch metadata","lengthSeconds":"10"},
+              "streamingData":{"formats":[{
+                "itag":18,
+                "url":"https://fixture.googlevideo.com/videoplayback?id=watch&itag=18",
+                "mimeType":"video/mp4; codecs=\"avc1.42001E, mp4a.40.2\"",
+                "width":640,"height":360,"contentLength":"10"
+              }]}
+            };
+            ytcfg.set({"INNERTUBE_API_KEY":"fixturePublicConfig","VISITOR_DATA":"fixtureVisitor"});
+            </script>
+            """;
+        const string playerResponse = """
+            {
+              "playabilityStatus":{"status":"OK"},
+              "videoDetails":{"videoId":"Fixture123_","title":"Android metadata","lengthSeconds":"10"},
+              "streamingData":{
+                "formats":[{
+                  "itag":18,
+                  "url":"https://fixture.googlevideo.com/videoplayback?id=android&itag=18",
+                  "mimeType":"video/mp4; codecs=\"avc1.42001E, mp4a.40.2\"",
+                  "width":640,"height":360,"contentLength":"10"
+                }],
+                "adaptiveFormats":[{
+                  "itag":401,
+                  "url":"https://fixture.googlevideo.com/videoplayback?id=android&itag=401",
+                  "mimeType":"video/mp4; codecs=\"av01.0.12M.08\"",
+                  "width":3840,"height":2160,"fps":60,"bitrate":15000000,"contentLength":"100"
+                },{
+                  "itag":140,
+                  "url":"https://fixture.googlevideo.com/videoplayback?id=android&itag=140",
+                  "mimeType":"audio/mp4; codecs=\"mp4a.40.2\"",
+                  "bitrate":130000,"audioSampleRate":"44100","contentLength":"20"
+                }]
+              }
+            }
+            """;
+        var requestCount = 0;
+        using var handler = new StubHandler(request =>
+        {
+            requestCount++;
+            return request.Method == HttpMethod.Get
+                ? new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(watchPage) }
+                : new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(playerResponse) };
+        });
+        using var client = new HttpClient(handler);
+        var resolver = new YouTubeMetadataResolver(client);
+        Assert.True(YouTubeVideoId.TryCreate("Fixture123_", out var videoId));
+
+        var result = await resolver.ResolveAsync(videoId);
+
+        Assert.True(result.IsSuccess, result.Error?.Message);
+        var selection = AdaptiveFormatSelector.SelectBest(result.Value.Metadata.Formats);
+        Assert.Equal(3, result.Value.Metadata.Formats.Count);
+        Assert.Equal(1, result.Value.Metadata.Formats.Count(format => format.FormatId == 18));
+        Assert.Equal("AndroidClientAugmented", result.Value.Diagnostics?.Stage);
+        Assert.True(selection?.RequiresMuxing == true);
+        Assert.Equal(401, selection!.Video.FormatId);
+        Assert.Equal(140, selection.Audio!.FormatId);
         Assert.Equal(2, requestCount);
     }
 

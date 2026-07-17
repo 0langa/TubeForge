@@ -57,25 +57,26 @@ public sealed class YouTubeMetadataResolver(HttpClient httpClient)
                 return watchResult;
             }
 
-            if (watchResult.Value.Metadata.Formats.Count > 0)
-            {
-                return watchResult.Value.PlayerScriptUrl is not null &&
-                       HasThrottlingParameter(watchResult.Value)
-                    ? await TryResolvePlayerTransformsAsync(
-                        html,
-                        watchResult.Value,
-                        url,
-                        timeoutSource.Token).ConfigureAwait(false)
-                    : watchResult;
-            }
-
             var clientResult = await TryResolveWithAndroidClientAsync(
                 html,
                 watchResult.Value,
                 timeoutSource.Token).ConfigureAwait(false);
             if (clientResult is not null && clientResult.Metadata.Formats.Count > 0)
             {
-                return Result<WatchPageData>.Success(clientResult);
+                return Result<WatchPageData>.Success(MergeClientFormats(watchResult.Value, clientResult));
+            }
+
+            if (watchResult.Value.Metadata.Formats.Count > 0)
+            {
+                return watchResult.Value.PlayerScriptUrl is not null &&
+                       (HasThrottlingParameter(watchResult.Value) ||
+                        watchResult.Value.CipheredFormatCount > 0)
+                    ? await TryResolvePlayerTransformsAsync(
+                        html,
+                        watchResult.Value,
+                        url,
+                        timeoutSource.Token).ConfigureAwait(false)
+                    : watchResult;
             }
 
             if (watchResult.Value.CipheredFormatCount == 0 ||
@@ -123,6 +124,28 @@ public sealed class YouTubeMetadataResolver(HttpClient httpClient)
                 exception.GetType().Name,
                 IsTransient: true));
         }
+    }
+
+    private static WatchPageData MergeClientFormats(WatchPageData watchPage, WatchPageData client)
+    {
+        if (watchPage.Metadata.Formats.Count == 0)
+        {
+            return client;
+        }
+
+        var clientFormatIds = client.Metadata.Formats
+            .Select(format => format.FormatId)
+            .ToHashSet();
+        var formats = client.Metadata.Formats
+            .Concat(watchPage.Metadata.Formats.Where(format => !clientFormatIds.Contains(format.FormatId)))
+            .ToArray();
+        return client with
+        {
+            Metadata = client.Metadata with { Formats = formats },
+            PlayerScriptUrl = watchPage.PlayerScriptUrl ?? client.PlayerScriptUrl,
+            CipheredFormatCount = Math.Max(watchPage.CipheredFormatCount, client.CipheredFormatCount),
+            Diagnostics = new ExtractionDiagnostics("AndroidClientAugmented")
+        };
     }
 
     private async Task<WatchPageData?> TryResolveWithAndroidClientAsync(
