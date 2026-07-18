@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.2.1 - 2026-07-18
+
+- Bundle pinned x64 LGPL FFmpeg (8.1.2, verified SHA-256, license, source, and build provenance) and finalize MP4 outputs with `-c copy` and `+faststart`, converting YouTube fragmented DASH MP4 into conventional indexed MP4 without re-encoding.
+- Route WebM adaptive muxing (VP9/AV1 + Opus/Vorbis) through FFmpeg stream-copy as well, giving every 1440p/4K/8K quality the same proven reliability as MP4; keep the in-house Mp4/WebM muxers as the FFmpeg-absent fallback.
+- Add lossless Matroska (MKV) output as a cross-container fallback so any video codec can pair with the best available audio track when no same-container audio family exists; native MP4/WebM output is unchanged when both audio families are present.
+- Stop silently dropping video qualities that lack a same-container audio companion; pair them across containers and mux into MKV instead.
+- Fail closed instead of publishing MP4, WebM, or MKV output when bundled FFmpeg is absent, exits non-zero, or leaves fragmented/non-indexed structure.
+- Recover validated MP4/WebM/MKV output after a crash between atomic publication and queue checkpoint without redownloading tracks.
+- Add deterministic process-boundary tests plus live packet/decode/Windows-media verification for the FFmpeg finalization paths.
+
 ## 1.1.7 - 2026-07-17
 
 - Stop rewriting unchanged resume metadata after every bounded media range.

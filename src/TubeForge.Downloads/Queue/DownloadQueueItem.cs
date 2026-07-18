@@ -18,6 +18,8 @@ public sealed record DownloadQueueItem
 
     public long BytesReceived { get; init; }
 
+    public int AttemptCount { get; init; }
+
     public DownloadQueueStatus Status { get; init; }
 
     public required DateTimeOffset CreatedAtUtc { get; init; }

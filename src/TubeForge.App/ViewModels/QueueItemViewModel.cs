@@ -111,7 +111,8 @@ public sealed class QueueItemViewModel : INotifyPropertyChanged
             var failure = string.IsNullOrWhiteSpace(_item.FailureCode)
                 ? string.Empty
                 : $" · {_item.FailureCode}";
-            return $"{FormatBytes(_liveBytes)}{expected}{failure}";
+            var attempt = _item.AttemptCount > 1 ? $" · attempt {_item.AttemptCount}" : string.Empty;
+            return $"{FormatBytes(_liveBytes)}{expected}{attempt}{failure}";
         }
     }
 

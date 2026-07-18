@@ -1,6 +1,6 @@
 # Installation, upgrades, and removal
 
-TubeForge v1.1 provides a recommended per-user installer and portable ZIP distributions. Neither option adds a Windows service or modifies `PATH`.
+TubeForge provides a recommended per-user installer and portable ZIP distributions. Neither option adds a Windows service or modifies `PATH`.
 
 ## Choose a build
 
@@ -10,14 +10,14 @@ TubeForge v1.1 provides a recommended per-user installer and portable ZIP distri
 
 Both builds target Windows 10/11 x64. Extract the whole archive; do not run `TubeForge.exe` from inside the ZIP.
 
-The self-contained release build restores only the exact Microsoft .NET runtime packs selected by the pinned SDK from the official NuGet feed. Application projects still reject every `PackageReference`; no third-party application package is introduced.
+The self-contained release build restores only the exact Microsoft .NET runtime packs selected by the pinned SDK from the official NuGet feed. Application projects still reject every `PackageReference`. Every x64 distribution also contains `ffmpeg/ffmpeg.exe`, pinned by SHA-256 and used only as a separate process for MP4 stream-copy finalization. Licenses and exact source/build provenance ship beside it and in [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md).
 
 ## Verify and install
 
 Keep the downloaded installer or ZIP and `SHA256SUMS.txt` in the same directory. In PowerShell:
 
 ```powershell
-$version = '1.1.7'
+$version = '1.2.1'
 $name = "TubeForge-$version-win-x64-setup.exe"
 $expected = (Get-Content .\SHA256SUMS.txt | Where-Object { $_ -match "  $([regex]::Escape($name))$" }).Split(' ')[0]
 $actual = (Get-FileHash -LiteralPath ".\$name" -Algorithm SHA256).Hash
@@ -47,14 +47,14 @@ gh attestation verify ".\$name" -R 0langa/TubeForge
 
 Portable users should verify and extract the new archive to a sibling directory. Keep the prior portable directory until the new version has completed an analyze/download smoke test.
 
-Portable rollback uses the previous version directory. Installer rollback requires reinstalling a previously verified setup asset. A release that changes a persistence schema must document downgrade compatibility in its release notes. v1.1 uses schema version 1 for settings, queue, and Library history.
+Portable rollback uses the previous version directory. Installer rollback requires reinstalling a previously verified setup asset. Settings and queue schema v1 files migrate in memory to schema v2 and are written as v2 on the next save; Library history remains schema v1. Downgrading after TubeForge writes schema v2 settings or queue state is unsupported, so keep the newer installer available.
 
 ## Local data and retention
 
 TubeForge stores application state in `%LOCALAPPDATA%\TubeForge`:
 
-- `settings.json`: download directory, filename template, concurrency, segmented-transfer preference, responsible-use acknowledgement;
-- `queue.json`: video IDs, display titles, format identities, destination paths, byte counts, timestamps, and failure codes;
+- `settings.json`: download directory, filename template, concurrency, segmented-transfer preference, Library sort preference, responsible-use acknowledgement;
+- `queue.json`: video IDs, display titles, format identities, destination paths, byte counts, attempt counts, timestamps, and failure codes;
 - `history.json`: completed video IDs, display titles, format identities, destination paths, sizes, and timestamps;
 - `.bak` and `.pending` siblings: crash-recovery copies of those stores.
 

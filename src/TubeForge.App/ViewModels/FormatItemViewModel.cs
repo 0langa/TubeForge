@@ -6,6 +6,10 @@ public sealed record FormatItemViewModel(StreamFormat Format, StreamFormat? Audi
 {
     public bool RequiresMuxing => AudioFormat is not null;
 
+    public MediaContainer OutputContainer => AudioFormat is null
+        ? Format.Container
+        : AdaptiveFormatSelector.ResolveOutputContainer(Format, AudioFormat) ?? Format.Container;
+
     public string Label => FormatDisplay.Label(DisplayFormat());
 
     public string TechnicalLabel => string.Join(" · ", new[]
@@ -14,7 +18,14 @@ public sealed record FormatItemViewModel(StreamFormat Format, StreamFormat? Audi
         {
             StreamKind.Progressive => "ready to play",
             StreamKind.AudioOnly => "native audio",
-            StreamKind.VideoOnly when RequiresMuxing => "muxed locally; no re-encoding",
+            StreamKind.VideoOnly when RequiresMuxing => OutputContainer switch
+            {
+                MediaContainer.Mkv => "MKV stream copy; no re-encoding",
+                MediaContainer.WebM => "WebM stream copy; no re-encoding",
+                _ => "indexed MP4 stream copy; no re-encoding"
+            },
+            StreamKind.VideoOnly when Format.Container == MediaContainer.Mp4 =>
+                "video track only; indexed MP4 stream copy",
             StreamKind.VideoOnly => "video track only",
             _ => "stream"
         },
@@ -55,6 +66,7 @@ public sealed record FormatItemViewModel(StreamFormat Format, StreamFormat? Audi
         ? Format with
         {
             Kind = StreamKind.Progressive,
+            Container = OutputContainer,
             AudioCodec = AudioFormat!.AudioCodec,
             ContentLength = CombinedLength()
         }

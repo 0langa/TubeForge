@@ -6,7 +6,9 @@ param(
 
     [string] $ReleaseDirectory,
 
-    [switch] $SkipLaunch
+    [switch] $SkipLaunch,
+
+    [switch] $RequireAuthenticode
 )
 
 $scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -84,6 +86,8 @@ if (Test-Path -LiteralPath $verificationRoot) {
 [void](New-Item -ItemType Directory -Path $verificationRoot)
 
 try {
+    $manifest = Get-Content -LiteralPath (Join-Path $releaseRoot "TubeForge-$Version-manifest.json") -Raw |
+        ConvertFrom-Json
     foreach ($model in @('framework-dependent', 'self-contained')) {
         $archivePath = Join-Path $releaseRoot "TubeForge-$Version-win-x64-$model.zip"
         $destination = Join-Path $verificationRoot $model
@@ -92,10 +96,43 @@ try {
         if (-not (Test-Path -LiteralPath (Join-Path $destination 'TubeForge.exe') -PathType Leaf)) {
             throw "$model archive does not contain TubeForge.exe."
         }
+        $ffmpeg = Join-Path $destination 'ffmpeg\ffmpeg.exe'
+        foreach ($required in @(
+            $ffmpeg,
+            (Join-Path $destination 'ffmpeg\FFmpeg-LICENSE.txt'),
+            (Join-Path $destination 'ffmpeg\FFmpeg-Builds-LICENSE.txt'),
+            (Join-Path $destination 'ffmpeg\BUILD-PROVENANCE.txt'),
+            (Join-Path $destination 'THIRD_PARTY_NOTICES.md')
+        )) {
+            if (-not (Test-Path -LiteralPath $required -PathType Leaf)) {
+                throw "$model archive is missing required FFmpeg payload: $required"
+            }
+        }
+        $ffmpegVersion = & $ffmpeg -version
+        if ($LASTEXITCODE -ne 0 -or
+            $ffmpegVersion[0] -notmatch '^ffmpeg version n8\.1\.2-22-g94138f6973-20260717' -or
+            $ffmpegVersion -match '--enable-gpl') {
+            throw "$model archive contains an unexpected FFmpeg build."
+        }
 
         $coreRuntime = Test-Path -LiteralPath (Join-Path $destination 'coreclr.dll') -PathType Leaf
         if (($model -eq 'self-contained') -ne $coreRuntime) {
             throw "$model archive has an unexpected runtime dependency layout."
+        }
+
+        $manifestArtifact = @($manifest.artifacts | Where-Object { $_.dependencyModel -eq $model })
+        if ($manifestArtifact.Count -ne 1) {
+            throw "$model archive has no unique release-manifest record."
+        }
+        $signed = [bool]$manifestArtifact[0].authenticodeSigned
+        if ($RequireAuthenticode -and -not $signed) {
+            throw "$model archive is not declared Authenticode-signed."
+        }
+        if ($signed) {
+            $signature = Get-AuthenticodeSignature -LiteralPath (Join-Path $destination 'TubeForge.exe')
+            if ($signature.Status -ne [Management.Automation.SignatureStatus]::Valid) {
+                throw "$model TubeForge.exe signature is not valid: $($signature.Status)"
+            }
         }
     }
 

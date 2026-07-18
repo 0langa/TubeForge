@@ -1,5 +1,6 @@
 using TubeForge.Downloads.Queue;
 using TubeForge.Tests.Framework;
+using System.Text.Json;
 
 namespace TubeForge.Tests.Downloads;
 
@@ -75,6 +76,45 @@ public static class DownloadQueueStoreTests
         Assert.False(result.IsSuccess);
         Assert.Equal("Queue.Corrupt", result.Error?.Code);
         Assert.Equal("{not-json", await File.ReadAllTextAsync(path));
+    }
+
+    [Test]
+    public static async Task MigratesPublishedSchemaOneQueueAndPreservesDownloadState()
+    {
+        using var directory = new TestDirectory();
+        var path = Path.Combine(directory.Path, "queue.json");
+        var now = new DateTimeOffset(2026, 7, 16, 12, 0, 0, TimeSpan.Zero);
+        var legacy = new
+        {
+            schemaVersion = 1,
+            items = new[]
+            {
+                new
+                {
+                    id = Guid.Parse("11111111-1111-1111-1111-111111111111"),
+                    videoId = "Fixture123_",
+                    formatId = 22,
+                    sourceIdentity = "Fixture123_:22",
+                    displayTitle = "Synthetic fixture",
+                    destinationPath = Path.Combine(Path.GetTempPath(), "TubeForge.Tests", "fixture.mp4"),
+                    expectedLength = 1024L,
+                    bytesReceived = 512L,
+                    status = DownloadQueueStatus.Paused,
+                    createdAtUtc = now,
+                    updatedAtUtc = now,
+                    failureCode = (string?)null
+                }
+            }
+        };
+        await File.WriteAllTextAsync(path, JsonSerializer.Serialize(legacy));
+
+        var loaded = await new DownloadQueueStore(path).LoadAsync();
+
+        Assert.True(loaded.IsSuccess, loaded.Error?.Message);
+        Assert.Equal(DownloadQueueSnapshot.CurrentSchemaVersion, loaded.Value.SchemaVersion);
+        Assert.Equal(0, loaded.Value.Items[0].AttemptCount);
+        Assert.Equal(512L, loaded.Value.Items[0].BytesReceived);
+        Assert.Equal(DownloadQueueStatus.Paused, loaded.Value.Items[0].Status);
     }
 
     [Test]

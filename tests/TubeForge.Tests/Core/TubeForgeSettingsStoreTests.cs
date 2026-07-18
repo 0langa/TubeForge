@@ -1,5 +1,6 @@
 using TubeForge.Core.Settings;
 using TubeForge.Tests.Framework;
+using System.Text.Json;
 
 namespace TubeForge.Tests.Core;
 
@@ -62,6 +63,31 @@ public static class TubeForgeSettingsStoreTests
         Assert.False(corrupt.IsSuccess);
         Assert.Equal("Settings.Corrupt", corrupt.Error?.Code);
         Assert.Equal("{ malformed", await File.ReadAllTextAsync(path));
+    }
+
+    [Test]
+    public static async Task MigratesPublishedSchemaOneSettingsWithStableDefaults()
+    {
+        using var directory = new TestDirectory();
+        var path = Path.Combine(directory.Path, "settings.json");
+        await File.WriteAllTextAsync(path, JsonSerializer.Serialize(new
+        {
+            schemaVersion = 1,
+            downloadFolder = Path.GetFullPath(directory.Path),
+            maximumConcurrentDownloads = 3,
+            fileNameTemplate = "{title}",
+            enableSegmentedTransfers = true,
+            enableAutomaticUpdateChecks = false,
+            responsibleUseAccepted = true
+        }));
+
+        var loaded = await new TubeForgeSettingsStore(path).LoadAsync(Settings(directory.Path));
+
+        Assert.True(loaded.IsSuccess, loaded.Error?.Message);
+        Assert.Equal(TubeForgeSettings.CurrentSchemaVersion, loaded.Value.SchemaVersion);
+        Assert.Equal(LibrarySortOrder.NewestFirst, loaded.Value.LibrarySortOrder);
+        Assert.Equal(3, loaded.Value.MaximumConcurrentDownloads);
+        Assert.True(loaded.Value.EnableSegmentedTransfers);
     }
 
     private static TubeForgeSettings Settings(string folder) => new()

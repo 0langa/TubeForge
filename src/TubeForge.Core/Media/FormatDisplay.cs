@@ -48,6 +48,7 @@ public static class FormatDisplay
         MediaContainer.Mp4 => ".mp4",
         MediaContainer.WebM => ".webm",
         MediaContainer.ThreeGp => ".3gp",
+        MediaContainer.Mkv => ".mkv",
         _ => ".bin"
     };
 
@@ -61,6 +62,7 @@ public static class FormatDisplay
         MediaContainer.Mp4 => "MP4",
         MediaContainer.WebM => "WebM",
         MediaContainer.ThreeGp => "3GP",
+        MediaContainer.Mkv => "MKV",
         _ => "Unknown"
     };
 

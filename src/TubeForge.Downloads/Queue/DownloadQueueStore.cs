@@ -246,6 +246,7 @@ public sealed class DownloadQueueStore
                 return Corrupt();
             }
 
+            snapshot = Migrate(snapshot);
             var validation = Validate(snapshot);
             return validation is null
                 ? Result<DownloadQueueSnapshot>.Success(snapshot)
@@ -313,6 +314,7 @@ public sealed class DownloadQueueStore
                 !IsSafeDestination(item.DestinationPath) ||
                 item.ExpectedLength is <= 0 ||
                 item.BytesReceived < 0 ||
+                item.AttemptCount is < 0 or > 100_000 ||
                 item.ExpectedLength is not null &&
                     item.BytesReceived > item.ExpectedLength &&
                     !IsCompletedConvertedOutput(item, sourceIdentity) ||
@@ -327,6 +329,16 @@ public sealed class DownloadQueueStore
 
         return null;
     }
+
+    private static DownloadQueueSnapshot Migrate(DownloadQueueSnapshot snapshot) => snapshot.SchemaVersion switch
+    {
+        1 => snapshot with
+        {
+            SchemaVersion = DownloadQueueSnapshot.CurrentSchemaVersion,
+            Items = snapshot.Items?.Select(item => item with { AttemptCount = 0 }).ToArray()!
+        },
+        _ => snapshot
+    };
 
     private static bool IsCompletedConvertedOutput(
         DownloadQueueItem item,

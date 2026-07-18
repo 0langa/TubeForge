@@ -144,7 +144,7 @@
                     </StackPanel>
                     <Border HorizontalAlignment="Right" VerticalAlignment="Top" Background="#10251F"
                             BorderBrush="#245E4B" BorderThickness="1" CornerRadius="12" Padding="10,6">
-                        <TextBlock Text="●  ZERO DEPENDENCIES" FontSize="10" FontWeight="Bold"
+                        <TextBlock Text="●  COMPATIBLE MP4" FontSize="10" FontWeight="Bold"
                                    Foreground="{StaticResource SuccessBrush}" />
                     </Border>
                 </Grid>
@@ -601,11 +601,42 @@
                 </Grid>
 
                 <Border Grid.Row="2" Style="{StaticResource Card}">
-                    <StackPanel>
-                        <TextBlock Text="HISTORY STORAGE" Style="{StaticResource FieldLabel}" />
-                        <TextBlock Text="{Binding HistoryStoragePath}" Margin="0,6,0,0" FontSize="10"
-                                   Foreground="{StaticResource MutedTextBrush}" TextWrapping="Wrap" />
-                    </StackPanel>
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="10" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="12" />
+                                <ColumnDefinition Width="190" />
+                                <ColumnDefinition Width="12" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <StackPanel>
+                                <TextBlock Text="SEARCH LIBRARY" Style="{StaticResource FieldLabel}" />
+                                <TextBox Text="{Binding LibrarySearchText, UpdateSourceTrigger=PropertyChanged}"
+                                         Margin="0,5,0,0" AutomationProperties.Name="Search completed downloads" />
+                            </StackPanel>
+                            <StackPanel Grid.Column="2">
+                                <TextBlock Text="SORT" Style="{StaticResource FieldLabel}" />
+                                <ComboBox ItemsSource="{Binding LibrarySortOptions}"
+                                          SelectedItem="{Binding SelectedLibrarySort}"
+                                          DisplayMemberPath="Label" Margin="0,5,0,0"
+                                          AutomationProperties.Name="Sort completed downloads" />
+                            </StackPanel>
+                            <Button Grid.Column="4" Style="{StaticResource SecondaryButton}"
+                                    Content="Remove missing" Command="{Binding RemoveMissingHistoryCommand}"
+                                    Padding="13,9" VerticalAlignment="Bottom" />
+                        </Grid>
+                        <StackPanel Grid.Row="2">
+                            <TextBlock Text="HISTORY STORAGE" Style="{StaticResource FieldLabel}" />
+                            <TextBlock Text="{Binding HistoryStoragePath}" Margin="0,6,0,0" FontSize="10"
+                                       Foreground="{StaticResource MutedTextBrush}" TextWrapping="Wrap" />
+                        </StackPanel>
+                    </Grid>
                 </Border>
 
                 <Border Grid.Row="4">
@@ -620,7 +651,7 @@
                     </Border.Style>
                     <StackPanel HorizontalAlignment="Center" Margin="20">
                         <TextBlock Text="Library empty" FontSize="17" FontWeight="SemiBold" HorizontalAlignment="Center" />
-                        <TextBlock Text="Completed downloads appear here and remain recorded after queue cleanup."
+                        <TextBlock Text="{Binding HistoryEmptyMessage}"
                                    Margin="0,7,0,0" Foreground="{StaticResource MutedTextBrush}" />
                     </StackPanel>
                 </Border>
@@ -888,7 +919,7 @@
                                 <TextBlock Text="OUTPUT PREFERENCE" Style="{StaticResource FieldLabel}" />
                                 <TextBlock Text="MP4 preferred when video quality is equal; higher-quality WebM remains available."
                                            Margin="0,6,0,0" TextWrapping="Wrap" Foreground="#A8B7CE" />
-                                <TextBlock Text="Tracks are muxed without re-encoding. No FFmpeg or yt-dlp."
+                                <TextBlock Text="FFmpeg stream-copies tracks into indexed MP4; no video/audio re-encoding. No yt-dlp."
                                            Margin="0,4,0,0" FontSize="10" Foreground="{StaticResource MutedTextBrush}" />
                             </StackPanel>
                         </Border>

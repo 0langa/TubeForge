@@ -4,7 +4,14 @@ param(
     [ValidatePattern('^\d+\.\d+\.\d+$')]
     [string] $Version,
 
-    [string] $OutputDirectory
+    [string] $OutputDirectory,
+
+    [string] $FfmpegCacheDirectory,
+
+    [ValidatePattern('^[0-9A-Fa-f]{40,64}$')]
+    [string] $CertificateThumbprint,
+
+    [uri] $TimestampServer
 )
 
 Set-StrictMode -Version Latest
@@ -41,6 +48,46 @@ function Invoke-DotNet([string[]] $Arguments) {
     }
 }
 
+function Get-CodeSigningCertificate([string] $Thumbprint) {
+    foreach ($store in @('CurrentUser', 'LocalMachine')) {
+        $path = "Cert:\$store\My\$Thumbprint"
+        if (Test-Path -LiteralPath $path) {
+            $certificate = Get-Item -LiteralPath $path
+            $codeSigningOid = '1.3.6.1.5.5.7.3.3'
+            $canSignCode = $certificate.HasPrivateKey -and
+                $certificate.NotBefore -le [DateTime]::UtcNow -and
+                $certificate.NotAfter -gt [DateTime]::UtcNow -and
+                $certificate.EnhancedKeyUsageList.ObjectId.Value -contains $codeSigningOid
+            if (-not $canSignCode) {
+                throw 'The selected certificate is not a currently valid code-signing certificate with a private key.'
+            }
+            return $certificate
+        }
+    }
+
+    throw 'The requested code-signing certificate was not found in CurrentUser or LocalMachine Personal stores.'
+}
+
+function Sign-Application(
+    [string] $Path,
+    [Security.Cryptography.X509Certificates.X509Certificate2] $Certificate
+) {
+    $parameters = @{
+        LiteralPath = $Path
+        Certificate = $Certificate
+        HashAlgorithm = 'SHA256'
+        IncludeChain = 'NotRoot'
+    }
+    if ($TimestampServer) {
+        $parameters.TimestampServer = $TimestampServer.AbsoluteUri
+    }
+
+    $signature = Set-AuthenticodeSignature @parameters
+    if ($signature.Status -ne [Management.Automation.SignatureStatus]::Valid) {
+        throw "Authenticode signing failed for $Path with status $($signature.Status)."
+    }
+}
+
 function New-PayloadZip([string] $SourceDirectory, [string] $ArchivePath) {
     Add-Type -AssemblyName System.IO.Compression
     $stream = [IO.File]::Open($ArchivePath, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write)
@@ -71,6 +118,13 @@ if (Test-Path -LiteralPath $staging) {
 [void](New-Item -ItemType Directory -Path $setupDirectory -Force)
 
 try {
+    $certificate = if ($CertificateThumbprint) {
+        Get-CodeSigningCertificate -Thumbprint $CertificateThumbprint
+    }
+    else {
+        $null
+    }
+
     Invoke-DotNet @(
         'publish', (Join-Path $repoRoot 'src\TubeForge.App\TubeForge.App.csproj'),
         '--configuration', 'Release', '--runtime', 'win-x64', '--self-contained', 'true',
@@ -78,6 +132,17 @@ try {
         '--output', $appDirectory, "-p:Version=$Version", '-p:PublishSingleFile=false',
         '-p:PublishTrimmed=false', '-p:PublishReadyToRun=false'
     )
+
+    $applicationPath = Join-Path $appDirectory 'TubeForge.exe'
+    if (-not (Test-Path -LiteralPath $applicationPath -PathType Leaf)) {
+        throw 'Application publish did not produce TubeForge.exe.'
+    }
+    if ($certificate) {
+        Sign-Application -Path $applicationPath -Certificate $certificate
+    }
+    & (Join-Path $scriptRoot 'Stage-FFmpeg.ps1') `
+        -DestinationDirectory $appDirectory `
+        -CacheDirectory $FfmpegCacheDirectory
 
     $files = foreach ($file in (Get-ChildItem -LiteralPath $appDirectory -File -Recurse | Sort-Object FullName)) {
         [ordered]@{
@@ -107,6 +172,9 @@ try {
     $setupName = "TubeForge-$Version-win-x64-setup.exe"
     $setupPath = Join-Path $outputRoot $setupName
     Copy-Item -LiteralPath (Join-Path $setupDirectory 'TubeForge.Setup.exe') -Destination $setupPath -Force
+    if ($certificate) {
+        Sign-Application -Path $setupPath -Certificate $certificate
+    }
     $hash = (Get-FileHash -LiteralPath $setupPath -Algorithm SHA256).Hash.ToLowerInvariant()
     [IO.File]::WriteAllText((Join-Path $outputRoot 'SHA256SUMS.txt'), "$hash  $setupName`n", $utf8NoBom)
     Write-Output $setupPath

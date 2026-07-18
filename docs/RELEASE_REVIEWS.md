@@ -48,7 +48,7 @@ Status: implementation review pass; no claim of third-party certification.
 ## Release decision gates
 
 - Clean Release build and formatter gate.
-- Full dependency-free test suite.
+- Full package-free test suite plus pinned FFmpeg process-boundary and release-payload checks.
 - Core and desktop performance budgets.
 - Framework-dependent and self-contained artifact verification.
 - SHA-256 manifest verification.

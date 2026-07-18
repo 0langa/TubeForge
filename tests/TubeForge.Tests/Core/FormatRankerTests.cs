@@ -129,7 +129,7 @@ public static class FormatRankerTests
     }
 
     [Test]
-    public static void UsesProgressiveFallbackOnlyWhenNoCompatibleAdaptivePairExists()
+    public static void MuxesHighestVideoWithCrossContainerAudioIntoMkvInsteadOfLowProgressive()
     {
         var formats = new[]
         {
@@ -147,9 +147,54 @@ public static class FormatRankerTests
         var selection = AdaptiveFormatSelector.SelectBest(formats);
 
         Assert.True(selection is not null);
+        Assert.True(selection!.RequiresMuxing);
+        Assert.Equal(401, selection.Video.FormatId);
+        Assert.Equal(251, selection.Audio!.FormatId);
+        Assert.Equal(MediaContainer.Mkv, selection.OutputContainer);
+    }
+
+    [Test]
+    public static void UsesProgressiveFallbackOnlyWhenNoAudioTrackExists()
+    {
+        var formats = new[]
+        {
+            Format(18, StreamKind.Progressive, MediaContainer.Mp4, 360, 700_000),
+            Format(401, StreamKind.VideoOnly, MediaContainer.Mp4, 2160, 15_000_000) with
+            {
+                VideoCodec = VideoCodec.Av1
+            }
+        };
+
+        var selection = AdaptiveFormatSelector.SelectBest(formats);
+
+        Assert.True(selection is not null);
         Assert.False(selection!.RequiresMuxing);
         Assert.Equal(18, selection.Video.FormatId);
         Assert.True(selection.Audio is null);
+    }
+
+    [Test]
+    public static void PrefersNativeContainerOverMkvWhenBothAudioFamiliesExist()
+    {
+        var vp9 = Format(248, StreamKind.VideoOnly, MediaContainer.WebM, 1080, 5_000_000) with
+        {
+            VideoCodec = VideoCodec.Vp9
+        };
+        var aac = Format(140, StreamKind.AudioOnly, MediaContainer.Mp4, null, 256_000);
+        var opus = Format(251, StreamKind.AudioOnly, MediaContainer.WebM, null, 160_000) with
+        {
+            AudioCodec = AudioCodec.Opus
+        };
+
+        // VP9 pairs natively with Opus (WebM), not the higher-bitrate cross-container AAC.
+        var companion = AdaptiveFormatSelector.SelectCompanionAudio(vp9, [aac, opus]);
+        Assert.Equal(251, companion!.FormatId);
+        Assert.Equal(MediaContainer.WebM, AdaptiveFormatSelector.ResolveOutputContainer(vp9, companion));
+
+        // With only AAC available, VP9 falls back to a lossless MKV mux.
+        var crossOnly = AdaptiveFormatSelector.SelectCompanionAudio(vp9, [aac]);
+        Assert.Equal(140, crossOnly!.FormatId);
+        Assert.Equal(MediaContainer.Mkv, AdaptiveFormatSelector.ResolveOutputContainer(vp9, crossOnly));
     }
 
     [Test]

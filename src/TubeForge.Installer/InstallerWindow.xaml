@@ -27,7 +27,7 @@
             <StackPanel>
                 <TextBlock x:Name="HeadingText" FontSize="21" FontWeight="SemiBold" />
                 <TextBlock Margin="0,12,0,0" TextWrapping="Wrap" LineHeight="21"
-                           Text="Installs for your Windows account only. No administrator rights, service, PATH change, advertising, or bundled third-party tools." />
+                           Text="Installs for your Windows account only. Includes pinned LGPL FFmpeg for reliable MP4 finalization. No administrator rights, service, PATH change, or advertising." />
                 <TextBlock Margin="0,20,0,5" FontSize="10" FontWeight="Bold" Foreground="{StaticResource MutedBrush}"
                            Text="INSTALL LOCATION" />
                 <TextBlock x:Name="InstallPathText" TextWrapping="Wrap" />

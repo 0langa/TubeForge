@@ -56,12 +56,21 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         new(CaptionOutputFormat.WebVtt, "WebVTT · native timed text", "vtt")
     ];
 
+    private static readonly IReadOnlyList<FilterOption<LibrarySortOrder>> LibrarySortChoices =
+    [
+        new("Newest first", LibrarySortOrder.NewestFirst),
+        new("Oldest first", LibrarySortOrder.OldestFirst),
+        new("Title A–Z", LibrarySortOrder.TitleAscending),
+        new("Largest first", LibrarySortOrder.LargestFirst)
+    ];
+
     private readonly HttpClient _httpClient;
     private readonly HttpClient _sidecarHttpClient;
     private readonly HttpClient _updateHttpClient;
     private readonly YouTubeMetadataResolver _resolver;
     private readonly DirectDownloadEngine _downloader;
     private readonly AdaptiveDownloadEngine _adaptiveDownloader;
+    private readonly FfmpegMediaProcessor _mediaProcessor;
     private readonly WindowsMediaFoundationTranscoder _audioTranscoder = new();
     private readonly CaptionDownloadEngine _captionDownloader;
     private readonly YouTubeCollectionResolver _collectionResolver;
@@ -119,6 +128,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     private bool _isInitialized;
     private bool _queueUnavailable;
     private bool _historyUnavailable;
+    private string _librarySearchText = string.Empty;
+    private FilterOption<LibrarySortOrder> _selectedLibrarySort = LibrarySortChoices[0];
     private string _downloadActionLabel = "Add to queue";
     private AppPage _activePage = AppPage.Download;
     private int _selectedMaxConcurrentDownloads = 2;
@@ -162,7 +173,9 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         _httpClient = new HttpClient(handler) { Timeout = Timeout.InfiniteTimeSpan };
         _resolver = new YouTubeMetadataResolver(_httpClient);
         _downloader = new DirectDownloadEngine(_httpClient);
-        _adaptiveDownloader = new AdaptiveDownloadEngine(_downloader);
+        _mediaProcessor = new FfmpegMediaProcessor(
+            FfmpegMediaProcessor.BundledExecutablePath(AppContext.BaseDirectory));
+        _adaptiveDownloader = new AdaptiveDownloadEngine(_downloader, _mediaProcessor);
         _captionDownloader = new CaptionDownloadEngine(_httpClient);
         _collectionResolver = new YouTubeCollectionResolver(_httpClient);
         var sidecarHandler = new SocketsHttpHandler
@@ -236,7 +249,12 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             DownloadUpdateAsync,
             () => _availableUpdate is not null && !IsCheckingForUpdate && !IsDownloadingUpdate);
         ClearCompletedCommand = new AsyncRelayCommand(ClearCompletedAsync, () => QueueItems.Any(item => item.Status == DownloadQueueStatus.Completed));
-        ClearHistoryCommand = new AsyncRelayCommand(ClearHistoryAsync, () => HistoryItems.Count > 0 || _historyUnavailable);
+        ClearHistoryCommand = new AsyncRelayCommand(
+            ClearHistoryAsync,
+            () => _historySnapshot.Entries.Count > 0 || _historyUnavailable);
+        RemoveMissingHistoryCommand = new AsyncRelayCommand(
+            RemoveMissingHistoryAsync,
+            () => _historySnapshot.Entries.Any(entry => !File.Exists(entry.DestinationPath)));
     }
 
     public event PropertyChangedEventHandler? PropertyChanged;
@@ -294,6 +312,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     public AsyncRelayCommand ClearCompletedCommand { get; }
 
     public AsyncRelayCommand ClearHistoryCommand { get; }
+
+    public AsyncRelayCommand RemoveMissingHistoryCommand { get; }
 
     public IReadOnlyList<int> MaxConcurrentDownloadOptions { get; } = [1, 2, 3, 4];
 
@@ -530,7 +550,9 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
 
     public string ProcessArchitecture => RuntimeInformation.ProcessArchitecture.ToString();
 
-    public string DependencyStatus => "No third-party packages or bundled executables";
+    public string DependencyStatus => _mediaProcessor.IsAvailable
+        ? "Bundled FFmpeg media engine available"
+        : "Bundled FFmpeg media engine missing — reinstall TubeForge";
 
     public string QueueStoragePath => _queueStore.StoragePath;
 
@@ -548,9 +570,45 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
 
     public bool HasHistory => HistoryItems.Count > 0;
 
-    public string HistorySummary => HistoryItems.Count == 1
-        ? "1 completed output"
-        : $"{HistoryItems.Count} completed outputs";
+    public string HistorySummary => HistoryItems.Count == _historySnapshot.Entries.Count
+        ? HistoryItems.Count == 1 ? "1 completed output" : $"{HistoryItems.Count} completed outputs"
+        : $"{HistoryItems.Count} matching · {_historySnapshot.Entries.Count} total";
+
+    public string HistoryEmptyMessage => _historySnapshot.Entries.Count == 0
+        ? "Completed downloads appear here and remain recorded after queue cleanup."
+        : "No downloads match the current Library search.";
+
+    public IReadOnlyList<FilterOption<LibrarySortOrder>> LibrarySortOptions => LibrarySortChoices;
+
+    public string LibrarySearchText
+    {
+        get => _librarySearchText;
+        set
+        {
+            if (Set(ref _librarySearchText, value ?? string.Empty))
+            {
+                RebuildHistoryItems();
+            }
+        }
+    }
+
+    public FilterOption<LibrarySortOrder> SelectedLibrarySort
+    {
+        get => _selectedLibrarySort;
+        set
+        {
+            if (value is null || !Set(ref _selectedLibrarySort, value))
+            {
+                return;
+            }
+
+            RebuildHistoryItems();
+            if (_isInitialized && value.Value is { } order)
+            {
+                _ = SaveLibrarySortOrderAsync(order);
+            }
+        }
+    }
 
     public string QueueSummary
     {
@@ -787,6 +845,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             OnPropertyChanged(nameof(EnableAutomaticUpdateChecks));
             _fileNameTemplate = _settings.FileNameTemplate;
             OnPropertyChanged(nameof(FileNameTemplateText));
+            _selectedLibrarySort = LibrarySortChoices.First(option => option.Value == _settings.LibrarySortOrder);
+            OnPropertyChanged(nameof(SelectedLibrarySort));
             ShowResponsibleUseNotice = !_settings.ResponsibleUseAccepted;
         }
         else
@@ -864,7 +924,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                 MaximumConcurrentDownloads = SelectedMaxConcurrentDownloads,
                 FileNameTemplate = FileNameTemplateText,
                 EnableSegmentedTransfers = EnableSegmentedTransfers,
-                EnableAutomaticUpdateChecks = EnableAutomaticUpdateChecks
+                EnableAutomaticUpdateChecks = EnableAutomaticUpdateChecks,
+                LibrarySortOrder = SelectedLibrarySort.Value ?? LibrarySortOrder.NewestFirst
             };
         }
         catch (Exception exception) when (exception is ArgumentException or NotSupportedException or PathTooLongException)
@@ -910,6 +971,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                 FileNameTemplate = FileNameTemplateText,
                 EnableSegmentedTransfers = EnableSegmentedTransfers,
                 EnableAutomaticUpdateChecks = EnableAutomaticUpdateChecks,
+                LibrarySortOrder = SelectedLibrarySort.Value ?? LibrarySortOrder.NewestFirst,
                 ResponsibleUseAccepted = true
             };
         }
@@ -1250,7 +1312,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                         DownloadFolder,
                         renderedName.Value,
                         selection.RequiresMuxing
-                            ? FormatDisplay.Extension(selection.Format.Container)
+                            ? FormatDisplay.Extension(selection.OutputContainer)
                             : FormatDisplay.OutputExtension(selection.Format),
                         path => File.Exists(path) ||
                                 File.Exists(path + ".part") ||
@@ -1322,7 +1384,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             .ToArray();
         var adaptiveVideos = formats
             .Where(format => format.Kind == StreamKind.VideoOnly &&
-                             audio.Any(candidate => AdaptiveFormatSelector.AreMuxCompatible(format, candidate)))
+                             audio.Any(candidate => AdaptiveFormatSelector.AreMkvMuxCompatible(format, candidate)))
             .OrderByDescending(format => format.Height ?? 0)
             .ThenByDescending(format => format.FramesPerSecond ?? 0)
             .ThenByDescending(format => format.IsHdr)
@@ -1331,8 +1393,11 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             .ThenBy(format => format.FormatId);
         foreach (var video in adaptiveVideos)
         {
-            var companion = audio.First(candidate => AdaptiveFormatSelector.AreMuxCompatible(video, candidate));
-            return new FormatItemViewModel(video, companion);
+            var companion = AdaptiveFormatSelector.SelectCompanionAudio(video, audio);
+            if (companion is not null)
+            {
+                return new FormatItemViewModel(video, companion);
+            }
         }
 
         var progressive = formats
@@ -1691,7 +1756,10 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                 work.Destination,
                 ForecastLength(work),
                 reservedBytes,
-                work.Selection.RequiresMuxing || work.Output.Kind == AudioOutputKind.Mp3);
+                !File.Exists(work.Destination) &&
+                (work.Selection.RequiresMuxing ||
+                 RequiresMp4Normalization(work.Selection) ||
+                 work.Output.Kind == AudioOutputKind.Mp3));
             if (!diskForecast.IsSuccess)
             {
                 await CompleteQueueRunAsync(
@@ -1742,6 +1810,13 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             }
             else if (work.Selection.AudioFormat is StreamFormat audioFormat)
             {
+                var outputContainer = work.Selection.OutputContainer;
+                StatusMessage = outputContainer switch
+                {
+                    MediaContainer.Mp4 => "Finalizing compatible MP4 · stream copy, no quality loss",
+                    MediaContainer.Mkv => "Muxing MKV tracks · stream copy, no quality loss",
+                    _ => "Muxing WebM tracks · no quality loss"
+                };
                 var result = await _adaptiveDownloader.DownloadAsync(new AdaptiveDownloadRequest
                 {
                     Video = TrackRequest(
@@ -1753,12 +1828,68 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                         audioFormat,
                         IntermediateTrackPath(work.Destination, "audio", audioFormat)),
                     DestinationPath = work.Destination,
-                    OutputContainer = work.Selection.Format.Container
+                    OutputContainer = outputContainer,
+                    AllowExistingValidatedOutput = true
                 }, progress, cancellation.Token);
                 downloadError = result.Error;
                 completedBytes = result.IsSuccess
                     ? result.Value.BytesWritten
                     : SelectionPartialLength(work.Destination, work.Selection, work.Output);
+            }
+            else if (RequiresMp4Normalization(work.Selection))
+            {
+                var sourcePath = IntermediateTrackPath(
+                    work.Destination,
+                    "video",
+                    work.Selection.Format);
+                if (File.Exists(work.Destination))
+                {
+                    var recovered = await _mediaProcessor.RemuxMp4Async(
+                        sourcePath,
+                        work.Destination,
+                        cancellation.Token,
+                        allowExistingValidatedOutput: true);
+                    downloadError = recovered.Error;
+                    completedBytes = recovered.IsSuccess
+                        ? recovered.Value.BytesWritten
+                        : SelectionPartialLength(work.Destination, work.Selection, work.Output);
+                    if (recovered.IsSuccess && File.Exists(sourcePath))
+                    {
+                        File.Delete(sourcePath);
+                    }
+                }
+                else
+                {
+                    var sourceResult = await EnsureTrackDownloadedAsync(
+                        TrackRequest(work.Metadata, work.Selection.Format, sourcePath),
+                        progress,
+                        cancellation.Token);
+                    if (!sourceResult.IsSuccess)
+                    {
+                        downloadError = sourceResult.Error;
+                        completedBytes = SelectionPartialLength(
+                            work.Destination,
+                            work.Selection,
+                            work.Output);
+                    }
+                    else
+                    {
+                        StatusMessage = "Finalizing compatible MP4 · stream copy, no quality loss";
+                        var processResult = await _mediaProcessor.RemuxMp4Async(
+                            sourcePath,
+                            work.Destination,
+                            cancellation.Token,
+                            allowExistingValidatedOutput: true);
+                        downloadError = processResult.Error;
+                        completedBytes = processResult.IsSuccess
+                            ? processResult.Value.BytesWritten
+                            : SelectionPartialLength(work.Destination, work.Selection, work.Output);
+                        if (processResult.IsSuccess)
+                        {
+                            File.Delete(sourcePath);
+                        }
+                    }
+                }
             }
             else
             {
@@ -1887,7 +2018,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         {
             audio = resolved.Value.Metadata.Formats.FirstOrDefault(format =>
                 format.FormatId == audioFormatId && format.Kind == StreamKind.AudioOnly);
-            if (audio is null || !AdaptiveFormatSelector.AreMuxCompatible(primary, audio))
+            if (audio is null || !AdaptiveFormatSelector.AreMkvMuxCompatible(primary, audio))
             {
                 return (null, new TubeForgeError(
                     "Queue.AudioFormatUnavailable",
@@ -2073,6 +2204,30 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
 
     private async Task ClearHistoryAsync() => await SaveHistoryEntriesAsync([]);
 
+    private async Task RemoveMissingHistoryAsync()
+    {
+        var existing = _historySnapshot.Entries
+            .Where(entry => File.Exists(entry.DestinationPath))
+            .ToArray();
+        await SaveHistoryEntriesAsync(existing);
+    }
+
+    private async Task SaveLibrarySortOrderAsync(LibrarySortOrder order)
+    {
+        var next = _settings with { LibrarySortOrder = order };
+        var result = await _settingsStore.SaveAsync(next);
+        if (!result.IsSuccess)
+        {
+            SettingsStatus = "Library sort preference could not be saved.";
+            return;
+        }
+
+        if (SelectedLibrarySort.Value == order)
+        {
+            _settings = next;
+        }
+    }
+
     private async Task SaveHistoryEntriesAsync(IReadOnlyList<DownloadHistoryEntry> entries)
     {
         await _historyMutationLock.WaitAsync();
@@ -2152,7 +2307,22 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     private void RebuildHistoryItems()
     {
         HistoryItems.Clear();
-        foreach (var entry in _historySnapshot.Entries.OrderByDescending(entry => entry.CompletedAtUtc))
+        var matching = _historySnapshot.Entries.Where(entry =>
+            string.IsNullOrWhiteSpace(LibrarySearchText) ||
+            entry.DisplayTitle.Contains(LibrarySearchText.Trim(), StringComparison.CurrentCultureIgnoreCase) ||
+            entry.DestinationPath.Contains(LibrarySearchText.Trim(), StringComparison.OrdinalIgnoreCase));
+        matching = SelectedLibrarySort.Value switch
+        {
+            LibrarySortOrder.OldestFirst => matching.OrderBy(entry => entry.CompletedAtUtc),
+            LibrarySortOrder.TitleAscending => matching
+                .OrderBy(entry => entry.DisplayTitle, StringComparer.CurrentCultureIgnoreCase)
+                .ThenByDescending(entry => entry.CompletedAtUtc),
+            LibrarySortOrder.LargestFirst => matching
+                .OrderByDescending(entry => entry.BytesWritten)
+                .ThenByDescending(entry => entry.CompletedAtUtc),
+            _ => matching.OrderByDescending(entry => entry.CompletedAtUtc)
+        };
+        foreach (var entry in matching)
         {
             HistoryItems.Add(new HistoryItemViewModel(entry, RevealDestination, RemoveHistoryItemAsync));
         }
@@ -2202,7 +2372,9 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     {
         OnPropertyChanged(nameof(HasHistory));
         OnPropertyChanged(nameof(HistorySummary));
+        OnPropertyChanged(nameof(HistoryEmptyMessage));
         ClearHistoryCommand.RaiseCanExecuteChanged();
+        RemoveMissingHistoryCommand.RaiseCanExecuteChanged();
     }
 
     private void RevealDestination(string destination)
@@ -2313,6 +2485,11 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     private static string AudioSourcePath(string destination, StreamFormat format) =>
         destination + ".source" + FormatDisplay.OutputExtension(format);
 
+    private static bool RequiresMp4Normalization(FormatItemViewModel selection) =>
+        selection.AudioFormat is null &&
+        selection.Format.Container == MediaContainer.Mp4 &&
+        selection.Format.Kind != StreamKind.AudioOnly;
+
     private static string SelectionIdentity(
         VideoMetadata metadata,
         FormatItemViewModel selection,
@@ -2370,7 +2547,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         output.Kind == AudioOutputKind.Mp3
             ? output.Extension
             : selection.RequiresMuxing
-                ? FormatDisplay.Extension(selection.Format.Container)
+                ? FormatDisplay.Extension(selection.OutputContainer)
                 : FormatDisplay.OutputExtension(selection.Format);
 
     private static long? ForecastLength(QueuedDownloadWork work)
@@ -2415,14 +2592,25 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         FormatItemViewModel selection,
         AudioOutputProfile output = default)
     {
+        if (File.Exists(destination))
+        {
+            return CompletedOrReservedLength(destination);
+        }
+
         if (output.Kind == AudioOutputKind.Mp3)
         {
             return CompletedOrPartialLength(AudioSourcePath(destination, selection.Format));
         }
 
-        if (selection.AudioFormat is null)
+        if (selection.AudioFormat is null && !RequiresMp4Normalization(selection))
         {
             return PartialLength(destination);
+        }
+
+        if (selection.AudioFormat is null)
+        {
+            return CompletedOrPartialLength(
+                IntermediateTrackPath(destination, "video", selection.Format));
         }
 
         var videoPath = IntermediateTrackPath(destination, "video", selection.Format);
@@ -2442,14 +2630,25 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         FormatItemViewModel selection,
         AudioOutputProfile output = default)
     {
+        if (File.Exists(destination))
+        {
+            return CompletedOrReservedLength(destination);
+        }
+
         if (output.Kind == AudioOutputKind.Mp3)
         {
             return CompletedOrReservedLength(AudioSourcePath(destination, selection.Format));
         }
 
-        if (selection.AudioFormat is null)
+        if (selection.AudioFormat is null && !RequiresMp4Normalization(selection))
         {
             return CompletedOrReservedLength(destination);
+        }
+
+        if (selection.AudioFormat is null)
+        {
+            return CompletedOrReservedLength(
+                IntermediateTrackPath(destination, "video", selection.Format));
         }
 
         var videoPath = IntermediateTrackPath(destination, "video", selection.Format);
@@ -2533,10 +2732,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         }
 
         var expectedLength = item.ExpectedLength;
-        if (status == DownloadQueueStatus.Completed &&
-            completedBytes is > 0 &&
-            DownloadSourceIdentity.TryParse(item.SourceIdentity, out var sourceIdentity) &&
-            sourceIdentity.Output.Kind != AudioOutputKind.Native)
+        if (status == DownloadQueueStatus.Completed && completedBytes is > 0)
         {
             expectedLength = completedBytes;
         }
@@ -2545,6 +2741,9 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         {
             ExpectedLength = expectedLength,
             BytesReceived = completedBytes ?? item.BytesReceived,
+            AttemptCount = status == DownloadQueueStatus.Downloading && item.Status != DownloadQueueStatus.Downloading
+                ? checked(item.AttemptCount + 1)
+                : item.AttemptCount,
             Status = status,
             UpdatedAtUtc = DateTimeOffset.UtcNow,
             FailureCode = failureCode
@@ -2850,7 +3049,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         return _allFormats
             .Where(format => format.Kind == StreamKind.Progressive ||
                              format.Kind == StreamKind.VideoOnly &&
-                             audio.Any(candidate => AdaptiveFormatSelector.AreMuxCompatible(format, candidate)))
+                             audio.Any(candidate => AdaptiveFormatSelector.AreMkvMuxCompatible(format, candidate)))
             .OrderByDescending(format => format.Kind == StreamKind.VideoOnly)
             .ThenByDescending(format => format.Height ?? 0)
             .ThenByDescending(format => format.FramesPerSecond ?? 0)
@@ -2866,7 +3065,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         var materializedVideos = videos.Where(format => format.Kind == StreamKind.VideoOnly).ToArray();
         return _allFormats
             .Where(audio => audio.Kind == StreamKind.AudioOnly &&
-                            materializedVideos.Any(video => AdaptiveFormatSelector.AreMuxCompatible(video, audio)))
+                            materializedVideos.Any(video => AdaptiveFormatSelector.AreMkvMuxCompatible(video, audio)))
             .OrderByDescending(audio => audio.Bitrate ?? 0)
             .ThenByDescending(audio => audio.AudioSampleRate ?? 0)
             .ThenBy(audio => audio.FormatId)
@@ -2913,8 +3112,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                     continue;
                 }
 
-                var companion = audio.FirstOrDefault(candidate =>
-                    AdaptiveFormatSelector.AreMuxCompatible(video, candidate));
+                var companion = AdaptiveFormatSelector.SelectCompanionAudio(video, audio);
                 if (companion is not null)
                 {
                     Formats.Add(new FormatItemViewModel(video, companion));

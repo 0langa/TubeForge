@@ -6,6 +6,8 @@ param(
 
     [string] $OutputDirectory,
 
+    [string] $FfmpegCacheDirectory,
+
     [ValidatePattern('^[0-9A-Fa-f]{40,64}$')]
     [string] $CertificateThumbprint,
 
@@ -199,6 +201,9 @@ try {
             '-p:PublishReadyToRun=false'
         )
         Add-ReleaseDocuments -PublishDirectory $publishDirectory
+        & (Join-Path $scriptRoot 'Stage-FFmpeg.ps1') `
+            -DestinationDirectory $publishDirectory `
+            -CacheDirectory $FfmpegCacheDirectory
 
         $applicationPath = Join-Path $publishDirectory 'TubeForge.exe'
         if (-not (Test-Path -LiteralPath $applicationPath)) {

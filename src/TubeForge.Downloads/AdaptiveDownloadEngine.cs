@@ -7,10 +7,13 @@ using TubeForge.Media.IsoBmff;
 
 namespace TubeForge.Downloads;
 
-public sealed class AdaptiveDownloadEngine(DirectDownloadEngine directDownloadEngine)
+public sealed class AdaptiveDownloadEngine(
+    DirectDownloadEngine directDownloadEngine,
+    FfmpegMediaProcessor? ffmpegMediaProcessor = null)
 {
     private readonly DirectDownloadEngine _directDownloadEngine =
         directDownloadEngine ?? throw new ArgumentNullException(nameof(directDownloadEngine));
+    private readonly FfmpegMediaProcessor? _ffmpegMediaProcessor = ffmpegMediaProcessor;
 
     public async Task<Result<AdaptiveDownloadReceipt>> DownloadAsync(
         AdaptiveDownloadRequest request,
@@ -24,6 +27,36 @@ public sealed class AdaptiveDownloadEngine(DirectDownloadEngine directDownloadEn
         }
 
         var totalBytes = Sum(request.Video.ExpectedLength, request.Audio.ExpectedLength);
+        if (request.AllowExistingValidatedOutput &&
+            request.OutputContainer is MediaContainer.Mp4 or MediaContainer.WebM or MediaContainer.Mkv &&
+            _ffmpegMediaProcessor is not null &&
+            File.Exists(request.DestinationPath))
+        {
+            var recovered = await _ffmpegMediaProcessor.MuxAsync(
+                    request.Video.DestinationPath,
+                    request.Audio.DestinationPath,
+                    request.DestinationPath,
+                    request.OutputContainer,
+                    cancellationToken,
+                    allowExistingValidatedOutput: true)
+                .ConfigureAwait(false);
+            if (!recovered.IsSuccess)
+            {
+                return Result<AdaptiveDownloadReceipt>.Failure(recovered.Error!);
+            }
+
+            progress?.Report(new DownloadProgress(
+                recovered.Value.BytesWritten,
+                recovered.Value.BytesWritten,
+                0,
+                TimeSpan.Zero));
+            return Result<AdaptiveDownloadReceipt>.Success(new AdaptiveDownloadReceipt(
+                recovered.Value.DestinationPath,
+                recovered.Value.BytesWritten,
+                0,
+                0));
+        }
+
         var videoProgress = ProgressFor(progress, 0, totalBytes);
         var videoResult = await EnsureTrackAsync(request.Video, videoProgress, cancellationToken)
             .ConfigureAwait(false);
@@ -40,32 +73,7 @@ public sealed class AdaptiveDownloadEngine(DirectDownloadEngine directDownloadEn
             return Result<AdaptiveDownloadReceipt>.Failure(audioResult.Error!);
         }
 
-        Result<(string Path, long Length)> muxResult;
-        if (request.OutputContainer == MediaContainer.Mp4)
-        {
-            var result = await Mp4TrackMuxer.MuxAsync(
-                    request.Video.DestinationPath,
-                    request.Audio.DestinationPath,
-                    request.DestinationPath,
-                    cancellationToken)
-                .ConfigureAwait(false);
-            muxResult = result.IsSuccess
-                ? Result<(string Path, long Length)>.Success((result.Value.DestinationPath, result.Value.BytesWritten))
-                : Result<(string Path, long Length)>.Failure(result.Error!);
-        }
-        else
-        {
-            var result = await WebMTrackMuxer.MuxAsync(
-                    request.Video.DestinationPath,
-                    request.Audio.DestinationPath,
-                    request.DestinationPath,
-                    cancellationToken)
-                .ConfigureAwait(false);
-            muxResult = result.IsSuccess
-                ? Result<(string Path, long Length)>.Success((result.Value.DestinationPath, result.Value.BytesWritten))
-                : Result<(string Path, long Length)>.Failure(result.Error!);
-        }
-
+        var muxResult = await MuxTracksAsync(request, cancellationToken).ConfigureAwait(false);
         if (!muxResult.IsSuccess)
         {
             return Result<AdaptiveDownloadReceipt>.Failure(muxResult.Error!);
@@ -83,6 +91,62 @@ public sealed class AdaptiveDownloadEngine(DirectDownloadEngine directDownloadEn
             muxResult.Value.Length,
             videoResult.Value.BytesWritten,
             audioResult.Value.BytesWritten));
+    }
+
+    private async Task<Result<(string Path, long Length)>> MuxTracksAsync(
+        AdaptiveDownloadRequest request,
+        CancellationToken cancellationToken)
+    {
+        if (_ffmpegMediaProcessor is not null)
+        {
+            var processed = await _ffmpegMediaProcessor.MuxAsync(
+                    request.Video.DestinationPath,
+                    request.Audio.DestinationPath,
+                    request.DestinationPath,
+                    request.OutputContainer,
+                    cancellationToken,
+                    request.AllowExistingValidatedOutput)
+                .ConfigureAwait(false);
+            return processed.IsSuccess
+                ? Result<(string Path, long Length)>.Success((
+                    processed.Value.DestinationPath,
+                    processed.Value.BytesWritten))
+                : Result<(string Path, long Length)>.Failure(processed.Error!);
+        }
+
+        if (request.OutputContainer == MediaContainer.Mkv)
+        {
+            return Result<(string Path, long Length)>.Failure(new TubeForgeError(
+                "Media.FFmpegMissing",
+                "TubeForge's bundled FFmpeg media engine is missing. Reinstall TubeForge."));
+        }
+
+        if (request.OutputContainer == MediaContainer.Mp4)
+        {
+            var mp4 = await Mp4TrackMuxer.MuxAsync(
+                    request.Video.DestinationPath,
+                    request.Audio.DestinationPath,
+                    request.DestinationPath,
+                    cancellationToken)
+                .ConfigureAwait(false);
+            return mp4.IsSuccess
+                ? Result<(string Path, long Length)>.Success((
+                    mp4.Value.DestinationPath,
+                    mp4.Value.BytesWritten))
+                : Result<(string Path, long Length)>.Failure(mp4.Error!);
+        }
+
+        var webm = await WebMTrackMuxer.MuxAsync(
+                request.Video.DestinationPath,
+                request.Audio.DestinationPath,
+                request.DestinationPath,
+                cancellationToken)
+            .ConfigureAwait(false);
+        return webm.IsSuccess
+            ? Result<(string Path, long Length)>.Success((
+                webm.Value.DestinationPath,
+                webm.Value.BytesWritten))
+            : Result<(string Path, long Length)>.Failure(webm.Error!);
     }
 
     private async Task<Result<DownloadReceipt>> EnsureTrackAsync(
@@ -119,9 +183,20 @@ public sealed class AdaptiveDownloadEngine(DirectDownloadEngine directDownloadEn
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(request.Video);
         ArgumentNullException.ThrowIfNull(request.Audio);
-        if (request.OutputContainer is not (MediaContainer.Mp4 or MediaContainer.WebM) ||
-            request.Video.ExpectedContainer != request.OutputContainer ||
-            request.Audio.ExpectedContainer != request.OutputContainer)
+        var sourcesAreDownloadable =
+            request.Video.ExpectedContainer is MediaContainer.Mp4 or MediaContainer.WebM &&
+            request.Audio.ExpectedContainer is MediaContainer.Mp4 or MediaContainer.WebM;
+        var valid = request.OutputContainer switch
+        {
+            // Native lossless mux: both tracks must already share the output container.
+            MediaContainer.Mp4 or MediaContainer.WebM =>
+                request.Video.ExpectedContainer == request.OutputContainer &&
+                request.Audio.ExpectedContainer == request.OutputContainer,
+            // Cross-container lossless mux into Matroska: any downloadable source pair.
+            MediaContainer.Mkv => sourcesAreDownloadable,
+            _ => false
+        };
+        if (!valid)
         {
             return new TubeForgeError(
                 "Media.IncompatibleTracks",

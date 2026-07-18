@@ -1,0 +1,47 @@
+name: YouTube resolver canary
+
+on:
+  schedule:
+    - cron: '17 5 * * 2'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: youtube-resolver-canary
+  cancel-in-progress: true
+
+jobs:
+  resolve:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Install .NET SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Run bounded resolver canary
+        shell: pwsh
+        env:
+          TUBEFORGE_CANARY_URLS: ${{ secrets.TUBEFORGE_CANARY_URLS }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:TUBEFORGE_CANARY_URLS)) {
+            Write-Output 'TUBEFORGE_CANARY_URLS is not configured; canary skipped.'
+            exit 0
+          }
+          $list = Join-Path $env:RUNNER_TEMP 'tubeforge-canary-urls.txt'
+          try {
+            [IO.File]::WriteAllText($list, $env:TUBEFORGE_CANARY_URLS, [Text.UTF8Encoding]::new($false))
+            dotnet run --project tools/TubeForge.Smoke --configuration Release -- canary $list
+            if ($LASTEXITCODE -ne 0) {
+              throw "Resolver canary failed with exit code $LASTEXITCODE."
+            }
+          }
+          finally {
+            Remove-Item -LiteralPath $list -Force -ErrorAction SilentlyContinue
+          }

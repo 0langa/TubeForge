@@ -69,6 +69,7 @@ public sealed class TubeForgeSettingsStore
                 return Corrupt();
             }
 
+            settings = Migrate(settings);
             var validation = Validate(settings);
             return validation is null
                 ? Result<TubeForgeSettings>.Success(settings)
@@ -170,6 +171,7 @@ public sealed class TubeForgeSettingsStore
         }
 
         if (settings.MaximumConcurrentDownloads is < 1 or > 4 ||
+            !Enum.IsDefined(settings.LibrarySortOrder) ||
             !FileNameTemplate.IsValid(settings.FileNameTemplate) ||
             string.IsNullOrWhiteSpace(settings.DownloadFolder) ||
             settings.DownloadFolder.Length > 32_767 ||
@@ -193,6 +195,16 @@ public sealed class TubeForgeSettingsStore
 
         return null;
     }
+
+    private static TubeForgeSettings Migrate(TubeForgeSettings settings) => settings.SchemaVersion switch
+    {
+        1 => settings with
+        {
+            SchemaVersion = TubeForgeSettings.CurrentSchemaVersion,
+            LibrarySortOrder = LibrarySortOrder.NewestFirst
+        },
+        _ => settings
+    };
 
     private static TubeForgeError InvalidState() => new(
         "Settings.InvalidState",

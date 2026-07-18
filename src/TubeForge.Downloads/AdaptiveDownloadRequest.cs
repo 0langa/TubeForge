@@ -11,6 +11,8 @@ public sealed record AdaptiveDownloadRequest
     public required string DestinationPath { get; init; }
 
     public required MediaContainer OutputContainer { get; init; }
+
+    public bool AllowExistingValidatedOutput { get; init; }
 }
 
 public sealed record AdaptiveDownloadReceipt(

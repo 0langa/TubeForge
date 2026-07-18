@@ -2,6 +2,8 @@
 
 Use this playbook when live analysis starts returning `Extractor.*` failures or format counts change unexpectedly. Never commit live URLs, player scripts, signed media URLs, cookies, visitor data, or private-video metadata.
 
+The weekly `YouTube resolver canary` workflow reads its bounded list from the private `TUBEFORGE_CANARY_URLS` repository secret. A missing secret skips the scheduled probe; it never falls back to a committed identifier.
+
 ## Canary set
 
 Maintain a local text file outside Git with 3–10 public videos you are authorized to probe. Prefer stable, short videos covering:

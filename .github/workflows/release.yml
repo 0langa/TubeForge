@@ -28,10 +28,43 @@ jobs:
         shell: pwsh
         run: |
           $tag = '${{ github.ref_name }}'
-          if ($tag -notmatch '^v\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$') {
-            throw "Invalid release tag: $tag"
+          if ($tag -notmatch '^v\d+\.\d+\.\d+$') {
+            throw "TubeForge publishes stable releases only; invalid tag: $tag"
           }
           "value=$($tag.Substring(1))" >> $env:GITHUB_OUTPUT
+
+      - name: Import optional code-signing certificate
+        id: signing
+        shell: pwsh
+        env:
+          SIGNING_PFX_BASE64: ${{ secrets.TUBEFORGE_SIGNING_PFX_BASE64 }}
+          SIGNING_PFX_PASSWORD: ${{ secrets.TUBEFORGE_SIGNING_PFX_PASSWORD }}
+          TIMESTAMP_SERVER: ${{ vars.TUBEFORGE_TIMESTAMP_SERVER }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:SIGNING_PFX_BASE64) -and
+              [string]::IsNullOrWhiteSpace($env:SIGNING_PFX_PASSWORD)) {
+            'enabled=false' >> $env:GITHUB_OUTPUT
+            exit 0
+          }
+          if ([string]::IsNullOrWhiteSpace($env:SIGNING_PFX_BASE64) -or
+              [string]::IsNullOrWhiteSpace($env:SIGNING_PFX_PASSWORD) -or
+              [string]::IsNullOrWhiteSpace($env:TIMESTAMP_SERVER)) {
+            throw 'Signing requires both PFX secrets and TUBEFORGE_TIMESTAMP_SERVER.'
+          }
+          $pfxPath = Join-Path $env:RUNNER_TEMP 'tubeforge-signing.pfx'
+          try {
+            [IO.File]::WriteAllBytes($pfxPath, [Convert]::FromBase64String($env:SIGNING_PFX_BASE64))
+            $password = ConvertTo-SecureString $env:SIGNING_PFX_PASSWORD -AsPlainText -Force
+            $certificate = Import-PfxCertificate -FilePath $pfxPath -CertStoreLocation Cert:\CurrentUser\My -Password $password
+            if (@($certificate).Count -ne 1) {
+              throw 'The signing PFX must import exactly one certificate.'
+            }
+            "thumbprint=$($certificate.Thumbprint)" >> $env:GITHUB_OUTPUT
+            'enabled=true' >> $env:GITHUB_OUTPUT
+          }
+          finally {
+            Remove-Item -LiteralPath $pfxPath -Force -ErrorAction SilentlyContinue
+          }
 
       - name: Build
         run: dotnet build TubeForge.slnx --configuration Release
@@ -44,17 +77,42 @@ jobs:
 
       - name: Produce release archives
         shell: pwsh
-        run: .\scripts\Publish-Release.ps1 -Version '${{ steps.version.outputs.value }}'
+        run: |
+          $arguments = @{ Version = '${{ steps.version.outputs.value }}' }
+          if ('${{ steps.signing.outputs.enabled }}' -eq 'true') {
+            $arguments.CertificateThumbprint = '${{ steps.signing.outputs.thumbprint }}'
+            $arguments.TimestampServer = '${{ vars.TUBEFORGE_TIMESTAMP_SERVER }}'
+          }
+          .\scripts\Publish-Release.ps1 @arguments
 
       - name: Verify release archives
         shell: pwsh
-        run: .\scripts\Test-Release.ps1 -Version '${{ steps.version.outputs.value }}' -SkipLaunch
+        run: |
+          $arguments = @{ Version = '${{ steps.version.outputs.value }}'; SkipLaunch = $true }
+          if ('${{ steps.signing.outputs.enabled }}' -eq 'true') {
+            $arguments.RequireAuthenticode = $true
+          }
+          .\scripts\Test-Release.ps1 @arguments
 
       - name: Produce installer
         shell: pwsh
         run: |
-          .\scripts\Publish-Installer.ps1 -Version '${{ steps.version.outputs.value }}'
+          $arguments = @{ Version = '${{ steps.version.outputs.value }}' }
+          if ('${{ steps.signing.outputs.enabled }}' -eq 'true') {
+            $arguments.CertificateThumbprint = '${{ steps.signing.outputs.thumbprint }}'
+            $arguments.TimestampServer = '${{ vars.TUBEFORGE_TIMESTAMP_SERVER }}'
+          }
+          .\scripts\Publish-Installer.ps1 @arguments
           Get-Content artifacts/installer/SHA256SUMS.txt | Add-Content artifacts/release/SHA256SUMS.txt
+
+      - name: Verify installer
+        shell: pwsh
+        run: |
+          $arguments = @{ Version = '${{ steps.version.outputs.value }}' }
+          if ('${{ steps.signing.outputs.enabled }}' -eq 'true') {
+            $arguments.RequireAuthenticode = $true
+          }
+          .\scripts\Test-Installer.ps1 @arguments
 
       - name: Attest release artifacts
         uses: actions/attest@v4
@@ -79,4 +137,9 @@ jobs:
             --title "TubeForge ${{ github.ref_name }}" `
             --notes-file docs/RELEASE_NOTES.md `
             --generate-notes
+
+      - name: Remove imported signing certificate
+        if: always() && steps.signing.outputs.enabled == 'true'
+        shell: pwsh
+        run: Remove-Item -LiteralPath 'Cert:\CurrentUser\My\${{ steps.signing.outputs.thumbprint }}' -Force
 

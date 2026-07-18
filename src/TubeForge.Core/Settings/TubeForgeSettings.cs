@@ -2,7 +2,7 @@ namespace TubeForge.Core.Settings;
 
 public sealed record TubeForgeSettings
 {
-    public const int CurrentSchemaVersion = 1;
+    public const int CurrentSchemaVersion = 2;
 
     public int SchemaVersion { get; init; } = CurrentSchemaVersion;
 
@@ -16,5 +16,15 @@ public sealed record TubeForgeSettings
 
     public bool EnableAutomaticUpdateChecks { get; init; } = true;
 
+    public LibrarySortOrder LibrarySortOrder { get; init; } = LibrarySortOrder.NewestFirst;
+
     public bool ResponsibleUseAccepted { get; init; }
+}
+
+public enum LibrarySortOrder
+{
+    NewestFirst,
+    OldestFirst,
+    TitleAscending,
+    LargestFirst
 }

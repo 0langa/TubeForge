@@ -31,7 +31,8 @@ public static class MediaContainerValidator
             {
                 MediaContainer.Mp4 or MediaContainer.ThreeGp =>
                     IsValidIsoBaseMediaHeader(header[..bytesRead], stream.Length),
-                MediaContainer.WebM => IsValidWebMHeader(header[..bytesRead], stream.Length),
+                MediaContainer.WebM or MediaContainer.Mkv =>
+                    IsValidEbmlHeader(header[..bytesRead], stream.Length),
                 _ => false
             };
             return valid
@@ -94,7 +95,7 @@ public static class MediaContainerValidator
         return boxSize <= (ulong)fileLength;
     }
 
-    private static bool IsValidWebMHeader(ReadOnlySpan<byte> header, long fileLength)
+    private static bool IsValidEbmlHeader(ReadOnlySpan<byte> header, long fileLength)
     {
         ReadOnlySpan<byte> ebmlMagic = [0x1A, 0x45, 0xDF, 0xA3];
         if (header.Length < 5 || fileLength < 5 || !header[..4].SequenceEqual(ebmlMagic))

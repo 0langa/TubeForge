@@ -16,6 +16,16 @@ public partial class App : Application
     {
         base.OnStartup(e);
         var arguments = new InstallerArguments(e.Args);
+        var version = Assembly.GetExecutingAssembly().GetName().Version ?? new Version(1, 0, 0);
+        version = new Version(version.Major, version.Minor, Math.Max(0, version.Build));
+        if (arguments.Has("/verify-payload"))
+        {
+            var verified = await VerifyPayloadAsync(version);
+            Environment.ExitCode = verified ? 0 : 1;
+            Shutdown(Environment.ExitCode);
+            return;
+        }
+
         if (arguments.Has("/uninstall-final"))
         {
             await RunFinalUninstallAsync(arguments);
@@ -28,8 +38,6 @@ public partial class App : Application
             return;
         }
 
-        var version = Assembly.GetExecutingAssembly().GetName().Version ?? new Version(1, 0, 0);
-        version = new Version(version.Major, version.Minor, Math.Max(0, version.Build));
         var update = arguments.Has("/update");
         if (arguments.Has("/quiet"))
         {
@@ -51,6 +59,44 @@ public partial class App : Application
         MainWindow = window;
         window.Closed += (_, _) => Shutdown(Environment.ExitCode);
         window.Show();
+    }
+
+    private static async Task<bool> VerifyPayloadAsync(Version version)
+    {
+        var staging = Path.Combine(Path.GetTempPath(), $"TubeForge-PayloadVerify-{Guid.NewGuid():N}");
+        try
+        {
+            var payload = Assembly.GetExecutingAssembly().GetManifestResourceStream(PayloadResource);
+            if (payload is null)
+            {
+                return false;
+            }
+
+            await using (payload)
+            {
+                var result = await InstallPayloadExtractor.ExtractAsync(payload, staging, version);
+                return result.IsSuccess &&
+                       result.Value.FileCount > 0 &&
+                       result.Value.BytesWritten > 0 &&
+                       File.Exists(Path.Combine(staging, "TubeForge.exe")) &&
+                       File.Exists(Path.Combine(staging, "ffmpeg", "ffmpeg.exe")) &&
+                       File.Exists(Path.Combine(staging, "ffmpeg", "FFmpeg-LICENSE.txt")) &&
+                       File.Exists(Path.Combine(staging, "THIRD_PARTY_NOTICES.md"));
+            }
+        }
+        finally
+        {
+            try
+            {
+                if (Directory.Exists(staging))
+                {
+                    Directory.Delete(staging, recursive: true);
+                }
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+            }
+        }
     }
 
     private static async Task<Result<InstallationReceipt>> InstallAsync(Version version, int? waitProcessId)

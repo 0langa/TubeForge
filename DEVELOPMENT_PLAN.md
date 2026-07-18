@@ -2,7 +2,7 @@
 
 ## 1. Product vision
 
-TubeForge is a free, ad-free, local-first Windows desktop application for downloading YouTube media that the user has the right to save. It must provide a polished interface, resilient downloads, clear format choices, and useful diagnostics without invoking `yt-dlp`, FFmpeg, browser extensions, hosted conversion services, or third-party application libraries.
+TubeForge is a free, ad-free, local-first Windows desktop application for downloading YouTube media that the user has the right to save. It must provide a polished interface, resilient downloads, clear format choices, and useful diagnostics without invoking `yt-dlp`, browser extensions, hosted conversion services, or third-party managed application libraries. A pinned x64 LGPL FFmpeg executable is bundled only for reliable MP4 stream-copy muxing and normalization.
 
 The application is built from source in this repository. Network access is limited to fetching YouTube pages, API responses, player scripts, thumbnails, captions, and media selected by the user. No analytics, ads, account system, telemetry, or remote control plane.
 
@@ -13,25 +13,25 @@ The application is built from source in this repository. Network access is limit
 - Windows 10/11 x64 desktop.
 - C# and .NET 10.
 - WPF UI using the Windows Desktop runtime shipped with .NET.
-- Standard-library and Windows APIs only at runtime.
+- Standard-library and Windows APIs plus one pinned FFmpeg command-line executable at runtime.
 - Public YouTube videos first.
 - Audio + video defaults to the highest compatible adaptive video and audio tracks; progressive media is fallback only.
 - Audio-only downloads in the native container (`m4a`/MP4 or WebM), with optional Windows Media Foundation MP3 transcoding.
-- In-house ISO BMFF/MP4 and EBML/WebM muxing combines encoded tracks without re-encoding.
+- FFmpeg produces conventional indexed MP4 outputs by stream copy; in-house EBML/WebM muxing remains available.
 - Resumable, bounded-concurrency downloads with atomic finalization.
 
 ### Forbidden dependencies
 
-- No `yt-dlp`, `youtube-dl`, FFmpeg, aria2, VLC, browser automation, or hosted downloader API.
+- No `yt-dlp`, `youtube-dl`, aria2, VLC, browser automation, or hosted downloader API.
 - No third-party NuGet or npm packages.
 - No copied extractor, decipher, muxer, codec, or downloader implementation.
-- No silent installation or execution of external binaries.
+- No unpinned or unverified external executable. Bundled FFmpeg provenance, hash, license, and exact source revision must ship with every x64 release.
 
 ### Explicit non-goals for early releases
 
 - DRM-protected, paid, members-only, or rental content.
 - Circumventing access controls.
-- Bundling or silently installing third-party codec binaries.
+- General-purpose codec packs or silent system-wide dependency installation.
 - Mobile, macOS, or Linux UI before the Windows release is stable.
 - Guaranteed support for every YouTube experiment at all times.
 
@@ -81,7 +81,8 @@ TubeForge.App (WPF, composition root)
     |     queue, range transfer, resume state, retries, integrity, filenames
     |
     +-- TubeForge.Media
-          stream probing, MP4/WebM metadata, muxing, tagging
+          stream probing, container validation, safe FFmpeg process boundary,
+          internal WebM muxing
 
 TubeForge.Tests (dependency-free console test runner)
     references all production projects except UI where avoidable
@@ -92,7 +93,7 @@ TubeForge.Tests (dependency-free console test runner)
 - `TubeForge.Core`: no WPF and no YouTube-specific HTTP behavior.
 - `TubeForge.YouTube`: converts YouTube inputs into stable domain models. Player changes stay here.
 - `TubeForge.Downloads`: accepts resolved stream URLs; does not know how extraction works.
-- `TubeForge.Media`: pure binary/container work with streaming I/O and strict bounds checks.
+- `TubeForge.Media`: bounded binary/container work plus safe argument-list-only FFmpeg invocation for MP4 finalization.
 - `TubeForge.App`: view models, UI state, settings, composition. Minimal code-behind.
 - `TubeForge.Tests`: custom attributes/assertions/runner; no external test framework.
 
@@ -176,7 +177,7 @@ Muxing combines existing encoded tracks without quality loss. Transcoding decode
 - `%LocalAppData%/TubeForge/logs/`: planned bounded rolling diagnostic logs; not created yet.
 - Downloads remain in user-selected folders.
 - Writes use temporary files plus replace/rename.
-- Settings and queue schemas are versioned and fail closed on unsupported versions; migrations remain future work.
+- Settings and queue schemas are versioned, migrate published v1 state forward, and fail closed on unsupported future versions.
 - No authentication cookies in the first public release.
 - If cookie support is later approved, use Windows DPAPI and explicit import/clear controls; never log cookie contents.
 
@@ -347,7 +348,7 @@ Exit: signed public formats resolve without executing arbitrary JavaScript.
 
 Exit: user can save best/native audio stream with truthful format labeling.
 
-### M7 — In-house MP4 muxer
+### M7 — Internal MP4 muxer prototype (superseded for release output by M15)
 
 - [x] Implement bounded ISO BMFF box reader/writer.
 - [x] Parse init segments and fragmented media metadata.
@@ -358,7 +359,7 @@ Exit: user can save best/native audio stream with truthful format labeling.
 - [x] Validate output structure and playback against Windows media stack.
 - [x] Fuzz box sizes, nesting, integer overflow, truncation, and hostile input.
 
-Exit: compatible adaptive MP4 video and audio combine into a seekable file without re-encoding.
+Exit at completion: compatible adaptive MP4 tracks combined without re-encoding and passed structural/open checks. Later real-player stress tests exposed compatibility failures; M15 replaces this release path with FFmpeg stream-copy normalization.
 
 ### M8 — Advanced content features
 
@@ -387,6 +388,7 @@ Exit: best compatible WebM adaptive formats combine into seekable files.
 ### M10 — Reliability hardening
 
 - [x] Maintain extraction canary set and documented update playbook.
+- [x] Run a bounded weekly GitHub Actions canary from an operator-owned secret URL list without logging media identifiers.
 - [x] Add segmented transfer behind a feature flag and prove integrity/performance.
 - [x] Add network-change, sleep/resume, proxy, IPv4/IPv6, and slow-disk tests.
 - [x] Add disk-space forecasting and low-space recovery.
@@ -401,6 +403,7 @@ Exit: release-candidate reliability targets met on supported Windows versions.
 - [x] Choose project license before accepting outside contributions.
 - [x] Produce framework-dependent and self-contained x64 builds.
 - [x] Add reproducible release script, checksums, and signed artifacts when certificate exists.
+- [x] Verify the final setup executable's embedded payload and optional Authenticode signature before publishing.
 - [x] Add upgrade/uninstall behavior and data-retention documentation.
 - [x] Add versioned extraction compatibility notes.
 - [x] Complete privacy, security, responsible-use, accessibility, and threat-model reviews.
@@ -437,21 +440,32 @@ Exit: supported Windows codecs convert selected public audio to playable MP3 wit
 - [x] Require explicit user confirmation before applying an update; never elevate or silently execute remote content.
 - [x] Add atomic staging, rollback, stale-file cleanup, and update/installer failure recovery.
 - [x] Extend threat model, packaging tests, installation docs, release workflow, and support policy.
+- [x] Migrate published settings and queue schema v1 state to schema v2 without storing expiring media URLs.
+- [x] Add Library search, sort, and missing-file cleanup while preserving durable duplicate history.
 - [x] Publish v1.1 with installer, updater, branding, and MP3 limitations documented.
 
 Exit: clean-machine install, in-app update, rollback, uninstall, MP3 conversion, checksum, and provenance smoke tests pass.
+
+### M15 — Reliable indexed MP4 finalization
+
+- [x] Reproduce Windows playback failures on valid YouTube H.264/AAC fragmented MP4 outputs.
+- [x] Prove source tracks decode without errors and isolate fragmented DASH layout as compatibility cause.
+- [x] Replace release-path MP4 muxing with FFmpeg `-c copy` and `+faststart`; retain source quality.
+- [x] Normalize direct progressive and video-only MP4 downloads, not only adaptive audio + video outputs.
+- [x] Fail closed when FFmpeg is absent, exits non-zero, or leaves fragmented/non-indexed output.
+- [x] Pin exact Windows x64 LGPL FFmpeg archive, SHA-256, licenses, source revision, and build scripts.
+- [x] Add deterministic process-boundary tests plus live real-file packet/decode/Windows-media verification.
+
+Exit: adaptive and video-only H.264 MP4 outputs become conventional indexed files, decode through start/middle/end, and open through Windows media stack.
 
 ## 12. Immediate implementation backlog
 
 Order for current work:
 
-1. TubeForge vector/icon identity and repository-wide naming audit.
-2. Windows Media Foundation MP3 transcode engine and tests.
-3. Audio-output profile persistence and UI integration.
-4. Per-user installer and uninstall behavior.
-5. Release discovery, verified download, update staging, and apply helper.
-6. Packaging/release pipeline integration and clean-machine smoke tests.
-7. Threat-model/documentation refresh, v1.1 publication, and GitHub repository rename.
+1. Build v1.2.1 x64 archives and installer with pinned FFmpeg payload.
+2. Run clean-install adaptive MP4, video-only MP4, audio-only, MP3, WebM, queue, Library, diagnostics, and updater smoke tests.
+3. Confirm new indexed MP4 samples in Windows Media Player and VLC.
+4. Publish signed/checksummed v1.2.1 artifacts when release gates pass.
 
 ## 13. Risk register
 
@@ -459,6 +473,7 @@ Order for current work:
 |---|---|---|---|
 | YouTube page/player changes | Core resolution breaks | Isolate extractor, fixtures, structural parsing, canaries | Classified extractor errors spike; capture sanitized new shape and patch adapter |
 | Platform codec availability differs | MP3 conversion may reject some source codecs | Use Windows Media Foundation capability negotiation and typed failures | Preserve native output path; never claim unsupported conversion |
+| FFmpeg binary supply-chain or license drift | Release compromise or incomplete notices | Pin exact archive/hash/source/build revisions; ship notices/licenses; fail release verification on drift | Review and deliberately repin before any FFmpeg update |
 | Updater supply-chain compromise | Remote code executes as user | Pin repository/asset policy; verify API digest, checksum, version, and bounded payload | Fail closed; keep manual download path; update threat model before release |
 | Arbitrary player JavaScript | Security and reliability risk | Constrained subset interpreter with hard limits | Unsupported syntax fails closed and records sanitized structure |
 | Signed URL expiry | Resume fails | Store source identity; re-resolve and compare format/validators | Refresh URL, then resume only if remote identity matches |
@@ -472,14 +487,14 @@ Order for current work:
 
 - 2026-07-16: Greenfield repository targets Windows using .NET 10 and WPF because the active development environment contains the full Windows Desktop runtime and this avoids third-party UI dependencies.
 - 2026-07-17: `TubeForge` is the product, namespace, artifact, installer, updater-policy, and public repository identity.
-- 2026-07-16: Zero third-party application dependencies is an architectural invariant, not merely a packaging goal.
+- 2026-07-17: Supersede zero-executable invariant after real 720p/1080p H.264 outputs decoded cleanly but failed or lagged in common players because TubeForge preserved YouTube's fragmented DASH layout. Bundle one pinned x64 LGPL FFmpeg executable and use stream-copy-only MP4 mux/remux with conventional indexed output; keep zero third-party managed packages and no `yt-dlp`.
 - 2026-07-16: Progressive and native-container output precede muxing; transcoding is not conflated with downloading.
 - 2026-07-16: RECALL state is local development context and must remain outside Git.
 - 2026-07-16: Use a versioned Android player profile as the primary direct-format fallback when the watch page exposes only ciphered media. Current WEB/MWEB/TV profiles returned no usable streams during live verification; the tested Android profile returned progressive, audio-only, and video-only URLs.
 - 2026-07-16: Keep the constrained classic signature planner as a guarded fallback. The current ES6 player no longer exposes the traditional split/reverse/splice shape, so current-player decipher and `n` transformation remain unfinished M5 work.
 - 2026-07-16: Use type-first stream selection. Combined audio/video, native audio, and video-only modes expose only relevant filters and report per-mode limits. Audio + video presents muxable adaptive outputs as complete files, while Video only remains an explicit track-only choice.
 - 2026-07-16: Highest-quality audio + video is an MVP release gate. Audio + video selects the highest compatible adaptive tracks, downloads both resumably, and muxes them internally; low-resolution progressive media is fallback only.
-- 2026-07-16: Support regular MP4 chunk-offset rewriting, fragmented MP4 track/fragment remapping and interleaving, and WebM cluster interleaving/cue generation. A live H.264/AAC fragmented MP4 mux passed structural validation and opened with both tracks in the Windows media stack; AV1 playback still depends on the system codec installation.
+- 2026-07-16: Internal MP4 and WebM muxers established container parsing and hostile-input safety coverage. Internal MP4 output later proved insufficiently compatible for release playback; see 2026-07-17 FFmpeg decision. Internal WebM cluster interleaving/cue generation remains active.
 - 2026-07-16: Prefer MP4 when video quality characteristics are equivalent, while keeping quality as the primary rank and retaining higher-quality WebM options.
 - 2026-07-16: Queue downloads through a tested global 1–4 transfer dispatcher. Persist only validated video/format identities and local destinations; re-resolve fresh media URLs when resuming recovered work.
 - 2026-07-16: Persist bounded local settings atomically. Gate first use on a locally stored responsible-use acknowledgement and keep diagnostics redacted to runtime, counts, stages, and local storage paths.
@@ -500,8 +515,11 @@ Order for current work:
 - 2026-07-16: Render filenames from a bounded token template before Windows filename sanitization, retaining indexed default collection names. Persist completed-output history atomically with recovery candidates and no media URLs; exact source-output and destination matches across queue/history are explicit duplicates, while different output selections for the same video remain allowed.
 - 2026-07-16: Classify Shorts and completed live replays in stable metadata and sidecars, preserving live start/end timestamps when present. Completed replays use ordinary adaptive selection and internal muxing; active, upcoming, and offline live capture fail with explicit typed errors until a dedicated segmented-live design exists. Always try the versioned direct-format client when a watch page has zero streams, even when it also has zero ciphers.
 - 2026-07-17: TubeForge becomes the public repository and artifact identity. Use a vector-first forge/play mark and derive Windows icon sizes from the same geometry.
-- 2026-07-17: MP3 conversion uses Windows Media Foundation codecs already present in supported Windows, preserving the no-FFmpeg/no-third-party-package invariant. Native M4A/WebM remains available and is the no-quality-loss choice.
+- 2026-07-17: MP3 conversion continues using Windows Media Foundation. FFmpeg handles MP4 stream-copy finalization only; native M4A/WebM remains available and no video/audio re-encoding occurs during MP4 mux/remux.
 - 2026-07-17: Installer and updater remain per-user and unelevated. Update checks are configurable; applying an update requires explicit confirmation plus strict GitHub repository, version, asset, size, and SHA-256 validation.
+- 2026-07-18: Route WebM adaptive muxing (VP9/AV1 + Opus/Vorbis) through the bundled FFmpeg `-c copy` path, not only MP4. The highest ladder qualities (1440p/4K/8K) are WebM-only and previously depended on the internal 717-line EBML muxer — the same class of hand-rolled muxer M15 replaced for MP4 after real-player failures. `FfmpegMediaProcessor` is now container-parameterized (MP4 `+faststart`/indexed validation, WebM EBML-structural validation); `AdaptiveDownloadEngine` uses FFmpeg for both containers when present and keeps the internal Mp4/WebM muxers as the no-FFmpeg fallback. Verified live: 480p VP9+Opus stream-copy produced structurally valid WebM at full throughput; 144p H264+AAC still yields an indexed MP4 that opens in the Windows media stack.
+- 2026-07-18: Confirmed by live probe (Big Buck Bunny, ANDROID_VR client) that the direct-client path already returns the complete watch-page ladder (144p–2160p60 across H264/VP9/AV1, AAC+Opus) with `ciphered=0` and no throttling `n` parameter, downloading at full speed. Wiring the signature/`n` decipher engine into the direct-client path is therefore not required for coverage or download reliability; keep it a watch-page-fallback concern. Revisit only if canary/live evidence shows a client returning ciphered or throttled URLs.
+- 2026-07-18: Add Matroska (`MediaContainer.Mkv`) as a lossless cross-container fallback so every watch-page quality is selectable even when a video codec has no same-container audio family (e.g. a WebM-only VP9/AV1 ladder paired with AAC-only audio). `AdaptiveFormatSelector.ResolveOutputContainer` returns the native shared container when the pair is natively muxable and Matroska otherwise; `SelectCompanionAudio` prefers a native companion and falls back to the best cross-codec companion. FFmpeg (`-f matroska -c copy`) performs the mux; MKV output fails closed when FFmpeg is absent (internal muxers cannot produce Matroska). Native MP4/WebM output is unchanged for the common case where both audio families exist. Verified live: 480p VP9 (WebM) + AAC (MP4) stream-copied into a structurally valid MKV.
 
 ## 15. Plan maintenance
 
