@@ -150,6 +150,65 @@ public static class DirectDownloadEngineTests
     }
 
     [Test]
+    public static async Task DiscoversUnknownGoogleVideoLengthFromShortFinalQueryRange()
+    {
+        using var directory = new TestDirectory();
+        var destination = Path.Combine(directory.Path, "unknown-googlevideo-length.mp4");
+        var payload = Enumerable.Range(0, checked((int)DirectDownloadEngine.MaximumDirectRequestBytes + 257))
+            .Select(index => (byte)(index % 241))
+            .ToArray();
+        var requests = 0;
+        using var handler = new StubHandler((request, _) =>
+        {
+            var bounds = QueryValue(request.RequestUri!, "range")!
+                .Split('-')
+                .Select(long.Parse)
+                .ToArray();
+            var from = bounds[0];
+            var to = Math.Min(bounds[1], payload.Length - 1L);
+            var length = checked((int)(to - from + 1));
+            var content = new byte[length];
+            Buffer.BlockCopy(payload, checked((int)from), content, 0, length);
+            requests++;
+            return Task.FromResult(Response(HttpStatusCode.OK, content));
+        });
+        using var client = new HttpClient(handler);
+        var engine = Engine(client);
+
+        var result = await engine.DownloadAsync(Request(destination, payload.Length) with
+        {
+            SourceUrl = new Uri("https://fixture.googlevideo.com/videoplayback?sig=fixture"),
+            ExpectedLength = null
+        });
+
+        Assert.True(result.IsSuccess, result.Error?.Message);
+        Assert.Equal(2, requests);
+        Assert.Equal(payload.Length, result.Value.BytesWritten);
+        Assert.SequenceEqual(payload, await File.ReadAllBytesAsync(destination));
+    }
+
+    [Test]
+    public static async Task RejectsShortGoogleVideoQueryRangeWhenLengthIsKnown()
+    {
+        using var directory = new TestDirectory();
+        var destination = Path.Combine(directory.Path, "short-known-googlevideo.mp4");
+        var payload = Enumerable.Range(0, 257).Select(index => (byte)index).ToArray();
+        using var handler = new StubHandler((_, _) =>
+            Task.FromResult(Response(HttpStatusCode.OK, payload)));
+        using var client = new HttpClient(handler);
+        var engine = Engine(client);
+
+        var result = await engine.DownloadAsync(Request(destination, payload.Length + 1L) with
+        {
+            SourceUrl = new Uri("https://fixture.googlevideo.com/videoplayback?sig=fixture")
+        });
+
+        Assert.False(result.IsSuccess);
+        Assert.Equal("Download.RemoteChanged", result.Error?.Code);
+        Assert.False(File.Exists(destination));
+    }
+
+    [Test]
     public static async Task ResumesCompatiblePartialUsingRangeAndValidator()
     {
         using var directory = new TestDirectory();

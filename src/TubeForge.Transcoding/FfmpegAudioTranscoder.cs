@@ -1,0 +1,280 @@
+using System.ComponentModel;
+using System.Diagnostics;
+using TubeForge.Core.Errors;
+using TubeForge.Core.Media;
+using TubeForge.Core.Results;
+
+namespace TubeForge.Transcoding;
+
+public sealed class FfmpegAudioTranscoder
+{
+    private const string RelativeBundledPath = "ffmpeg/ffmpeg.exe";
+    private readonly string _executablePath;
+    private readonly IFfmpegAudioProcessRunner _processRunner;
+
+    public FfmpegAudioTranscoder(string executablePath)
+        : this(executablePath, new FfmpegAudioProcessRunner())
+    {
+    }
+
+    internal FfmpegAudioTranscoder(
+        string executablePath,
+        IFfmpegAudioProcessRunner processRunner)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(executablePath);
+        _executablePath = Path.GetFullPath(executablePath);
+        _processRunner = processRunner ?? throw new ArgumentNullException(nameof(processRunner));
+    }
+
+    public string ExecutablePath => _executablePath;
+
+    public bool IsAvailable => File.Exists(_executablePath);
+
+    public static string BundledExecutablePath(string baseDirectory) =>
+        Path.GetFullPath(Path.Combine(baseDirectory, RelativeBundledPath));
+
+    public async Task<Result<AudioTranscodeReceipt>> TranscodeAsync(
+        AudioTranscodeRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        var validation = ValidateRequest(request);
+        if (validation is not null)
+        {
+            return Result<AudioTranscodeReceipt>.Failure(validation);
+        }
+
+        var source = Path.GetFullPath(request.SourcePath);
+        var destination = Path.GetFullPath(request.DestinationPath);
+        string? temporary = null;
+        try
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (!IsAvailable)
+            {
+                return Failure(
+                    "Media.FFmpegMissing",
+                    "TubeForge's bundled FFmpeg media engine is missing. Reinstall TubeForge.");
+            }
+
+            if (File.Exists(destination))
+            {
+                var recovered = Mp3FileValidator.Validate(destination);
+                if (!request.AllowExistingValidatedOutput || !recovered.IsSuccess)
+                {
+                    return Result<AudioTranscodeReceipt>.Failure(
+                        recovered.Error ?? new TubeForgeError(
+                            "Download.DestinationExists",
+                            "The selected output file already exists."));
+                }
+
+                return Success(destination, request.Output.BitrateKbps);
+            }
+
+            var directory = Path.GetDirectoryName(destination)!;
+            Directory.CreateDirectory(directory);
+            temporary = destination + "." + Guid.NewGuid().ToString("N") + ".transcoding.mp3";
+            var arguments = new List<string>
+            {
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-xerror",
+                "-nostdin",
+                "-i",
+                source,
+                "-map",
+                "0:a:0",
+                "-vn",
+                "-c:a",
+                "libmp3lame",
+                "-b:a",
+                $"{request.Output.BitrateKbps}k",
+                "-map_metadata",
+                "-1",
+                "-f",
+                "mp3",
+                temporary
+            };
+
+            var exitCode = await _processRunner.RunAsync(
+                    _executablePath,
+                    arguments,
+                    directory,
+                    cancellationToken)
+                .ConfigureAwait(false);
+            if (exitCode != 0)
+            {
+                return Failure(
+                    "Media.FFmpegAudioFailed",
+                    "FFmpeg could not convert this audio stream to MP3.",
+                    $"FFmpeg exited with code {exitCode}.");
+            }
+
+            var outputValidation = Mp3FileValidator.Validate(temporary);
+            if (!outputValidation.IsSuccess)
+            {
+                return Result<AudioTranscodeReceipt>.Failure(outputValidation.Error!);
+            }
+
+            File.Move(temporary, destination, overwrite: false);
+            temporary = null;
+            return Success(destination, request.Output.BitrateKbps);
+        }
+        catch (OperationCanceledException)
+        {
+            return Failure("Operation.Cancelled", "The audio conversion was cancelled.");
+        }
+        catch (Win32Exception exception)
+        {
+            return Failure(
+                "Media.FFmpegStartFailed",
+                "TubeForge could not start FFmpeg.",
+                exception.GetType().Name);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return Failure(
+                "Media.TranscodeWriteFailed",
+                "TubeForge could not write the converted audio file.",
+                exception.GetType().Name);
+        }
+        catch (Exception exception) when (
+            exception is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            return Failure(
+                "Media.InvalidTranscodePath",
+                "Select valid source and destination paths.",
+                exception.GetType().Name);
+        }
+        finally
+        {
+            if (temporary is not null)
+            {
+                TryDelete(temporary);
+            }
+        }
+    }
+
+    private static TubeForgeError? ValidateRequest(AudioTranscodeRequest request)
+    {
+        if (!request.Output.IsValid || request.Output.Kind != AudioOutputKind.Mp3)
+        {
+            return new TubeForgeError("Media.InvalidTranscodeProfile", "Select a supported MP3 output profile.");
+        }
+
+        if (string.IsNullOrWhiteSpace(request.SourcePath) ||
+            string.IsNullOrWhiteSpace(request.DestinationPath))
+        {
+            return new TubeForgeError("Media.InvalidTranscodePath", "Select valid source and destination paths.");
+        }
+
+        try
+        {
+            var source = Path.GetFullPath(request.SourcePath);
+            var destination = Path.GetFullPath(request.DestinationPath);
+            if (!File.Exists(source) ||
+                source.Equals(destination, StringComparison.OrdinalIgnoreCase) ||
+                !string.Equals(Path.GetExtension(destination), ".mp3", StringComparison.OrdinalIgnoreCase) ||
+                string.IsNullOrWhiteSpace(Path.GetDirectoryName(destination)))
+            {
+                return new TubeForgeError("Media.InvalidTranscodePath", "Select valid source and destination paths.");
+            }
+        }
+        catch (Exception exception) when (
+            exception is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            return new TubeForgeError(
+                "Media.InvalidTranscodePath",
+                "Select valid source and destination paths.",
+                exception.GetType().Name);
+        }
+
+        return null;
+    }
+
+    private static Result<AudioTranscodeReceipt> Success(string path, int bitrateKbps) =>
+        Result<AudioTranscodeReceipt>.Success(new AudioTranscodeReceipt(
+            path,
+            new FileInfo(path).Length,
+            bitrateKbps,
+            Channels: 0,
+            SampleRate: 0));
+
+    private static Result<AudioTranscodeReceipt> Failure(
+        string code,
+        string message,
+        string? detail = null) =>
+        Result<AudioTranscodeReceipt>.Failure(new TubeForgeError(code, message, detail));
+
+    private static void TryDelete(string path)
+    {
+        try
+        {
+            File.Delete(path);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+        }
+    }
+}
+
+internal interface IFfmpegAudioProcessRunner
+{
+    Task<int> RunAsync(
+        string executablePath,
+        IReadOnlyList<string> arguments,
+        string workingDirectory,
+        CancellationToken cancellationToken);
+}
+
+internal sealed class FfmpegAudioProcessRunner : IFfmpegAudioProcessRunner
+{
+    public async Task<int> RunAsync(
+        string executablePath,
+        IReadOnlyList<string> arguments,
+        string workingDirectory,
+        CancellationToken cancellationToken)
+    {
+        var start = new ProcessStartInfo
+        {
+            FileName = executablePath,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            RedirectStandardError = true,
+            RedirectStandardOutput = true,
+            WorkingDirectory = workingDirectory
+        };
+        foreach (var argument in arguments)
+        {
+            start.ArgumentList.Add(argument);
+        }
+
+        using var process = Process.Start(start);
+        if (process is null)
+        {
+            throw new Win32Exception("FFmpeg did not start.");
+        }
+
+        var standardError = process.StandardError.ReadToEndAsync();
+        var standardOutput = process.StandardOutput.ReadToEndAsync();
+        try
+        {
+            await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            if (!process.HasExited)
+            {
+                process.Kill(entireProcessTree: true);
+                await process.WaitForExitAsync(CancellationToken.None).ConfigureAwait(false);
+            }
+
+            throw;
+        }
+
+        _ = await standardError.ConfigureAwait(false);
+        _ = await standardOutput.ConfigureAwait(false);
+        return process.ExitCode;
+    }
+}

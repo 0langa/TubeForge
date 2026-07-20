@@ -71,7 +71,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     private readonly DirectDownloadEngine _downloader;
     private readonly AdaptiveDownloadEngine _adaptiveDownloader;
     private readonly FfmpegMediaProcessor _mediaProcessor;
-    private readonly WindowsMediaFoundationTranscoder _audioTranscoder = new();
+    private readonly FfmpegAudioTranscoder _audioTranscoder;
     private readonly CaptionDownloadEngine _captionDownloader;
     private readonly YouTubeCollectionResolver _collectionResolver;
     private readonly ThumbnailDownloadEngine _thumbnailDownloader;
@@ -175,6 +175,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         _downloader = new DirectDownloadEngine(_httpClient);
         _mediaProcessor = new FfmpegMediaProcessor(
             FfmpegMediaProcessor.BundledExecutablePath(AppContext.BaseDirectory));
+        _audioTranscoder = new FfmpegAudioTranscoder(
+            FfmpegAudioTranscoder.BundledExecutablePath(AppContext.BaseDirectory));
         _adaptiveDownloader = new AdaptiveDownloadEngine(_downloader, _mediaProcessor);
         _captionDownloader = new CaptionDownloadEngine(_httpClient);
         _collectionResolver = new YouTubeCollectionResolver(_httpClient);
@@ -796,7 +798,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         DownloadMode.AudioOnly =>
             SelectedAudioProcessing.Value.Kind == AudioOutputKind.Native
                 ? "Native AAC/Opus: fastest path with no re-encoding or quality loss."
-                : $"MP3 {SelectedAudioProcessing.Value.BitrateKbps} kbps: Windows Media Foundation decodes and re-encodes locally; no FFmpeg.",
+                : $"MP3 {SelectedAudioProcessing.Value.BitrateKbps} kbps: bundled FFmpeg decodes and re-encodes locally.",
         DownloadMode.VideoOnly =>
             VideoOnlyModeNotice(),
         _ => string.Empty
@@ -2508,9 +2510,11 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         AudioOutputProfile output = default)
     {
         var format = selection.Format;
-        var quality = format.HasVideo
-            ? format.Height is > 0 ? $"{format.Height}p" : "video"
-            : format.Bitrate is > 0 ? $"{Math.Round(format.Bitrate.Value / 1000d):0}kbps" : "audio";
+        var quality = output.Kind == AudioOutputKind.Mp3
+            ? $"{output.BitrateKbps}kbps"
+            : format.HasVideo
+                ? format.Height is > 0 ? $"{format.Height}p" : "video"
+                : format.Bitrate is > 0 ? $"{Math.Round(format.Bitrate.Value / 1000d):0}kbps" : "audio";
         var extension = OutputExtension(selection, output);
         var template = index is not null && FileNameTemplateText == FileNameTemplate.Default
             ? "{index} - {title}"

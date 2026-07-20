@@ -5,9 +5,10 @@ using TubeForge.Downloads;
 using TubeForge.Transcoding;
 using TubeForge.YouTube;
 
-if (args.Length != 1)
+if (args.Length is < 1 or > 2)
 {
-    Console.Error.WriteLine("Usage: dotnet run --project tools/TubeForge.TranscodeSmoke -- <youtube-url>");
+    Console.Error.WriteLine(
+        "Usage: dotnet run --project tools/TubeForge.TranscodeSmoke -- <youtube-url> [ffmpeg-path]");
     return 2;
 }
 
@@ -57,7 +58,10 @@ Directory.CreateDirectory(workDirectory);
 try
 {
     var downloader = new DirectDownloadEngine(client);
-    var transcoder = new WindowsMediaFoundationTranscoder();
+    var ffmpegPath = args.Length == 2
+        ? Path.GetFullPath(args[1])
+        : FfmpegAudioTranscoder.BundledExecutablePath(AppContext.BaseDirectory);
+    var transcoder = new FfmpegAudioTranscoder(ffmpegPath);
     foreach (var format in formats)
     {
         var source = Path.Combine(workDirectory, $"source-{format.FormatId}{FormatDisplay.OutputExtension(format)}");

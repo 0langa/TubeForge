@@ -63,5 +63,5 @@ public static class Mp3FileValidator
 
     private static Result<bool> Invalid() => Result<bool>.Failure(new TubeForgeError(
         "Media.InvalidTranscodeOutput",
-        "Windows produced an invalid or empty MP3 file."));
+        "FFmpeg produced an invalid or empty MP3 file."));
 }

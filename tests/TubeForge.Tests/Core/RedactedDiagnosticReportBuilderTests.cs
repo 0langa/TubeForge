@@ -24,7 +24,9 @@ public static class RedactedDiagnosticReportBuilderTests
             FailedQueueItems = 5
         });
 
-        Assert.True(report.Contains("\"thirdPartyDependencies\": false", StringComparison.Ordinal));
+        Assert.True(report.Contains("\"thirdPartyDependencies\": true", StringComparison.Ordinal));
+        Assert.True(report.Contains("\"thirdPartyManagedPackages\": false", StringComparison.Ordinal));
+        Assert.True(report.Contains("\"bundledFfmpeg\": true", StringComparison.Ordinal));
         Assert.True(report.Contains("\"stage\": \"AndroidClientResolved\"", StringComparison.Ordinal));
         Assert.True(report.Contains("\"totalFormats\": 27", StringComparison.Ordinal));
         Assert.False(report.Contains("http", StringComparison.OrdinalIgnoreCase));

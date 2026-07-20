@@ -234,9 +234,15 @@ public sealed class DirectDownloadEngine
                 }
 
                 var requestedBytes = checked(rangeEnd - currentLength + 1);
+                var queryResponseBytes = response.Content.Headers.ContentLength;
+                var discoveredQueryEnd = usesRangeQuery &&
+                                         expectedLength is null &&
+                                         queryResponseBytes is >= 0 &&
+                                         queryResponseBytes < requestedBytes;
                 if (usesRangeQuery &&
-                    response.Content.Headers.ContentLength is long queryLength &&
-                    queryLength != requestedBytes)
+                    queryResponseBytes is long queryLength &&
+                    (queryLength > requestedBytes ||
+                     expectedLength is not null && queryLength != requestedBytes))
                 {
                     return Failure(
                         "Download.RemoteChanged",
@@ -244,7 +250,9 @@ public sealed class DirectDownloadEngine
                 }
 
                 var responseTotal = usesRangeQuery
-                    ? expectedLength
+                    ? discoveredQueryEnd
+                        ? checked(currentLength + queryResponseBytes!.Value)
+                        : expectedLength
                     : contentRange?.Length ?? DetermineTotalLength(response, currentLength);
                 if (expectedLength is not null &&
                     responseTotal is not null &&
@@ -286,7 +294,9 @@ public sealed class DirectDownloadEngine
 
                 if (response.Content.Headers.ContentLength is long responseLength &&
                     transferred != responseLength ||
-                    usesRangeQuery && transferred != requestedBytes ||
+                    usesRangeQuery && transferred != (discoveredQueryEnd
+                        ? queryResponseBytes!.Value
+                        : requestedBytes) ||
                     !usesRangeQuery && response.StatusCode == HttpStatusCode.PartialContent &&
                     contentRange!.To != currentLength - 1)
                 {

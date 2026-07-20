@@ -20,7 +20,7 @@ Include the TubeForge version, Windows version, typed failure code, extraction s
 ## v1 limitations
 
 - No active/upcoming live capture.
-- MP3 conversion uses Windows Media Foundation; video re-encoding is not supported.
+- MP3 conversion uses bundled FFmpeg `libmp3lame`; video re-encoding is not supported.
 - No authenticated, private, paid, membership, DRM, or access-control content.
 - No silent update, telemetry, or crash-upload service. Update checks are optional and installation always requires confirmation.
 - Installer and portable distributions are Windows x64 only.

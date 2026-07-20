@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.2.4 - 2026-07-21
+
+- Replace Windows Media Foundation MP3 conversion with bundled FFmpeg `libmp3lame`, fixing high-bitrate AAC/M4A and Opus/WebM inputs that could fail before publication.
+- Fail closed on missing FFmpeg, conversion failure, cancellation, or invalid MP3 output; retain validated-output queue recovery and clean temporary files.
+- Add exhaustive dependent-filter coverage across download modes, containers, codecs, resolutions, frame rates, dynamic ranges, audio bitrates, processing profiles, and exact-output selection.
+
 ## 1.2.3 - 2026-07-20
 
 - Preserve provider user agents that contain comma-separated product comments across metadata probes, direct downloads, and segmented downloads without relaxing header-injection bounds.

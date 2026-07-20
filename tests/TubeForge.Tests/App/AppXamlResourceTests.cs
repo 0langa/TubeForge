@@ -50,4 +50,18 @@ public static class AppXamlResourceTests
             }
         }
     }
+
+    [Test]
+    public static void CollectionFilenameGuidanceDoesNotPromiseAnUnconfiguredIndex()
+    {
+        var fixtureDirectory = Path.Combine(AppContext.BaseDirectory, "Fixtures");
+        var mainWindowXaml = File.ReadAllText(Path.Combine(fixtureDirectory, "MainWindow.xaml"));
+
+        Assert.False(mainWindowXaml.Contains(
+            "Filenames include collection index.",
+            StringComparison.Ordinal));
+        Assert.True(mainWindowXaml.Contains(
+            "Use {index} in the filename template to include collection positions.",
+            StringComparison.Ordinal));
+    }
 }

@@ -31,7 +31,9 @@ public static class RedactedDiagnosticReportBuilder
                 version = SafeValue(input.ApplicationVersion, 64),
                 runtime = SafeValue(input.RuntimeDescription, 128),
                 architecture = SafeValue(input.ProcessArchitecture, 32),
-                thirdPartyDependencies = false
+                thirdPartyDependencies = true,
+                thirdPartyManagedPackages = false,
+                bundledFfmpeg = true
             },
             extraction = new
             {

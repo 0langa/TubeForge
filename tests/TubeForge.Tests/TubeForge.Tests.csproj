@@ -6,6 +6,7 @@
     <RootNamespace>TubeForge.Tests</RootNamespace>
   </PropertyGroup>
   <ItemGroup>
+    <ProjectReference Include="../../src/TubeForge.App/TubeForge.App.csproj" />
     <ProjectReference Include="../../src/TubeForge.Core/TubeForge.Core.csproj" />
     <ProjectReference Include="../../src/TubeForge.Downloads/TubeForge.Downloads.csproj" />
     <ProjectReference Include="../../src/TubeForge.Installation/TubeForge.Installation.csproj" />
