@@ -35,12 +35,16 @@ Pass. The final diagnostics report recorded TubeForge 1.2.3, 11 completed output
 
 - The E: destination was disconnected during validation. TubeForge remained usable, Library reflected missing media, and all 14 final files returned intact when the drive was reconnected.
 - Library immediately reported the restored files as available. No partial files remained.
+- Reinstalling the exact 1.2.3 installer preserved both the saved settings file and a disposable application-data marker byte-for-byte, confirming that normal install and upgrade paths retain `%LOCALAPPDATA%\TubeForge` data.
 
 ## Automated gates
 
 - Release build: zero warnings and zero errors.
 - Tests: 166/166 passed.
 - Core performance: 0.5457 ms p95 against a 25 ms budget.
+- GitHub Actions completed the clean v1.2.3 release workflow and published the installer, portable archives, manifest, and checksums.
+- The public installer matched the published SHA-256 record, installed with exit code 0, and reported product version `1.2.3+9adeedda408e8a24888092183710cdb43037243c`.
+- The installed app's updater reported TubeForge 1.2.3 as current after an explicit update check.
 - Final redacted diagnostics: `Evidence\diagnostics-final.json` under the E2E root.
 
 This matrix is broad release evidence, not a guarantee against every future upstream YouTube response change, network failure, regional policy, or unsupported access-controlled input.
