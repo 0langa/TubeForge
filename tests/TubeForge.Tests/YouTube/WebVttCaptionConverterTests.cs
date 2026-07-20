@@ -49,4 +49,20 @@ public static class WebVttCaptionConverterTests
         Assert.False(reversed.IsSuccess);
         Assert.Equal("Caption.InvalidWebVtt", reversed.Error?.Code);
     }
+
+    [Test]
+    public static void AcceptsYouTubeAutoCaptionWhitespacePayloadLines()
+    {
+        const string autoCaption =
+            "WEBVTT\nKind: captions\nLanguage: en\n\n" +
+            "00:00:00.240 --> 00:00:02.149 align:start position:0%\n" +
+            " \n" +
+            "Last<00:00:00.480><c> week,</c><00:00:00.880><c> Bun</c>\n\n";
+
+        var subRip = WebVttCaptionConverter.ConvertToSubRip(autoCaption);
+
+        Assert.True(subRip.IsSuccess, subRip.Error?.Message);
+        Assert.True(subRip.Value.Contains("Last week, Bun", StringComparison.Ordinal));
+        Assert.Equal(1, WebVttCaptionConverter.CountCues(autoCaption).Value);
+    }
 }

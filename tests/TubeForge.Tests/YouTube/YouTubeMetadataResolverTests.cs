@@ -332,6 +332,78 @@ public static class YouTubeMetadataResolverTests
         Assert.Equal(4, requestCount);
     }
 
+    [Test]
+    public static async Task UsesTvFallbackWithProviderUserAgentContainingSeparator()
+    {
+        const string watchPage = """
+            <script>
+            var ytInitialPlayerResponse={
+              "playabilityStatus":{"status":"OK"},
+              "videoDetails":{"videoId":"Fixture123_","title":"Watch metadata","lengthSeconds":"10"}
+            };
+            ytcfg.set({"INNERTUBE_API_KEY":"fixturePublicConfig"});
+            </script>
+            """;
+        const string emptyPlayerResponse = """
+            {
+              "playabilityStatus":{"status":"OK"},
+              "videoDetails":{"videoId":"Fixture123_","title":"Client metadata","lengthSeconds":"10"}
+            }
+            """;
+        const string tvPlayerResponse = """
+            {
+              "playabilityStatus":{"status":"OK"},
+              "videoDetails":{"videoId":"Fixture123_","title":"TV metadata","lengthSeconds":"10"},
+              "streamingData":{"formats":[{
+                "itag":18,
+                "url":"https://fixture.googlevideo.com/videoplayback?id=tv&itag=18",
+                "mimeType":"video/mp4; codecs=\"avc1.42001E, mp4a.40.2\"",
+                "width":640,"height":360,"contentLength":"10"
+              }]}
+            }
+            """;
+        var clientNames = new List<string>();
+        using var handler = new StubHandler(request =>
+        {
+            if (request.Method == HttpMethod.Get && request.RequestUri?.Host == "www.youtube.com")
+            {
+                return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(watchPage) };
+            }
+
+            if (request.Method == HttpMethod.Post)
+            {
+                var clientName = request.Headers.GetValues("X-YouTube-Client-Name").Single();
+                clientNames.Add(clientName);
+                if (clientName == "7")
+                {
+                    Assert.True(request.Headers.GetValues("User-Agent").Single()
+                        .Contains("(unlike Gecko), Unknown_TV", StringComparison.Ordinal));
+                    return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(tvPlayerResponse) };
+                }
+
+                return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(emptyPlayerResponse) };
+            }
+
+            Assert.Equal("fixture.googlevideo.com", request.RequestUri?.Host);
+            Assert.True(request.Headers.GetValues("User-Agent").Single()
+                .Contains("(unlike Gecko), Unknown_TV", StringComparison.Ordinal));
+            return new HttpResponseMessage(HttpStatusCode.PartialContent)
+            {
+                Content = new ByteArrayContent([0])
+            };
+        });
+        using var client = new HttpClient(handler);
+        var resolver = new YouTubeMetadataResolver(client);
+        Assert.True(YouTubeVideoId.TryCreate("Fixture123_", out var videoId));
+
+        var result = await resolver.ResolveAsync(videoId);
+
+        Assert.True(result.IsSuccess, result.Error?.Message);
+        Assert.Equal("ClientResolved:TVHTML5", result.Value.Diagnostics?.Stage);
+        Assert.Equal(18, result.Value.Metadata.Formats.Single().FormatId);
+        Assert.SequenceEqual(new[] { "28", "56", "7" }, clientNames);
+    }
+
     private static string? QueryValue(Uri uri, string key)
     {
         foreach (var pair in uri.Query.TrimStart('?').Split('&'))

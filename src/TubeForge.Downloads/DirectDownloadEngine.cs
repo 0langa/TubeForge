@@ -153,9 +153,13 @@ public sealed class DirectDownloadEngine
                     ? AddRangeQuery(request.SourceUrl, currentLength, rangeEnd, requestNumber++)
                     : request.SourceUrl;
                 using var requestMessage = new HttpRequestMessage(HttpMethod.Get, requestUri);
-                requestMessage.Headers.UserAgent.ParseAdd(request.HttpUserAgent ??
-                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
-                    "(KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36");
+                if (!HttpUserAgentHeader.TryApply(requestMessage, request.HttpUserAgent))
+                {
+                    return Failure(
+                        "Download.InvalidUserAgent",
+                        "The media request contained an invalid HTTP user agent.");
+                }
+
                 // Googlevideo rejects full-object and open-ended GETs for some adaptive URLs.
                 // Bounded requests also keep each response recoverable after interruption.
                 if (!usesRangeQuery)

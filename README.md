@@ -9,7 +9,7 @@ TubeForge is an experimental, ad-free Windows desktop downloader built from scra
 
 ## Status
 
-TubeForge v1.2.2 is the current public stable release.
+TubeForge v1.2.3 is the current public stable release.
 
 Working now:
 
@@ -102,14 +102,14 @@ dotnet run --project src/TubeForge.App --configuration Release
 Create framework-dependent and self-contained Windows x64 archives, a manifest, and SHA-256 checksums:
 
 ```powershell
-.\scripts\Publish-Release.ps1 -Version 1.2.2
-.\scripts\Test-Release.ps1 -Version 1.2.2
+.\scripts\Publish-Release.ps1 -Version 1.2.3
+.\scripts\Test-Release.ps1 -Version 1.2.3
 ```
 
 Create the self-contained per-user installer and checksum manifest:
 
 ```powershell
-.\scripts\Publish-Installer.ps1 -Version 1.2.2
+.\scripts\Publish-Installer.ps1 -Version 1.2.3
 ```
 
 Authenticode signing is optional and fails closed when a requested certificate cannot produce a valid signature. See [installation and data retention](docs/INSTALLATION.md), [extraction compatibility](docs/EXTRACTION_COMPATIBILITY.md), and the [v1 support policy](docs/SUPPORT_POLICY.md).

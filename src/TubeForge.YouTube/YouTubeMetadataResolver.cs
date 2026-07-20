@@ -249,7 +249,11 @@ public sealed class YouTubeMetadataResolver(HttpClient httpClient)
             var endpoint = new Uri(
                 $"https://www.youtube.com/youtubei/v1/player?prettyPrint=false&key={Uri.EscapeDataString(apiKey!)}");
             using var request = new HttpRequestMessage(HttpMethod.Post, endpoint);
-            request.Headers.UserAgent.ParseAdd(profile.UserAgent);
+            if (!HttpUserAgentHeader.TryApply(request, profile.UserAgent))
+            {
+                return null;
+            }
+
             request.Headers.TryAddWithoutValidation("X-YouTube-Client-Name", profile.NumericId);
             request.Headers.TryAddWithoutValidation("X-YouTube-Client-Version", profile.Version);
             if (!string.IsNullOrWhiteSpace(visitorData))
@@ -345,9 +349,11 @@ public sealed class YouTubeMetadataResolver(HttpClient httpClient)
         {
             var lastByte = Math.Max(0, (format.ContentLength ?? 1) - 1);
             using var probe = new HttpRequestMessage(HttpMethod.Get, format.Url);
-            probe.Headers.UserAgent.ParseAdd(format.HttpUserAgent ??
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
-                "(KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36");
+            if (!HttpUserAgentHeader.TryApply(probe, format.HttpUserAgent))
+            {
+                return false;
+            }
+
             probe.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("*/*"));
             probe.Headers.Range = new RangeHeaderValue(lastByte, lastByte);
             probe.Headers.Referrer = watchUrl;

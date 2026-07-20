@@ -112,6 +112,9 @@ public static class DirectDownloadEngineTests
     [Test]
     public static async Task DownloadsGoogleVideoUsingPlayerStyleQueryRangesAndClientUserAgent()
     {
+        const string providerUserAgent =
+            "Mozilla/5.0 (ChromiumStylePlatform) Cobalt/25.lts.30.1034943-gold " +
+            "(unlike Gecko), Unknown_TV_Unknown_0/Unknown (Unknown, Unknown)";
         using var directory = new TestDirectory();
         var destination = Path.Combine(directory.Path, "googlevideo-ranges.mp4");
         var payload = Enumerable.Range(0, checked((int)DirectDownloadEngine.MaximumDirectRequestBytes + 257))
@@ -121,7 +124,7 @@ public static class DirectDownloadEngineTests
         using var handler = new StubHandler((request, _) =>
         {
             Assert.True(request.Headers.Range is null);
-            Assert.True(request.Headers.UserAgent.ToString().Contains("fixture-client", StringComparison.Ordinal));
+            Assert.Equal(providerUserAgent, request.Headers.GetValues("User-Agent").Single());
             var rangeText = QueryValue(request.RequestUri!, "range")!;
             var bounds = rangeText.Split('-').Select(long.Parse).ToArray();
             Assert.Equal(requests.ToString(), QueryValue(request.RequestUri!, "rn"));
@@ -138,7 +141,7 @@ public static class DirectDownloadEngineTests
         var result = await engine.DownloadAsync(Request(destination, payload.Length) with
         {
             SourceUrl = new Uri("https://fixture.googlevideo.com/videoplayback?sig=fixture"),
-            HttpUserAgent = "fixture-client/1.0"
+            HttpUserAgent = providerUserAgent
         });
 
         Assert.True(result.IsSuccess, result.Error?.Message);
@@ -488,6 +491,9 @@ public static class DirectDownloadEngineTests
     [Test]
     public static async Task SegmentedTransferUsesConcurrentValidatedRangesWithoutByteLoss()
     {
+        const string providerUserAgent =
+            "Mozilla/5.0 (ChromiumStylePlatform) Cobalt/25.lts.30.1034943-gold " +
+            "(unlike Gecko), Unknown_TV_Unknown_0/Unknown (Unknown, Unknown)";
         using var directory = new TestDirectory();
         var destination = Path.Combine(directory.Path, "segmented.mp4");
         var payload = Enumerable.Range(0, 1024 * 1024).Select(index => (byte)(index % 239)).ToArray();
@@ -497,6 +503,7 @@ public static class DirectDownloadEngineTests
         var maximumActive = 0;
         using var handler = new StubHandler(async (request, cancellationToken) =>
         {
+            Assert.Equal(providerUserAgent, request.Headers.GetValues("User-Agent").Single());
             var range = request.Headers.Range?.Ranges.Single();
             Assert.True(range?.From is not null && range.To is not null);
             var currentActive = Interlocked.Increment(ref active);
@@ -513,7 +520,10 @@ public static class DirectDownloadEngineTests
         using var client = new HttpClient(handler);
         var engine = Engine(client);
 
-        var result = await engine.DownloadAsync(SegmentedRequest(destination, payload.Length));
+        var result = await engine.DownloadAsync(SegmentedRequest(destination, payload.Length) with
+        {
+            HttpUserAgent = providerUserAgent
+        });
 
         Assert.True(result.IsSuccess, result.Error?.Message);
         Assert.False(result.Value.Resumed);

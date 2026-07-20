@@ -2,6 +2,15 @@
 
 YouTube is an upstream service outside TubeForge's control. Compatibility is versioned by TubeForge release and verified with synthetic fixtures plus bounded public canaries; it is not a permanent guarantee.
 
+## v1.2.3 provider compatibility update
+
+Validated on 2026-07-20:
+
+- provider user agents containing commas remain byte-for-byte intact across metadata fallback, tail probes, direct downloads, and segmented downloads;
+- CR, LF, NUL, and values above the explicit length bound remain rejected before an HTTP request is sent;
+- YouTube auto-caption WebVTT with a whitespace-only first payload line converts to valid SRT instead of terminating the cue early;
+- an installed-app E2E matrix completed 11 media outputs with zero failed/cancelled queue items, including 4K, one-hour, MP4, WebM, MKV, M4A, MP3, caption, sidecar, and channel-selection paths.
+
 ## v1.2.2 audio selection update
 
 Validated on 2026-07-20:

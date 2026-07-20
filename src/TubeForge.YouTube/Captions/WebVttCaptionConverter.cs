@@ -131,7 +131,7 @@ public static class WebVttCaptionConverter
 
             index++;
             var cueLines = new List<string>();
-            while (index < lines.Length && !string.IsNullOrWhiteSpace(lines[index]))
+            while (index < lines.Length && lines[index].Length > 0)
             {
                 if (lines[index].Any(character => char.IsControl(character) && character != '\t'))
                 {

@@ -467,6 +467,9 @@ Exit: adaptive and video-only H.264 MP4 outputs become conventional indexed file
 - [x] Rank companion audio globally by bitrate and sample rate; prefer native MP4/WebM only when audio quality is equal.
 - [x] Synchronize current docs and container-specific FFmpeg failure wording.
 - [x] Prepare v1.2.2 x64 release source, tests, notes, installer copy, and update metadata.
+- [x] Fix comma-bearing provider user-agent handling and whitespace-prefixed auto-caption cues with deterministic regression tests.
+- [x] Complete the v1.2.3 installed-app E2E matrix, including drive loss/reconnect, long-form media, player compatibility, and FFmpeg decode checks.
+- [ ] Prepare v1.2.3 x64 release source, notes, installer, checksums, update metadata, and public artifacts.
 
 No unfinished implementation item remains in this plan. New product work requires a new milestone with explicit exit criteria.
 

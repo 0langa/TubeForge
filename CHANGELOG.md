@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.2.3 - 2026-07-20
+
+- Preserve provider user agents that contain comma-separated product comments across metadata probes, direct downloads, and segmented downloads without relaxing header-injection bounds.
+- Accept whitespace-only payload lines emitted by YouTube auto-caption WebVTT while continuing to reject malformed cue controls and timing.
+- Complete a fresh installed-app E2E matrix covering MP4, WebM, MKV, M4A, MP3, captions, sidecars, 4K, a one-hour output, public channel selection, queue recovery, drive disconnect/reconnect, Windows playback, and FFmpeg decode validation.
+
 ## 1.2.2 - 2026-07-20
 
 - Select the highest-bitrate, highest-sample-rate compatible audio track across MP4 and WebM families; use native MP4/WebM only as an equal-quality tie-breaker and MKV when the better audio track crosses container families.

@@ -5,6 +5,7 @@ using System.Net.Http.Headers;
 using System.Text.Json;
 using Microsoft.Win32.SafeHandles;
 using TubeForge.Core.Errors;
+using TubeForge.Core.Networking;
 using TubeForge.Core.Results;
 
 namespace TubeForge.Downloads;
@@ -208,9 +209,13 @@ internal sealed class SegmentedDownloadEngine(HttpClient httpClient, DownloadUri
         try
         {
             using var message = new HttpRequestMessage(HttpMethod.Get, request.SourceUrl);
-            message.Headers.UserAgent.ParseAdd(request.HttpUserAgent ??
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
-                "(KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36");
+            if (!HttpUserAgentHeader.TryApply(message, request.HttpUserAgent))
+            {
+                return FailureBool(
+                    "Download.InvalidUserAgent",
+                    "The media request contained an invalid HTTP user agent.");
+            }
+
             message.Headers.Range = new RangeHeaderValue(segment.Start, segment.End);
             var initialState = getState();
             if (!string.IsNullOrWhiteSpace(initialState.EntityTag) &&
