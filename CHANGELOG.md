@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.2.2 - 2026-07-20
+
+- Select the highest-bitrate, highest-sample-rate compatible audio track across MP4 and WebM families; use native MP4/WebM only as an equal-quality tie-breaker and MKV when the better audio track crosses container families.
+- Report FFmpeg finalization failures using the selected MP4, WebM, or MKV output container.
+- Synchronize current architecture and release-status documentation with the FFmpeg-backed WebM/MKV pipeline.
+
 ## 1.2.1 - 2026-07-18
 
 - Bundle pinned x64 LGPL FFmpeg (8.1.2, verified SHA-256, license, source, and build provenance) and finalize MP4 outputs with `-c copy` and `+faststart`, converting YouTube fragmented DASH MP4 into conventional indexed MP4 without re-encoding.

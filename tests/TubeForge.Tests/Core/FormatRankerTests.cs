@@ -174,7 +174,7 @@ public static class FormatRankerTests
     }
 
     [Test]
-    public static void PrefersNativeContainerOverMkvWhenBothAudioFamiliesExist()
+    public static void SelectsHighestQualityAudioAcrossContainers()
     {
         var vp9 = Format(248, StreamKind.VideoOnly, MediaContainer.WebM, 1080, 5_000_000) with
         {
@@ -186,15 +186,27 @@ public static class FormatRankerTests
             AudioCodec = AudioCodec.Opus
         };
 
-        // VP9 pairs natively with Opus (WebM), not the higher-bitrate cross-container AAC.
+        var companion = AdaptiveFormatSelector.SelectCompanionAudio(vp9, [aac, opus]);
+        Assert.Equal(140, companion!.FormatId);
+        Assert.Equal(MediaContainer.Mkv, AdaptiveFormatSelector.ResolveOutputContainer(vp9, companion));
+    }
+
+    [Test]
+    public static void PrefersNativeContainerWhenAudioQualityIsEqual()
+    {
+        var vp9 = Format(248, StreamKind.VideoOnly, MediaContainer.WebM, 1080, 5_000_000) with
+        {
+            VideoCodec = VideoCodec.Vp9
+        };
+        var aac = Format(140, StreamKind.AudioOnly, MediaContainer.Mp4, null, 160_000);
+        var opus = Format(251, StreamKind.AudioOnly, MediaContainer.WebM, null, 160_000) with
+        {
+            AudioCodec = AudioCodec.Opus
+        };
+
         var companion = AdaptiveFormatSelector.SelectCompanionAudio(vp9, [aac, opus]);
         Assert.Equal(251, companion!.FormatId);
         Assert.Equal(MediaContainer.WebM, AdaptiveFormatSelector.ResolveOutputContainer(vp9, companion));
-
-        // With only AAC available, VP9 falls back to a lossless MKV mux.
-        var crossOnly = AdaptiveFormatSelector.SelectCompanionAudio(vp9, [aac]);
-        Assert.Equal(140, crossOnly!.FormatId);
-        Assert.Equal(MediaContainer.Mkv, AdaptiveFormatSelector.ResolveOutputContainer(vp9, crossOnly));
     }
 
     [Test]
@@ -205,7 +217,7 @@ public static class FormatRankerTests
         {
             VideoCodec = VideoCodec.Vp9
         };
-        var mp4Audio = Format(140, StreamKind.AudioOnly, MediaContainer.Mp4, null, 128_000);
+        var mp4Audio = Format(140, StreamKind.AudioOnly, MediaContainer.Mp4, null, 160_000);
         var webMAudio = Format(251, StreamKind.AudioOnly, MediaContainer.WebM, null, 160_000) with
         {
             AudioCodec = AudioCodec.Opus

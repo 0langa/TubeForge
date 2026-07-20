@@ -532,7 +532,7 @@
                         </ListBox>
 
                         <Border Grid.Row="6" Background="#111A2A" CornerRadius="8" Padding="12,9">
-                            <TextBlock Text="Best complete file per video: highest compatible video + audio, MP4 preferred at equal quality. Filenames include collection index."
+                            <TextBlock Text="Best complete file per video: highest-quality compatible video + audio, MP4 preferred only when quality is equal. Filenames include collection index."
                                        TextWrapping="Wrap" FontSize="10" Foreground="#A8B7CE" />
                         </Border>
 
@@ -919,7 +919,7 @@
                                 <TextBlock Text="OUTPUT PREFERENCE" Style="{StaticResource FieldLabel}" />
                                 <TextBlock Text="MP4 preferred when video quality is equal; higher-quality WebM remains available."
                                            Margin="0,6,0,0" TextWrapping="Wrap" Foreground="#A8B7CE" />
-                                <TextBlock Text="FFmpeg stream-copies tracks into indexed MP4; no video/audio re-encoding. No yt-dlp."
+                                <TextBlock Text="FFmpeg stream-copies tracks into indexed MP4 or validated WebM/MKV; no video/audio re-encoding. No yt-dlp."
                                            Margin="0,4,0,0" FontSize="10" Foreground="{StaticResource MutedTextBrush}" />
                             </StackPanel>
                         </Border>

@@ -2,14 +2,14 @@
 
 # TubeForge
 
-TubeForge is an experimental, ad-free Windows desktop downloader built from scratch for media you are authorized to save from YouTube. It does not use `yt-dlp`, hosted conversion services, or third-party NuGet packages. Releases bundle a pinned LGPL FFmpeg executable for reliable MP4 stream-copy finalization.
+TubeForge is an experimental, ad-free Windows desktop downloader built from scratch for media you are authorized to save from YouTube. It does not use `yt-dlp`, hosted conversion services, or third-party NuGet packages. Releases bundle a pinned LGPL FFmpeg executable for reliable MP4, WebM, and MKV stream-copy finalization.
 
 > [!IMPORTANT]
 > You are responsible for complying with YouTube's terms, copyright, privacy, and local law. Download only content you own or have permission to save. TubeForge is not intended to bypass DRM, payment, membership, or other access controls.
 
 ## Status
 
-TubeForge v1.2.1 is the current public stable release.
+TubeForge v1.2.2 is the current public stable release.
 
 Working now:
 
@@ -17,7 +17,7 @@ Working now:
 - strict YouTube URL parsing and live public-video metadata resolution;
 - tail-verified no-token YouTube client chain for direct progressive, native-audio, and video-only streams;
 - type-first stream selection with resolution, container, codec, FPS/HDR, bitrate, and exact-stream filters;
-- highest-quality audio + video selection with separate resumable track downloads, indexed FFmpeg stream-copy MP4 finalization, and in-house WebM muxing;
+- highest-quality video + audio selection with separate resumable track downloads and FFmpeg stream-copy MP4, WebM, or MKV finalization;
 - native M4A/WebM audio saves plus dependency-free Windows Media Foundation MP3 conversion at 128, 192, 256, or 320 kbps;
 - caption-track metadata plus manual/auto language selection and atomic SRT/WebVTT sidecar saves;
 - on-demand validated thumbnail saves and stable JSON metadata sidecars with chapters but without signed stream URLs;
@@ -47,7 +47,7 @@ Not included: active/upcoming live capture, authenticated/access-controlled medi
 - .NET 10 WPF desktop application
 - Public video metadata plus progressive and highest-compatible adaptive downloads
 - Native audio-only downloads
-- Indexed MP4 mux/remux through pinned FFmpeg stream copy; in-house WebM muxing
+- Indexed MP4 plus validated WebM/MKV finalization through pinned FFmpeg stream copy
 - Resumable direct transfers, persisted queue recovery, and bounded concurrent queue processing
 - No ads, telemetry, accounts, or paid features
 
@@ -102,14 +102,14 @@ dotnet run --project src/TubeForge.App --configuration Release
 Create framework-dependent and self-contained Windows x64 archives, a manifest, and SHA-256 checksums:
 
 ```powershell
-.\scripts\Publish-Release.ps1 -Version 1.2.1
-.\scripts\Test-Release.ps1 -Version 1.2.1
+.\scripts\Publish-Release.ps1 -Version 1.2.2
+.\scripts\Test-Release.ps1 -Version 1.2.2
 ```
 
 Create the self-contained per-user installer and checksum manifest:
 
 ```powershell
-.\scripts\Publish-Installer.ps1 -Version 1.2.1
+.\scripts\Publish-Installer.ps1 -Version 1.2.2
 ```
 
 Authenticode signing is optional and fails closed when a requested certificate cannot produce a valid signature. See [installation and data retention](docs/INSTALLATION.md), [extraction compatibility](docs/EXTRACTION_COMPATIBILITY.md), and the [v1 support policy](docs/SUPPORT_POLICY.md).

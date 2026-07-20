@@ -3023,7 +3023,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             new DownloadModeOption(
                 DownloadMode.AudioVideo,
                 "Audio + video",
-                $"{OptionCount(combined.Count)} · up to {MaximumVideoQuality(combined)} · best compatible audio"),
+                $"{OptionCount(combined.Count)} · up to {MaximumVideoQuality(combined)} · highest-quality audio"),
             new DownloadModeOption(
                 DownloadMode.AudioOnly,
                 "Audio only",
@@ -3075,7 +3075,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     private string CombinedModeNotice()
     {
         var combined = AudioVideoVideoFormats();
-        return $"Up to {MaximumVideoQuality(combined)} with audio. TubeForge downloads the selected video and best compatible audio separately, then muxes both locally without re-encoding.";
+        return $"Up to {MaximumVideoQuality(combined)} with audio. TubeForge downloads the selected video and highest-quality compatible audio separately, then muxes both locally without re-encoding.";
     }
 
     private string VideoOnlyModeNotice() =>

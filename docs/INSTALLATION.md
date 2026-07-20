@@ -10,14 +10,14 @@ TubeForge provides a recommended per-user installer and portable ZIP distributio
 
 Both builds target Windows 10/11 x64. Extract the whole archive; do not run `TubeForge.exe` from inside the ZIP.
 
-The self-contained release build restores only the exact Microsoft .NET runtime packs selected by the pinned SDK from the official NuGet feed. Application projects still reject every `PackageReference`. Every x64 distribution also contains `ffmpeg/ffmpeg.exe`, pinned by SHA-256 and used only as a separate process for MP4 stream-copy finalization. Licenses and exact source/build provenance ship beside it and in [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md).
+The self-contained release build restores only the exact Microsoft .NET runtime packs selected by the pinned SDK from the official NuGet feed. Application projects still reject every `PackageReference`. Every x64 distribution also contains `ffmpeg/ffmpeg.exe`, pinned by SHA-256 and used only as a separate process for MP4, WebM, and MKV stream-copy finalization. Licenses and exact source/build provenance ship beside it and in [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md).
 
 ## Verify and install
 
 Keep the downloaded installer or ZIP and `SHA256SUMS.txt` in the same directory. In PowerShell:
 
 ```powershell
-$version = '1.2.1'
+$version = '1.2.2'
 $name = "TubeForge-$version-win-x64-setup.exe"
 $expected = (Get-Content .\SHA256SUMS.txt | Where-Object { $_ -match "  $([regex]::Escape($name))$" }).Split(' ')[0]
 $actual = (Get-FileHash -LiteralPath ".\$name" -Algorithm SHA256).Hash

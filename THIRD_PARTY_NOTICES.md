@@ -3,8 +3,8 @@
 ## FFmpeg
 
 TubeForge distributes an unmodified FFmpeg command-line executable as a separate
-process for MP4 stream-copy muxing and compatibility normalization. TubeForge
-does not link to FFmpeg libraries. MP4 finalization uses `-c copy`, so video and
+process for MP4, WebM, and MKV stream-copy muxing and compatibility normalization. TubeForge
+does not link to FFmpeg libraries. Media finalization uses `-c copy`, so video and
 audio are not re-encoded and source quality is preserved.
 
 - FFmpeg source revision: `94138f6973dd1ac6208ace92148ac0d172455d65`

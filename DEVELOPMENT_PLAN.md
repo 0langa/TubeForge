@@ -2,7 +2,7 @@
 
 ## 1. Product vision
 
-TubeForge is a free, ad-free, local-first Windows desktop application for downloading YouTube media that the user has the right to save. It must provide a polished interface, resilient downloads, clear format choices, and useful diagnostics without invoking `yt-dlp`, browser extensions, hosted conversion services, or third-party managed application libraries. A pinned x64 LGPL FFmpeg executable is bundled only for reliable MP4 stream-copy muxing and normalization.
+TubeForge is a free, ad-free, local-first Windows desktop application for downloading YouTube media that the user has the right to save. It must provide a polished interface, resilient downloads, clear format choices, and useful diagnostics without invoking `yt-dlp`, browser extensions, hosted conversion services, or third-party managed application libraries. A pinned x64 LGPL FFmpeg executable is bundled only for reliable MP4, WebM, and MKV stream-copy muxing and normalization.
 
 The application is built from source in this repository. Network access is limited to fetching YouTube pages, API responses, player scripts, thumbnails, captions, and media selected by the user. No analytics, ads, account system, telemetry, or remote control plane.
 
@@ -17,7 +17,7 @@ The application is built from source in this repository. Network access is limit
 - Public YouTube videos first.
 - Audio + video defaults to the highest compatible adaptive video and audio tracks; progressive media is fallback only.
 - Audio-only downloads in the native container (`m4a`/MP4 or WebM), with optional Windows Media Foundation MP3 transcoding.
-- FFmpeg produces conventional indexed MP4 outputs by stream copy; in-house EBML/WebM muxing remains available.
+- FFmpeg produces conventional indexed MP4 and validated WebM/MKV outputs by stream copy; in-house MP4/WebM muxers remain fallback and test surfaces.
 - Resumable, bounded-concurrency downloads with atomic finalization.
 
 ### Forbidden dependencies
@@ -82,7 +82,7 @@ TubeForge.App (WPF, composition root)
     |
     +-- TubeForge.Media
           stream probing, container validation, safe FFmpeg process boundary,
-          internal WebM muxing
+          internal MP4/WebM fallback muxing
 
 TubeForge.Tests (dependency-free console test runner)
     references all production projects except UI where avoidable
@@ -93,7 +93,7 @@ TubeForge.Tests (dependency-free console test runner)
 - `TubeForge.Core`: no WPF and no YouTube-specific HTTP behavior.
 - `TubeForge.YouTube`: converts YouTube inputs into stable domain models. Player changes stay here.
 - `TubeForge.Downloads`: accepts resolved stream URLs; does not know how extraction works.
-- `TubeForge.Media`: bounded binary/container work plus safe argument-list-only FFmpeg invocation for MP4 finalization.
+- `TubeForge.Media`: bounded binary/container work plus safe argument-list-only FFmpeg invocation for MP4/WebM/MKV finalization.
 - `TubeForge.App`: view models, UI state, settings, composition. Minimal code-behind.
 - `TubeForge.Tests`: custom attributes/assertions/runner; no external test framework.
 
@@ -458,14 +458,17 @@ Exit: clean-machine install, in-app update, rollback, uninstall, MP3 conversion,
 
 Exit: adaptive and video-only H.264 MP4 outputs become conventional indexed files, decode through start/middle/end, and open through Windows media stack.
 
-## 12. Immediate implementation backlog
+## 12. Current maintenance state
 
-Order for current work:
+- [x] Build v1.2.1 x64 archives and installer with pinned FFmpeg payload.
+- [x] Run adaptive MP4, video-only MP4, audio-only, MP3, WebM, MKV, queue, Library, diagnostics, and updater smoke tests.
+- [x] Confirm indexed MP4 samples in Windows Media Player and VLC.
+- [x] Publish checksummed v1.2.1 artifacts after release gates pass.
+- [x] Rank companion audio globally by bitrate and sample rate; prefer native MP4/WebM only when audio quality is equal.
+- [x] Synchronize current docs and container-specific FFmpeg failure wording.
+- [x] Prepare v1.2.2 x64 release source, tests, notes, installer copy, and update metadata.
 
-1. Build v1.2.1 x64 archives and installer with pinned FFmpeg payload.
-2. Run clean-install adaptive MP4, video-only MP4, audio-only, MP3, WebM, queue, Library, diagnostics, and updater smoke tests.
-3. Confirm new indexed MP4 samples in Windows Media Player and VLC.
-4. Publish signed/checksummed v1.2.1 artifacts when release gates pass.
+No unfinished implementation item remains in this plan. New product work requires a new milestone with explicit exit criteria.
 
 ## 13. Risk register
 
@@ -520,6 +523,7 @@ Order for current work:
 - 2026-07-18: Route WebM adaptive muxing (VP9/AV1 + Opus/Vorbis) through the bundled FFmpeg `-c copy` path, not only MP4. The highest ladder qualities (1440p/4K/8K) are WebM-only and previously depended on the internal 717-line EBML muxer — the same class of hand-rolled muxer M15 replaced for MP4 after real-player failures. `FfmpegMediaProcessor` is now container-parameterized (MP4 `+faststart`/indexed validation, WebM EBML-structural validation); `AdaptiveDownloadEngine` uses FFmpeg for both containers when present and keeps the internal Mp4/WebM muxers as the no-FFmpeg fallback. Verified live: 480p VP9+Opus stream-copy produced structurally valid WebM at full throughput; 144p H264+AAC still yields an indexed MP4 that opens in the Windows media stack.
 - 2026-07-18: Confirmed by live probe (Big Buck Bunny, ANDROID_VR client) that the direct-client path already returns the complete watch-page ladder (144p–2160p60 across H264/VP9/AV1, AAC+Opus) with `ciphered=0` and no throttling `n` parameter, downloading at full speed. Wiring the signature/`n` decipher engine into the direct-client path is therefore not required for coverage or download reliability; keep it a watch-page-fallback concern. Revisit only if canary/live evidence shows a client returning ciphered or throttled URLs.
 - 2026-07-18: Add Matroska (`MediaContainer.Mkv`) as a lossless cross-container fallback so every watch-page quality is selectable even when a video codec has no same-container audio family (e.g. a WebM-only VP9/AV1 ladder paired with AAC-only audio). `AdaptiveFormatSelector.ResolveOutputContainer` returns the native shared container when the pair is natively muxable and Matroska otherwise; `SelectCompanionAudio` prefers a native companion and falls back to the best cross-codec companion. FFmpeg (`-f matroska -c copy`) performs the mux; MKV output fails closed when FFmpeg is absent (internal muxers cannot produce Matroska). Native MP4/WebM output is unchanged for the common case where both audio families exist. Verified live: 480p VP9 (WebM) + AAC (MP4) stream-copied into a structurally valid MKV.
+- 2026-07-20: Supersede native-first companion-audio ranking. Rank all losslessly muxable audio by bitrate and sample rate, using native MP4/WebM compatibility only as an equal-quality tie-breaker. Higher-quality cross-container audio produces MKV so Audio + video does not sacrifice available audio quality.
 
 ## 15. Plan maintenance
 

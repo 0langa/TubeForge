@@ -180,7 +180,7 @@ public sealed class FfmpegMediaProcessor
             {
                 return Failure(
                     "Media.FFmpegFailed",
-                    "FFmpeg could not finalize this MP4.",
+                    $"FFmpeg could not finalize this {ContainerLabel(outputContainer)} file.",
                     $"FFmpeg exited with code {exitCode}.");
             }
 
@@ -198,7 +198,9 @@ public sealed class FfmpegMediaProcessor
         }
         catch (OperationCanceledException)
         {
-            return Failure("Operation.Cancelled", "MP4 finalization was cancelled.");
+            return Failure(
+                "Operation.Cancelled",
+                $"{ContainerLabel(outputContainer)} finalization was cancelled.");
         }
         catch (Win32Exception exception)
         {
@@ -211,7 +213,7 @@ public sealed class FfmpegMediaProcessor
         {
             return Failure(
                 "Media.FFmpegWriteFailed",
-                "TubeForge could not finalize the MP4 file.",
+                $"TubeForge could not finalize the {ContainerLabel(outputContainer)} file.",
                 exception.GetType().Name);
         }
         catch (Exception exception) when (exception is ArgumentException or NotSupportedException)
@@ -268,6 +270,13 @@ public sealed class FfmpegMediaProcessor
         MediaContainer.WebM => "webm",
         MediaContainer.Mkv => "matroska",
         _ => "mp4"
+    };
+
+    private static string ContainerLabel(MediaContainer container) => container switch
+    {
+        MediaContainer.WebM => "WebM",
+        MediaContainer.Mkv => "MKV",
+        _ => "MP4"
     };
 
     private static TubeForgeError? ValidateOutput(string path, MediaContainer container) => container switch

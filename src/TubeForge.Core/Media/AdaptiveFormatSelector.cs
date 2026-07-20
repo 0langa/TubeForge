@@ -44,9 +44,9 @@ public static class AdaptiveFormatSelector
     }
 
     /// <summary>
-    /// Selects the best audio track to combine with <paramref name="video"/>, preferring a
-    /// native same-container companion (lossless MP4/WebM output) and falling back to the best
-    /// cross-codec companion, which is muxed losslessly into Matroska.
+    /// Selects the highest-quality audio track that can be stream-copied with
+    /// <paramref name="video"/>. Native MP4/WebM output wins only when bitrate and sample rate
+    /// are equal; a higher-quality cross-container track is muxed losslessly into Matroska.
     /// </summary>
     public static StreamFormat? SelectCompanionAudio(
         StreamFormat video,
@@ -54,9 +54,14 @@ public static class AdaptiveFormatSelector
     {
         ArgumentNullException.ThrowIfNull(video);
         ArgumentNullException.ThrowIfNull(audioFormats);
-        var audios = audioFormats.Where(format => format.Kind == StreamKind.AudioOnly).ToArray();
-        return BestAudio(audios.Where(audio => AreMuxCompatible(video, audio)))
-            ?? BestAudio(audios.Where(audio => AreMkvMuxCompatible(video, audio)));
+        return audioFormats
+            .Where(audio => AreMkvMuxCompatible(video, audio))
+            .OrderByDescending(audio => audio.Bitrate ?? 0)
+            .ThenByDescending(audio => audio.AudioSampleRate ?? 0)
+            .ThenByDescending(audio => AreMuxCompatible(video, audio))
+            .ThenByDescending(audio => audio.AudioCodec == AudioCodec.Opus)
+            .ThenBy(audio => audio.FormatId)
+            .FirstOrDefault();
     }
 
     /// <summary>
@@ -111,12 +116,4 @@ public static class AdaptiveFormatSelector
             video.VideoCodec is VideoCodec.H264 or VideoCodec.Vp9 or VideoCodec.Av1 &&
             audio.AudioCodec is AudioCodec.Aac or AudioCodec.Opus or AudioCodec.Vorbis;
     }
-
-    private static StreamFormat? BestAudio(IEnumerable<StreamFormat> audios) =>
-        audios
-            .OrderByDescending(format => format.Bitrate ?? 0)
-            .ThenByDescending(format => format.AudioSampleRate ?? 0)
-            .ThenByDescending(format => format.AudioCodec == AudioCodec.Opus)
-            .ThenBy(format => format.FormatId)
-            .FirstOrDefault();
 }

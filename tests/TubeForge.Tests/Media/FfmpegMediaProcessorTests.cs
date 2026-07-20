@@ -128,6 +128,27 @@ public static class FfmpegMediaProcessorTests
     }
 
     [Test]
+    public static async Task FailureMessageNamesSelectedOutputContainer()
+    {
+        using var directory = new MediaTestDirectory();
+        var executable = Path.Combine(directory.Path, "ffmpeg.exe");
+        var video = Path.Combine(directory.Path, "video.webm");
+        var audio = Path.Combine(directory.Path, "audio.webm");
+        var output = Path.Combine(directory.Path, "output.webm");
+        await File.WriteAllBytesAsync(executable, []);
+        await File.WriteAllBytesAsync(video, []);
+        await File.WriteAllBytesAsync(audio, []);
+        var processor = new FfmpegMediaProcessor(executable, new FailingProcessRunner());
+
+        var result = await processor.MuxAsync(video, audio, output, MediaContainer.WebM);
+
+        Assert.False(result.IsSuccess);
+        Assert.Equal("Media.FFmpegFailed", result.Error?.Code);
+        Assert.Equal("FFmpeg could not finalize this WebM file.", result.Error?.Message);
+        Assert.False(File.Exists(output));
+    }
+
+    [Test]
     public static async Task RecoversValidatedOutputPublishedBeforeQueueCheckpoint()
     {
         using var directory = new MediaTestDirectory();
@@ -190,5 +211,14 @@ public static class FfmpegMediaProcessorTests
             await source.CopyToAsync(destination, cancellationToken);
             return 0;
         }
+    }
+
+    private sealed class FailingProcessRunner : IFfmpegProcessRunner
+    {
+        public Task<int> RunAsync(
+            string executablePath,
+            IReadOnlyList<string> arguments,
+            string workingDirectory,
+            CancellationToken cancellationToken) => Task.FromResult(17);
     }
 }

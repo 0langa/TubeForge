@@ -2,6 +2,14 @@
 
 YouTube is an upstream service outside TubeForge's control. Compatibility is versioned by TubeForge release and verified with synthetic fixtures plus bounded public canaries; it is not a permanent guarantee.
 
+## v1.2.2 audio selection update
+
+Validated on 2026-07-20:
+
+- companion audio ranks across all losslessly muxable MP4 and WebM tracks by bitrate, then sample rate;
+- native MP4/WebM output remains the equal-quality tie-breaker;
+- higher-quality cross-container audio pairs with the selected video through lossless MKV stream-copy instead of being discarded for container preference.
+
 ## v1.2.1 MP4 compatibility update
 
 Validated on 2026-07-17:
