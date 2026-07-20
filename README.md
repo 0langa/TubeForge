@@ -39,7 +39,7 @@ Working now:
 - reproducible portable framework-dependent and self-contained Windows x64 packaging with SHA-256 manifests.
 - branded per-user installer, Add/Remove Programs integration, clean uninstall, and opt-in verified updates from the official GitHub release.
 
-Not included: active/upcoming live capture, authenticated/access-controlled media, or video re-encoding. See [DEVELOPMENT_PLAN.md](DEVELOPMENT_PLAN.md) for exact checklist state.
+Not included: active/upcoming live capture, authenticated/access-controlled media, or video re-encoding.
 
 ## Baseline
 
