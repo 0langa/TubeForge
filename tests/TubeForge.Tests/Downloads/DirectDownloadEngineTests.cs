@@ -471,12 +471,40 @@ public static class DirectDownloadEngineTests
             Path.Combine(directory.Path, "ipv4.mp4"),
             payload);
 
-        if (Socket.OSSupportsIPv6)
+        if (await HasIpv6LoopbackConnectivityAsync())
         {
             await DownloadFromLoopbackAsync(
                 IPAddress.IPv6Loopback,
                 Path.Combine(directory.Path, "ipv6.mp4"),
                 payload);
+        }
+    }
+
+    private static async Task<bool> HasIpv6LoopbackConnectivityAsync()
+    {
+        if (!Socket.OSSupportsIPv6)
+        {
+            return false;
+        }
+
+        using var listener = new TcpListener(IPAddress.IPv6Loopback, 0);
+        try
+        {
+            listener.Start();
+            var endpoint = (IPEndPoint)listener.LocalEndpoint;
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+            using var client = new Socket(AddressFamily.InterNetworkV6, SocketType.Stream, ProtocolType.Tcp);
+            await client.ConnectAsync(endpoint, timeout.Token);
+            using var accepted = await listener.AcceptSocketAsync(timeout.Token);
+            return true;
+        }
+        catch (Exception exception) when (exception is SocketException or OperationCanceledException)
+        {
+            return false;
+        }
+        finally
+        {
+            listener.Stop();
         }
     }
 
@@ -556,6 +584,7 @@ public static class DirectDownloadEngineTests
         using var directory = new TestDirectory();
         var destination = Path.Combine(directory.Path, "segmented.mp4");
         var payload = Enumerable.Range(0, 1024 * 1024).Select(index => (byte)(index % 239)).ToArray();
+        const int segmentBytes = 64 * 1024;
         var allRangesStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var rangeCount = 0;
         var active = 0;
@@ -581,16 +610,65 @@ public static class DirectDownloadEngineTests
 
         var result = await engine.DownloadAsync(SegmentedRequest(destination, payload.Length) with
         {
-            HttpUserAgent = providerUserAgent
+            HttpUserAgent = providerUserAgent,
+            SegmentedTransferChunkBytes = segmentBytes
         });
 
         Assert.True(result.IsSuccess, result.Error?.Message);
         Assert.False(result.Value.Resumed);
-        Assert.Equal(4, rangeCount);
+        Assert.Equal(payload.Length / segmentBytes, rangeCount);
         Assert.Equal(4, maximumActive);
         Assert.SequenceEqual(payload, await File.ReadAllBytesAsync(destination));
         Assert.False(File.Exists(destination + ".part"));
         Assert.False(File.Exists(destination + ".part.segments.json"));
+    }
+
+    [Test]
+    public static async Task SegmentedGoogleVideoUsesConcurrentQueryRangesWithoutHeaderRanges()
+    {
+        using var directory = new TestDirectory();
+        var destination = Path.Combine(directory.Path, "segmented-googlevideo.mp4");
+        var payload = Enumerable.Range(0, 1024 * 1024).Select(index => (byte)(index % 227)).ToArray();
+        var allRangesStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var requestNumbers = new ConcurrentBag<string>();
+        var rangeCount = 0;
+        var active = 0;
+        var maximumActive = 0;
+        using var handler = new StubHandler(async (request, cancellationToken) =>
+        {
+            Assert.True(request.Headers.Range is null);
+            var bounds = QueryValue(request.RequestUri!, "range")!
+                .Split('-')
+                .Select(long.Parse)
+                .ToArray();
+            requestNumbers.Add(QueryValue(request.RequestUri!, "rn")!);
+            var currentActive = Interlocked.Increment(ref active);
+            UpdateMaximum(ref maximumActive, currentActive);
+            if (Interlocked.Increment(ref rangeCount) == 4)
+            {
+                allRangesStarted.SetResult();
+            }
+
+            await allRangesStarted.Task.WaitAsync(cancellationToken);
+            Interlocked.Decrement(ref active);
+            var length = checked((int)(bounds[1] - bounds[0] + 1));
+            var content = new byte[length];
+            Buffer.BlockCopy(payload, checked((int)bounds[0]), content, 0, length);
+            return Response(HttpStatusCode.OK, content);
+        });
+        using var client = new HttpClient(handler);
+        var engine = Engine(client);
+
+        var result = await engine.DownloadAsync(SegmentedRequest(destination, payload.Length) with
+        {
+            SourceUrl = new Uri("https://r1---sn-fixture.googlevideo.com/videoplayback?id=fixture")
+        });
+
+        Assert.True(result.IsSuccess, result.Error?.Message);
+        Assert.Equal(4, rangeCount);
+        Assert.Equal(4, maximumActive);
+        Assert.Equal(4, requestNumbers.Distinct(StringComparer.Ordinal).Count());
+        Assert.SequenceEqual(payload, await File.ReadAllBytesAsync(destination));
     }
 
     [Test]
@@ -599,13 +677,31 @@ public static class DirectDownloadEngineTests
         using var directory = new TestDirectory();
         var destination = Path.Combine(directory.Path, "segmented-resume.mp4");
         var payload = Enumerable.Range(0, 512 * 1024).Select(index => (byte)(index % 233)).ToArray();
+        var segmentBytes = payload.Length / 4;
+        await using (var partial = new FileStream(destination + ".part", FileMode.CreateNew, FileAccess.Write))
+        {
+            partial.SetLength(payload.Length);
+            await partial.WriteAsync(payload.AsMemory(0, segmentBytes));
+        }
+
+        await SegmentedDownloadStateStore.WriteAsync(
+            destination + ".part.segments.json",
+            new SegmentedDownloadState
+            {
+                SourceIdentity = "Fixture123_:22",
+                ExpectedLength = payload.Length,
+                SegmentCount = 4,
+                SegmentBytes = segmentBytes,
+                Completed = [true, false, false, false]
+            },
+            CancellationToken.None);
         var requestsByStart = new ConcurrentDictionary<long, int>();
         using var handler = new StubHandler((request, _) =>
         {
             var range = request.Headers.Range!.Ranges.Single();
             var start = range.From!.Value;
             var requestCount = requestsByStart.AddOrUpdate(start, 1, (_, count) => count + 1);
-            if (start > 0 && requestCount == 1)
+            if (start == segmentBytes && requestCount == 1)
             {
                 return Task.FromResult(Response(HttpStatusCode.ServiceUnavailable, []));
             }
@@ -619,12 +715,15 @@ public static class DirectDownloadEngineTests
         using var client = new HttpClient(handler);
         var engine = Engine(client);
 
-        var result = await engine.DownloadAsync(SegmentedRequest(destination, payload.Length));
+        var result = await engine.DownloadAsync(SegmentedRequest(destination, payload.Length) with
+        {
+            EnableSegmentedTransfer = false
+        });
 
         Assert.True(result.IsSuccess, result.Error?.Message);
         Assert.True(result.Value.Resumed);
-        Assert.Equal(1, requestsByStart[0]);
-        Assert.True(requestsByStart.Values.Count(value => value == 2) == 3);
+        Assert.False(requestsByStart.ContainsKey(0));
+        Assert.Equal(2, requestsByStart[segmentBytes]);
         Assert.SequenceEqual(payload, await File.ReadAllBytesAsync(destination));
     }
 
@@ -701,6 +800,21 @@ public static class DirectDownloadEngineTests
                 SourceIdentity = "Fixture123_:22",
                 ExpectedLength = 100,
                 SegmentCount = 4,
+                SegmentBytes = 25,
+                Completed = [true, false, true, false]
+            },
+            CancellationToken.None);
+
+        Assert.Equal(50L, SegmentedTransferProgress.GetCompletedBytes(destination));
+
+        await SegmentedDownloadStateStore.WriteAsync(
+            destination + ".part.segments.json",
+            new SegmentedDownloadState
+            {
+                SchemaVersion = 1,
+                SourceIdentity = "Fixture123_:22",
+                ExpectedLength = 100,
+                SegmentCount = 4,
                 Completed = [true, false, true, false]
             },
             CancellationToken.None);
@@ -744,7 +858,8 @@ public static class DirectDownloadEngineTests
         {
             EnableSegmentedTransfer = true,
             MaximumSegments = 4,
-            SegmentedTransferMinimumBytes = 1
+            SegmentedTransferMinimumBytes = 1,
+            SegmentedTransferChunkBytes = Math.Max(1, (expectedLength + 3) / 4)
         };
 
     private static HttpResponseMessage Response(HttpStatusCode status, byte[] content) => new(status)

@@ -60,6 +60,27 @@ public static class YouTubeWatchPageParserTests
     }
 
     [Test]
+    public static void PrefersLargestWidescreenThumbnailOverLetterboxedFourByThreeVariant()
+    {
+        var result = YouTubeWatchPageParser.Parse(PlayerResponse("""
+            "videoDetails":{
+              "videoId":"Fixture123_","title":"Thumbnail fixture",
+              "thumbnail":{"thumbnails":[
+                {"url":"https://i.ytimg.com/vi/Fixture123_/default.jpg","width":120,"height":90},
+                {"url":"https://i.ytimg.com/vi/Fixture123_/mqdefault.jpg","width":320,"height":180},
+                {"url":"https://i.ytimg.com/vi/Fixture123_/maxresdefault.jpg","width":1280,"height":720},
+                {"url":"https://i.ytimg.com/vi/Fixture123_/hqdefault.jpg","width":480,"height":360}
+              ]}
+            }
+            """));
+
+        Assert.True(result.IsSuccess, result.Error?.TechnicalDetail);
+        Assert.Equal(
+            "https://i.ytimg.com/vi/Fixture123_/maxresdefault.jpg",
+            result.Value.Metadata.ThumbnailUrl?.AbsoluteUri);
+    }
+
+    [Test]
     public static void RejectsEmptyMalformedAndUnavailableResponses()
     {
         Assert.False(YouTubeWatchPageParser.Parse(null).IsSuccess);

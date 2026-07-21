@@ -4,6 +4,7 @@ using TubeForge.Core.Errors;
 using TubeForge.Core.Media;
 using TubeForge.Core.Results;
 using TubeForge.Core.YouTube;
+using TubeForge.YouTube.Thumbnails;
 
 namespace TubeForge.YouTube.Extraction;
 
@@ -659,21 +660,7 @@ public static class YouTubeWatchPageParser
             return null;
         }
 
-        Uri? selected = null;
-        foreach (var candidate in thumbnails.EnumerateArray())
-        {
-            var url = ReadString(candidate, "url");
-            if (Uri.TryCreate(url, UriKind.Absolute, out var uri) &&
-                uri.Scheme == Uri.UriSchemeHttps &&
-                string.IsNullOrEmpty(uri.UserInfo) &&
-                (uri.Host.Equals("ytimg.com", StringComparison.OrdinalIgnoreCase) ||
-                 uri.Host.EndsWith(".ytimg.com", StringComparison.OrdinalIgnoreCase)))
-            {
-                selected = uri;
-            }
-        }
-
-        return selected;
+        return YouTubeThumbnailSelector.SelectBest(thumbnails);
     }
 
     private static TimeSpan? ParseDuration(string? secondsText)

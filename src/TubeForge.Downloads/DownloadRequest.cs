@@ -5,6 +5,7 @@ namespace TubeForge.Downloads;
 public sealed record DownloadRequest
 {
     public const long DefaultSegmentedTransferMinimumBytes = 16 * 1024 * 1024;
+    internal const long DefaultSegmentedTransferChunkBytes = 8 * 1024 * 1024;
 
     public required Uri SourceUrl { get; init; }
 
@@ -23,4 +24,6 @@ public sealed record DownloadRequest
     public int MaximumSegments { get; init; } = 4;
 
     public long SegmentedTransferMinimumBytes { get; init; } = DefaultSegmentedTransferMinimumBytes;
+
+    internal long SegmentedTransferChunkBytes { get; init; } = DefaultSegmentedTransferChunkBytes;
 }

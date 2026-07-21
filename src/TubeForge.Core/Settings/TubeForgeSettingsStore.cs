@@ -201,7 +201,13 @@ public sealed class TubeForgeSettingsStore
         1 => settings with
         {
             SchemaVersion = TubeForgeSettings.CurrentSchemaVersion,
-            LibrarySortOrder = LibrarySortOrder.NewestFirst
+            LibrarySortOrder = LibrarySortOrder.NewestFirst,
+            EnableAcceleratedTransfers = true
+        },
+        2 => settings with
+        {
+            SchemaVersion = TubeForgeSettings.CurrentSchemaVersion,
+            EnableAcceleratedTransfers = true
         },
         _ => settings
     };

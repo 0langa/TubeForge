@@ -3,6 +3,7 @@ using System.Text.Json;
 using TubeForge.Core.Errors;
 using TubeForge.Core.Results;
 using TubeForge.Core.YouTube;
+using TubeForge.YouTube.Thumbnails;
 
 namespace TubeForge.YouTube.Collections;
 
@@ -256,21 +257,7 @@ public static class YouTubeCollectionPageParser
             return null;
         }
 
-        Uri? selected = null;
-        foreach (var candidate in thumbnails.EnumerateArray())
-        {
-            var raw = ReadString(candidate, "url");
-            if (Uri.TryCreate(raw, UriKind.Absolute, out var uri) &&
-                uri.Scheme == Uri.UriSchemeHttps &&
-                string.IsNullOrEmpty(uri.UserInfo) &&
-                (uri.Host.Equals("ytimg.com", StringComparison.OrdinalIgnoreCase) ||
-                 uri.Host.EndsWith(".ytimg.com", StringComparison.OrdinalIgnoreCase)))
-            {
-                selected = uri;
-            }
-        }
-
-        return selected;
+        return YouTubeThumbnailSelector.SelectBest(thumbnails);
     }
 
     private static Uri? ParseLockupThumbnail(JsonElement lockup)
@@ -287,21 +274,7 @@ public static class YouTubeCollectionPageParser
             return null;
         }
 
-        Uri? selected = null;
-        foreach (var candidate in sources.EnumerateArray())
-        {
-            var raw = ReadString(candidate, "url");
-            if (Uri.TryCreate(raw, UriKind.Absolute, out var uri) &&
-                uri.Scheme == Uri.UriSchemeHttps &&
-                string.IsNullOrEmpty(uri.UserInfo) &&
-                (uri.Host.Equals("ytimg.com", StringComparison.OrdinalIgnoreCase) ||
-                 uri.Host.EndsWith(".ytimg.com", StringComparison.OrdinalIgnoreCase)))
-            {
-                selected = uri;
-            }
-        }
-
-        return selected;
+        return YouTubeThumbnailSelector.SelectBest(sources);
     }
 
     private static TimeSpan? FindBadgeDuration(JsonElement element, int depth)

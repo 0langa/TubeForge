@@ -1,4 +1,4 @@
-# TubeForge v1.2.4
+# TubeForge v1.2.5
 
 TubeForge is an ad-free Windows desktop downloader for public media you own or are authorized to save. It has no `yt-dlp`, hosted converter, third-party managed package, telemetry, account, or paid feature. Releases bundle pinned LGPL FFmpeg for MP4, WebM, and MKV stream-copy finalization plus MP3 audio conversion.
 
@@ -6,10 +6,11 @@ Choose the per-user Windows x64 installer for normal use or a portable archive w
 
 Highlights:
 
-- converts MP3 through bundled FFmpeg `libmp3lame`, including high-bitrate AAC/M4A and Opus/WebM inputs;
-- fails closed without publishing invalid audio when FFmpeg is missing, fails, or conversion is cancelled;
-- covers every dependent stream-filter and audio-processing combination with deterministic selection tests;
-- retains highest-quality companion-audio ranking, MP4 preference at equal quality, lossless MKV cross-container fallback, resumable transfers, installer, updater, queue, and Library behavior.
+- accelerates large Googlevideo transfers with up to four validated 8 MiB query-range workers and safe automatic fallback;
+- resumes completed chunks after interruption instead of restarting successful ranges;
+- enables acceleration automatically for new and upgraded settings while keeping an explicit user control;
+- selects the largest trusted widescreen thumbnail, removing the black preview strip caused by square primary images;
+- retains bundled-FFmpeg MP3 conversion, highest-quality companion audio, MP4 preference, lossless MKV fallback, installer, updater, queue, and Library behavior.
 
 Known limitations:
 

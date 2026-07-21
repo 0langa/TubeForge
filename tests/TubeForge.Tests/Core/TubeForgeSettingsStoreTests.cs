@@ -18,7 +18,7 @@ public static class TubeForgeSettingsStoreTests
         {
             MaximumConcurrentDownloads = 4,
             FileNameTemplate = "{channel} - {title} [{quality}]",
-            EnableSegmentedTransfers = true,
+            EnableAcceleratedTransfers = false,
             EnableAutomaticUpdateChecks = false,
             ResponsibleUseAccepted = true
         });
@@ -30,7 +30,7 @@ public static class TubeForgeSettingsStoreTests
         Assert.True(loaded.IsSuccess);
         Assert.Equal(4, loaded.Value.MaximumConcurrentDownloads);
         Assert.Equal("{channel} - {title} [{quality}]", loaded.Value.FileNameTemplate);
-        Assert.True(loaded.Value.EnableSegmentedTransfers);
+        Assert.False(loaded.Value.EnableAcceleratedTransfers);
         Assert.False(loaded.Value.EnableAutomaticUpdateChecks);
         Assert.True(loaded.Value.ResponsibleUseAccepted);
     }
@@ -87,7 +87,31 @@ public static class TubeForgeSettingsStoreTests
         Assert.Equal(TubeForgeSettings.CurrentSchemaVersion, loaded.Value.SchemaVersion);
         Assert.Equal(LibrarySortOrder.NewestFirst, loaded.Value.LibrarySortOrder);
         Assert.Equal(3, loaded.Value.MaximumConcurrentDownloads);
-        Assert.True(loaded.Value.EnableSegmentedTransfers);
+        Assert.True(loaded.Value.EnableAcceleratedTransfers);
+    }
+
+    [Test]
+    public static async Task MigratesPublishedSchemaTwoToAutomaticAcceleration()
+    {
+        using var directory = new TestDirectory();
+        var path = Path.Combine(directory.Path, "settings.json");
+        await File.WriteAllTextAsync(path, JsonSerializer.Serialize(new
+        {
+            schemaVersion = 2,
+            downloadFolder = Path.GetFullPath(directory.Path),
+            maximumConcurrentDownloads = 2,
+            fileNameTemplate = "{title}",
+            enableSegmentedTransfers = false,
+            enableAutomaticUpdateChecks = true,
+            librarySortOrder = 0,
+            responsibleUseAccepted = true
+        }));
+
+        var loaded = await new TubeForgeSettingsStore(path).LoadAsync(Settings(directory.Path));
+
+        Assert.True(loaded.IsSuccess, loaded.Error?.Message);
+        Assert.Equal(TubeForgeSettings.CurrentSchemaVersion, loaded.Value.SchemaVersion);
+        Assert.True(loaded.Value.EnableAcceleratedTransfers);
     }
 
     private static TubeForgeSettings Settings(string folder) => new()
