@@ -133,7 +133,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     private string _downloadActionLabel = "Add to queue";
     private AppPage _activePage = AppPage.Download;
     private int _selectedMaxConcurrentDownloads = 2;
-    private bool _enableSegmentedTransfers;
+    private bool _enableAcceleratedTransfers = true;
     private bool _enableAutomaticUpdateChecks = true;
     private string _fileNameTemplate = FileNameTemplate.Default;
     private TubeForgeSettings _settings;
@@ -638,10 +638,10 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         }
     }
 
-    public bool EnableSegmentedTransfers
+    public bool EnableAcceleratedTransfers
     {
-        get => _enableSegmentedTransfers;
-        set => Set(ref _enableSegmentedTransfers, value);
+        get => _enableAcceleratedTransfers;
+        set => Set(ref _enableAcceleratedTransfers, value);
     }
 
     public bool EnableAutomaticUpdateChecks
@@ -841,8 +841,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             _selectedMaxConcurrentDownloads = _settings.MaximumConcurrentDownloads;
             _queueDispatcher.MaximumConcurrency = _selectedMaxConcurrentDownloads;
             OnPropertyChanged(nameof(SelectedMaxConcurrentDownloads));
-            _enableSegmentedTransfers = _settings.EnableSegmentedTransfers;
-            OnPropertyChanged(nameof(EnableSegmentedTransfers));
+            _enableAcceleratedTransfers = _settings.EnableAcceleratedTransfers;
+            OnPropertyChanged(nameof(EnableAcceleratedTransfers));
             _enableAutomaticUpdateChecks = _settings.EnableAutomaticUpdateChecks;
             OnPropertyChanged(nameof(EnableAutomaticUpdateChecks));
             _fileNameTemplate = _settings.FileNameTemplate;
@@ -925,7 +925,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                 DownloadFolder = Path.GetFullPath(DownloadFolder),
                 MaximumConcurrentDownloads = SelectedMaxConcurrentDownloads,
                 FileNameTemplate = FileNameTemplateText,
-                EnableSegmentedTransfers = EnableSegmentedTransfers,
+                EnableAcceleratedTransfers = EnableAcceleratedTransfers,
                 EnableAutomaticUpdateChecks = EnableAutomaticUpdateChecks,
                 LibrarySortOrder = SelectedLibrarySort.Value ?? LibrarySortOrder.NewestFirst
             };
@@ -971,7 +971,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                 DownloadFolder = Path.GetFullPath(DownloadFolder),
                 MaximumConcurrentDownloads = SelectedMaxConcurrentDownloads,
                 FileNameTemplate = FileNameTemplateText,
-                EnableSegmentedTransfers = EnableSegmentedTransfers,
+                EnableAcceleratedTransfers = EnableAcceleratedTransfers,
                 EnableAutomaticUpdateChecks = EnableAutomaticUpdateChecks,
                 LibrarySortOrder = SelectedLibrarySort.Value ?? LibrarySortOrder.NewestFirst,
                 ResponsibleUseAccepted = true
@@ -2447,7 +2447,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             DestinationPath = destination,
             ExpectedLength = format.ContentLength,
             ExpectedContainer = format.Container,
-            EnableSegmentedTransfer = _settings.EnableSegmentedTransfers
+            EnableSegmentedTransfer = _settings.EnableAcceleratedTransfers
         };
 
     private async Task<Result<DownloadReceipt>> EnsureTrackDownloadedAsync(

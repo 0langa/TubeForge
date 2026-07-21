@@ -903,11 +903,11 @@
                                    Margin="0,6,0,0" FontSize="10" TextWrapping="Wrap"
                                    Foreground="{StaticResource MutedTextBrush}" />
 
-                        <CheckBox IsChecked="{Binding EnableSegmentedTransfers}" Margin="0,20,0,0"
-                                  AutomationProperties.Name="Enable experimental segmented transfers">
+                        <CheckBox IsChecked="{Binding EnableAcceleratedTransfers}" Margin="0,20,0,0"
+                                  AutomationProperties.Name="Enable accelerated transfers">
                             <StackPanel>
-                                <TextBlock Text="Experimental segmented transfer" FontWeight="SemiBold" />
-                                <TextBlock Text="Use up to four validated parallel byte ranges for large files. Falls back automatically when unsupported."
+                                <TextBlock Text="Accelerated transfers" FontWeight="SemiBold" />
+                                <TextBlock Text="Use up to four validated parallel range workers for large files. Falls back automatically when unsupported."
                                            Margin="0,4,0,0" FontSize="11" TextWrapping="Wrap"
                                            Foreground="{StaticResource MutedTextBrush}" />
                             </StackPanel>

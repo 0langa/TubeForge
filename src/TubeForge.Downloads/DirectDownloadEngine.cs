@@ -14,7 +14,7 @@ namespace TubeForge.Downloads;
 public sealed class DirectDownloadEngine
 {
     private const int BufferSize = 128 * 1024;
-    internal const long MaximumDirectRequestBytes = 1024 * 1024;
+    internal const long MaximumDirectRequestBytes = 8 * 1024 * 1024;
     private readonly HttpClient _httpClient;
     private readonly DownloadUriPolicy _uriPolicy;
     private readonly Func<TimeSpan, CancellationToken, Task> _delay;
@@ -541,7 +541,9 @@ public sealed class DirectDownloadEngine
         }
 
         if (request.EnableSegmentedTransfer &&
-            (request.MaximumSegments is < 2 or > 8 || request.SegmentedTransferMinimumBytes <= 0))
+            (request.MaximumSegments is < 2 or > 8 ||
+             request.SegmentedTransferMinimumBytes <= 0 ||
+             request.SegmentedTransferChunkBytes <= 0))
         {
             return new TubeForgeError(
                 "Download.InvalidSegmentation",
@@ -579,12 +581,12 @@ public sealed class DirectDownloadEngine
     private static bool IsDiskFull(IOException exception) =>
         (exception.HResult & 0xFFFF) is 0x27 or 0x70;
 
-    private static bool IsGoogleVideo(Uri uri) =>
+    internal static bool IsGoogleVideo(Uri uri) =>
         uri.Scheme == Uri.UriSchemeHttps &&
         (uri.Host.Equals("googlevideo.com", StringComparison.OrdinalIgnoreCase) ||
          uri.Host.EndsWith(".googlevideo.com", StringComparison.OrdinalIgnoreCase));
 
-    private static Uri AddRangeQuery(Uri source, long from, long to, int requestNumber)
+    internal static Uri AddRangeQuery(Uri source, long from, long to, int requestNumber)
     {
         var separator = string.IsNullOrEmpty(source.Query) ? "?" : "&";
         return new Uri(

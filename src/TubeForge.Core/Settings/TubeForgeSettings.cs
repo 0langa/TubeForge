@@ -2,7 +2,7 @@ namespace TubeForge.Core.Settings;
 
 public sealed record TubeForgeSettings
 {
-    public const int CurrentSchemaVersion = 2;
+    public const int CurrentSchemaVersion = 3;
 
     public int SchemaVersion { get; init; } = CurrentSchemaVersion;
 
@@ -12,7 +12,7 @@ public sealed record TubeForgeSettings
 
     public string FileNameTemplate { get; init; } = Files.FileNameTemplate.Default;
 
-    public bool EnableSegmentedTransfers { get; init; }
+    public bool EnableAcceleratedTransfers { get; init; } = true;
 
     public bool EnableAutomaticUpdateChecks { get; init; } = true;
 

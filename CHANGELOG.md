@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.2.5 - 2026-07-21
+
+- Replace latency-bound 1 MiB sequential Googlevideo reads with validated 8 MiB query ranges and up to four bounded workers, while retaining automatic sequential fallback for incompatible servers.
+- Persist per-chunk completion for efficient retry/resume, migrate acceleration on by default, and preserve existing partial transfers when settings change.
+- Select the largest trusted widescreen YouTube thumbnail instead of a smaller square primary image, removing the persistent black preview strip.
+
 ## 1.2.4 - 2026-07-21
 
 - Replace Windows Media Foundation MP3 conversion with bundled FFmpeg `libmp3lame`, fixing high-bitrate AAC/M4A and Opus/WebM inputs that could fail before publication.

@@ -1,4 +1,5 @@
 using System.Buffers;
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Net;
 using System.Net.Http.Headers;
@@ -13,16 +14,19 @@ namespace TubeForge.Downloads;
 internal sealed class SegmentedDownloadEngine(HttpClient httpClient, DownloadUriPolicy uriPolicy)
 {
     private const int BufferSize = 128 * 1024;
+    private const int MaximumSegmentCount = 4_096;
+    private static readonly long ProgressIntervalTicks = TimeSpan.FromMilliseconds(100).Ticks;
     private readonly HttpClient _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
     private readonly DownloadUriPolicy _uriPolicy = uriPolicy ?? throw new ArgumentNullException(nameof(uriPolicy));
 
     public static bool ShouldUse(DownloadRequest request)
     {
         ArgumentNullException.ThrowIfNull(request);
-        return request.EnableSegmentedTransfer &&
+        var destination = Path.GetFullPath(request.DestinationPath);
+        return !File.Exists(destination + ".part.json") &&
                request.ExpectedLength is long expectedLength &&
-               expectedLength >= request.SegmentedTransferMinimumBytes &&
-               !File.Exists(Path.GetFullPath(request.DestinationPath) + ".part.json");
+               (File.Exists(StatePath(destination)) ||
+                request.EnableSegmentedTransfer && expectedLength >= request.SegmentedTransferMinimumBytes);
     }
 
     public static void Reset(string destinationPath)
@@ -56,10 +60,11 @@ internal sealed class SegmentedDownloadEngine(HttpClient httpClient, DownloadUri
 
             Directory.CreateDirectory(directory);
             var expectedLength = request.ExpectedLength!.Value;
-            var segments = CreateSegments(expectedLength, request.MaximumSegments);
+            var segmentBytes = CalculateSegmentBytes(expectedLength, request.SegmentedTransferChunkBytes);
+            var segments = CreateSegments(expectedLength, segmentBytes);
             var state = await SegmentedDownloadStateStore.ReadAsync(statePath, cancellationToken)
                 .ConfigureAwait(false);
-            if (!IsCompatible(state, request, segments) ||
+            if (!IsCompatible(state, request, segments, segmentBytes) ||
                 !File.Exists(partialPath) ||
                 new FileInfo(partialPath).Length != expectedLength)
             {
@@ -81,6 +86,7 @@ internal sealed class SegmentedDownloadEngine(HttpClient httpClient, DownloadUri
                     SourceIdentity = request.SourceIdentity,
                     ExpectedLength = expectedLength,
                     SegmentCount = segments.Length,
+                    SegmentBytes = segmentBytes,
                     Completed = new bool[segments.Length]
                 };
                 await SegmentedDownloadStateStore.WriteAsync(statePath, state, cancellationToken)
@@ -94,7 +100,10 @@ internal sealed class SegmentedDownloadEngine(HttpClient httpClient, DownloadUri
                 .Sum(segment => segment.Length);
             var attemptBytes = 0L;
             var stopwatch = Stopwatch.StartNew();
+            var lastProgressTicks = 0L;
+            var requestNumber = -1;
             using var stateGate = new SemaphoreSlim(1, 1);
+            using var attemptCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             var currentState = activeState;
             await using (var output = new FileStream(
                              partialPath,
@@ -105,33 +114,77 @@ internal sealed class SegmentedDownloadEngine(HttpClient httpClient, DownloadUri
                              FileOptions.Asynchronous | FileOptions.RandomAccess))
             {
                 progress?.Report(Progress(completedBytes, expectedLength, attemptBytes, stopwatch.Elapsed));
-                var tasks = segments
+                var pendingSegments = segments
                     .Where((_, index) => !activeState.Completed[index])
-                    .Select(segment => DownloadSegmentAsync(
-                        request,
-                        segment,
-                        output.SafeFileHandle,
-                        stateGate,
-                        () => currentState,
-                        value => currentState = value,
-                        statePath,
-                        bytes =>
-                        {
-                            Interlocked.Add(ref completedBytes, bytes);
-                            var currentAttemptBytes = Interlocked.Add(ref attemptBytes, bytes);
-                            progress?.Report(Progress(
-                                Interlocked.Read(ref completedBytes),
-                                expectedLength,
-                                currentAttemptBytes,
-                                stopwatch.Elapsed));
-                        },
-                        cancellationToken))
                     .ToArray();
-                var results = await Task.WhenAll(tasks).ConfigureAwait(false);
-                var failure = results.FirstOrDefault(result => !result.IsSuccess);
-                if (failure.Error is not null)
+                var nextSegment = -1;
+                var failures = new ConcurrentQueue<TubeForgeError>();
+
+                void ReportBytes(int bytes)
                 {
-                    return Result<DownloadReceipt>.Failure(failure.Error);
+                    var received = Interlocked.Add(ref completedBytes, bytes);
+                    var currentAttemptBytes = Interlocked.Add(ref attemptBytes, bytes);
+                    if (progress is null)
+                    {
+                        return;
+                    }
+
+                    var elapsed = stopwatch.Elapsed;
+                    var elapsedTicks = elapsed.Ticks;
+                    var previousTicks = Volatile.Read(ref lastProgressTicks);
+                    if (received != expectedLength &&
+                        (elapsedTicks - previousTicks < ProgressIntervalTicks ||
+                         Interlocked.CompareExchange(ref lastProgressTicks, elapsedTicks, previousTicks) != previousTicks))
+                    {
+                        return;
+                    }
+
+                    progress.Report(Progress(received, expectedLength, currentAttemptBytes, elapsed));
+                }
+
+                async Task RunWorkerAsync()
+                {
+                    await Task.Yield();
+                    while (!attemptCancellation.IsCancellationRequested)
+                    {
+                        var index = Interlocked.Increment(ref nextSegment);
+                        if (index >= pendingSegments.Length)
+                        {
+                            return;
+                        }
+
+                        var result = await DownloadSegmentAsync(
+                                request,
+                                pendingSegments[index],
+                                Interlocked.Increment(ref requestNumber),
+                                output.SafeFileHandle,
+                                stateGate,
+                                () => currentState,
+                                value => currentState = value,
+                                statePath,
+                                ReportBytes,
+                                attemptCancellation.Token)
+                            .ConfigureAwait(false);
+                        if (result.IsSuccess)
+                        {
+                            continue;
+                        }
+
+                        failures.Enqueue(result.Error!);
+                        await attemptCancellation.CancelAsync().ConfigureAwait(false);
+                        return;
+                    }
+                }
+
+                var workers = Enumerable.Range(
+                        0,
+                        Math.Min(request.MaximumSegments, pendingSegments.Length))
+                    .Select(_ => RunWorkerAsync())
+                    .ToArray();
+                await Task.WhenAll(workers).ConfigureAwait(false);
+                if (failures.TryDequeue(out var failure))
+                {
+                    return Result<DownloadReceipt>.Failure(failure);
                 }
 
                 await output.FlushAsync(cancellationToken).ConfigureAwait(false);
@@ -198,6 +251,7 @@ internal sealed class SegmentedDownloadEngine(HttpClient httpClient, DownloadUri
     private async Task<Result<bool>> DownloadSegmentAsync(
         DownloadRequest request,
         ByteRange segment,
+        int requestNumber,
         SafeFileHandle output,
         SemaphoreSlim stateGate,
         Func<SegmentedDownloadState> getState,
@@ -208,7 +262,11 @@ internal sealed class SegmentedDownloadEngine(HttpClient httpClient, DownloadUri
     {
         try
         {
-            using var message = new HttpRequestMessage(HttpMethod.Get, request.SourceUrl);
+            var usesRangeQuery = DirectDownloadEngine.IsGoogleVideo(request.SourceUrl);
+            var requestUri = usesRangeQuery
+                ? DirectDownloadEngine.AddRangeQuery(request.SourceUrl, segment.Start, segment.End, requestNumber)
+                : request.SourceUrl;
+            using var message = new HttpRequestMessage(HttpMethod.Get, requestUri);
             if (!HttpUserAgentHeader.TryApply(message, request.HttpUserAgent))
             {
                 return FailureBool(
@@ -216,7 +274,10 @@ internal sealed class SegmentedDownloadEngine(HttpClient httpClient, DownloadUri
                     "The media request contained an invalid HTTP user agent.");
             }
 
-            message.Headers.Range = new RangeHeaderValue(segment.Start, segment.End);
+            if (!usesRangeQuery)
+            {
+                message.Headers.Range = new RangeHeaderValue(segment.Start, segment.End);
+            }
             var initialState = getState();
             if (!string.IsNullOrWhiteSpace(initialState.EntityTag) &&
                 EntityTagHeaderValue.TryParse(initialState.EntityTag, out var entityTag))
@@ -234,7 +295,7 @@ internal sealed class SegmentedDownloadEngine(HttpClient httpClient, DownloadUri
                 return FailureBool("Download.UnsafeRedirect", "The media request redirected to an untrusted location.");
             }
 
-            if (response.StatusCode == HttpStatusCode.OK)
+            if (!usesRangeQuery && response.StatusCode == HttpStatusCode.OK)
             {
                 return FailureBool(
                     "Download.RangeUnsupported",
@@ -247,12 +308,23 @@ internal sealed class SegmentedDownloadEngine(HttpClient httpClient, DownloadUri
                 return Result<bool>.Failure(httpFailure.Error!);
             }
 
+            var contentLength = response.Content.Headers.ContentLength;
+            if (usesRangeQuery && contentLength is long queryLength && queryLength != segment.Length)
+            {
+                return FailureBool(
+                    queryLength > segment.Length ? "Download.RangeUnsupported" : "Download.RemoteChanged",
+                    queryLength > segment.Length
+                        ? "The media server did not honor a segmented query range."
+                        : "The server returned an incompatible segmented query range.");
+            }
+
             var contentRange = response.Content.Headers.ContentRange;
-            if (response.StatusCode != HttpStatusCode.PartialContent ||
-                contentRange?.From != segment.Start ||
-                contentRange.To != segment.End ||
-                contentRange.Length != request.ExpectedLength ||
-                response.Content.Headers.ContentLength is long contentLength && contentLength != segment.Length)
+            if (!usesRangeQuery &&
+                (response.StatusCode != HttpStatusCode.PartialContent ||
+                 contentRange?.From != segment.Start ||
+                 contentRange.To != segment.End ||
+                 contentRange.Length != request.ExpectedLength ||
+                 contentLength is long headerLength && headerLength != segment.Length))
             {
                 return FailureBool(
                     "Download.RemoteChanged",
@@ -300,8 +372,10 @@ internal sealed class SegmentedDownloadEngine(HttpClient httpClient, DownloadUri
                     if (received + count > segment.Length)
                     {
                         return FailureBool(
-                            "Download.RemoteChanged",
-                            "The server sent more bytes than the requested segment.");
+                            usesRangeQuery ? "Download.RangeUnsupported" : "Download.RemoteChanged",
+                            usesRangeQuery
+                                ? "The media server did not honor a segmented query range."
+                                : "The server sent more bytes than the requested segment.");
                     }
 
                     await RandomAccess.WriteAsync(
@@ -369,25 +443,41 @@ internal sealed class SegmentedDownloadEngine(HttpClient httpClient, DownloadUri
     private static bool IsCompatible(
         SegmentedDownloadState? state,
         DownloadRequest request,
-        IReadOnlyList<ByteRange> segments) =>
+        IReadOnlyList<ByteRange> segments,
+        long segmentBytes) =>
         state is not null &&
         state.SchemaVersion == SegmentedDownloadState.CurrentSchemaVersion &&
         string.Equals(state.SourceIdentity, request.SourceIdentity, StringComparison.Ordinal) &&
         state.ExpectedLength == request.ExpectedLength &&
         state.SegmentCount == segments.Count &&
+        state.SegmentBytes == segmentBytes &&
         state.Completed is not null &&
         state.Completed.Length == segments.Count;
 
-    private static ByteRange[] CreateSegments(long totalLength, int count)
+    private static long CalculateSegmentBytes(long totalLength, long requestedBytes)
     {
-        count = checked((int)Math.Min(totalLength, count));
-        var baseLength = totalLength / count;
-        var remainder = totalLength % count;
-        var ranges = new ByteRange[count];
-        var start = 0L;
-        for (var index = 0; index < count; index++)
+        var minimumBytes = totalLength / MaximumSegmentCount;
+        if (totalLength % MaximumSegmentCount != 0)
         {
-            var length = baseLength + (index < remainder ? 1 : 0);
+            minimumBytes++;
+        }
+
+        return Math.Max(requestedBytes, minimumBytes);
+    }
+
+    private static ByteRange[] CreateSegments(long totalLength, long segmentBytes)
+    {
+        var count = totalLength / segmentBytes;
+        if (totalLength % segmentBytes != 0)
+        {
+            count++;
+        }
+
+        var ranges = new ByteRange[checked((int)count)];
+        var start = 0L;
+        for (var index = 0; index < ranges.Length; index++)
+        {
+            var length = Math.Min(segmentBytes, totalLength - start);
             ranges[index] = new ByteRange(index, start, checked(start + length - 1));
             start += length;
         }
@@ -446,7 +536,7 @@ internal sealed class SegmentedDownloadEngine(HttpClient httpClient, DownloadUri
 
 internal sealed record SegmentedDownloadState
 {
-    public const int CurrentSchemaVersion = 1;
+    public const int CurrentSchemaVersion = 2;
 
     public int SchemaVersion { get; init; } = CurrentSchemaVersion;
 
@@ -456,6 +546,8 @@ internal sealed record SegmentedDownloadState
 
     public required int SegmentCount { get; init; }
 
+    public long SegmentBytes { get; init; }
+
     public required bool[] Completed { get; init; }
 
     public string? EntityTag { get; init; }
@@ -463,7 +555,8 @@ internal sealed record SegmentedDownloadState
 
 internal static class SegmentedDownloadStateStore
 {
-    private const long MaximumStateBytes = 64 * 1024;
+    private const long MaximumStateBytes = 256 * 1024;
+    private const int MaximumSegmentCount = 4_096;
     private static readonly JsonSerializerOptions SerializerOptions = new()
     {
         MaxDepth = 8,
@@ -534,9 +627,7 @@ internal static class SegmentedDownloadStateStore
                 File.ReadAllText(statePath),
                 SerializerOptions);
             if (state is null ||
-                state.SchemaVersion != SegmentedDownloadState.CurrentSchemaVersion ||
                 state.ExpectedLength <= 0 ||
-                state.SegmentCount is < 2 or > 8 ||
                 state.Completed is null ||
                 state.Completed.Length != state.SegmentCount ||
                 new FileInfo(partialPath).Length != state.ExpectedLength)
@@ -544,15 +635,42 @@ internal static class SegmentedDownloadStateStore
                 return null;
             }
 
-            var baseLength = state.ExpectedLength / state.SegmentCount;
-            var remainder = state.ExpectedLength % state.SegmentCount;
+            if (state.SchemaVersion == 1 && state.SegmentCount is >= 2 and <= 8)
+            {
+                var baseLength = state.ExpectedLength / state.SegmentCount;
+                var remainder = state.ExpectedLength % state.SegmentCount;
+                var legacyCompletedBytes = 0L;
+                for (var index = 0; index < state.SegmentCount; index++)
+                {
+                    if (state.Completed[index])
+                    {
+                        legacyCompletedBytes = checked(
+                            legacyCompletedBytes + baseLength + (index < remainder ? 1 : 0));
+                    }
+                }
+
+                return legacyCompletedBytes;
+            }
+
+            if (state.SchemaVersion != SegmentedDownloadState.CurrentSchemaVersion ||
+                state.SegmentBytes <= 0 ||
+                state.SegmentCount is < 1 or > MaximumSegmentCount ||
+                state.SegmentCount != SegmentCount(state.ExpectedLength, state.SegmentBytes))
+            {
+                return null;
+            }
+
             var completedBytes = 0L;
             for (var index = 0; index < state.SegmentCount; index++)
             {
-                if (state.Completed[index])
+                if (!state.Completed[index])
                 {
-                    completedBytes = checked(completedBytes + baseLength + (index < remainder ? 1 : 0));
+                    continue;
                 }
+
+                var start = checked(index * state.SegmentBytes);
+                completedBytes = checked(
+                    completedBytes + Math.Min(state.SegmentBytes, state.ExpectedLength - start));
             }
 
             return completedBytes;
@@ -562,5 +680,16 @@ internal static class SegmentedDownloadStateStore
         {
             return null;
         }
+    }
+
+    private static int SegmentCount(long totalLength, long segmentBytes)
+    {
+        var count = totalLength / segmentBytes;
+        if (totalLength % segmentBytes != 0)
+        {
+            count++;
+        }
+
+        return checked((int)count);
     }
 }
