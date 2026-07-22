@@ -195,20 +195,20 @@ Recommendation:
 - Route metadata, captions, thumbnails, updates, and media consistently.
 - Redact proxy host/user in diagnostics unless user opts in.
 
-### P2: SponsorBlock, Trim, And Chapter Workflows Missing
+### P2: SponsorBlock, Trim, And Chapter Split Workflows Missing
 
-yt-dlp GUIs increasingly expose SponsorBlock removal/chapter marking, and premium apps expose trimming. TubeForge only records chapters in JSON metadata.
+yt-dlp GUIs increasingly expose SponsorBlock removal/chapter marking, and premium apps expose trimming. TubeForge now records chapters in JSON metadata and can embed them in single-video MP4/MKV/WebM downloads.
 
 Wrong/optimizable:
 
 - No SponsorBlock API integration.
 - No "download chapters separately".
 - No "trim before save" or post-download cut workflow.
-- No embedded chapters.
+- Embedded-chapter UI currently targets single-video outputs; chapter split and batch controls remain open.
 
 Recommendation:
 
-- For v2, add chapter split and embed-chapters first because metadata already exists.
+- Complete chapter split and chapter filename tokens next; embedded chapters are implemented with queue recovery and FFmpeg extraction validation.
 - Add trim/cut later through FFmpeg copy where possible, transcode only when needed.
 - Add SponsorBlock as opt-in network feature, disabled by default, with privacy notice.
 

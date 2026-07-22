@@ -176,6 +176,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     private CaptionTrackOption? _selectedCaptionTrack;
     private CaptionFormatOption _selectedCaptionFormat = CaptionOutputChoices[0];
     private bool _embedSelectedCaption;
+    private bool _embedChapters;
     private bool _isSavingCaption;
     private bool _isSavingSidecar;
     private YouTubeCollectionResult? _collection;
@@ -434,6 +435,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     }
 
     public bool HasCaptions => CaptionTracks.Count > 0;
+
+    public bool HasChapters => _metadata?.Chapters.Count > 0;
 
     public CaptionTrackOption? SelectedCaptionTrack
     {
@@ -708,9 +711,14 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             if (Set(ref _selectedFormat, value))
             {
                 OnPropertyChanged(nameof(CanEmbedSelectedCaption));
+                OnPropertyChanged(nameof(CanEmbedChapters));
                 if (!CanEmbedSelectedCaption)
                 {
                     EmbedSelectedCaption = false;
+                }
+                if (!CanEmbedChapters)
+                {
+                    EmbedChapters = false;
                 }
 
                 RefreshCommands();
@@ -749,6 +757,21 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         set => Set(ref _embedSelectedCaption, value && CanEmbedSelectedCaption);
     }
 
+    public bool CanEmbedChapters =>
+        HasChapters &&
+        _metadata?.Duration is { } duration && duration > TimeSpan.Zero &&
+        !IsAudioOnly &&
+        SelectedFormat is not null &&
+        IsCaptionContainerSupported(FinalMediaContainer(
+            SelectedFormat,
+            OutputProfileFor(SelectedFormat)));
+
+    public bool EmbedChapters
+    {
+        get => _embedChapters;
+        set => Set(ref _embedChapters, value && CanEmbedChapters);
+    }
+
     public DownloadModeOption SelectedDownloadMode
     {
         get => _selectedDownloadMode;
@@ -765,9 +788,14 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             OnPropertyChanged(nameof(IsAudioOnly));
             OnPropertyChanged(nameof(IsAudioVideo));
             OnPropertyChanged(nameof(CanEmbedSelectedCaption));
+            OnPropertyChanged(nameof(CanEmbedChapters));
             if (!CanEmbedSelectedCaption)
             {
                 EmbedSelectedCaption = false;
+            }
+            if (!CanEmbedChapters)
+            {
+                EmbedChapters = false;
             }
             OnPropertyChanged(nameof(ModeNotice));
             RebuildFormatFilters(resetSelections: true);
@@ -880,9 +908,14 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             {
                 MarkPresetCustom();
                 OnPropertyChanged(nameof(CanEmbedSelectedCaption));
+                OnPropertyChanged(nameof(CanEmbedChapters));
                 if (!CanEmbedSelectedCaption)
                 {
                     EmbedSelectedCaption = false;
+                }
+                if (!CanEmbedChapters)
+                {
+                    EmbedChapters = false;
                 }
                 OnPropertyChanged(nameof(ModeNotice));
             }
@@ -1274,6 +1307,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         var format = selection.Format;
         var output = OutputProfileFor(selection);
         var caption = SelectedCaptionEmbedSelection();
+        var embedChapters = EmbedChapters && CanEmbedChapters;
         try
         {
             var renderedName = RenderFileName(_metadata, selection, index: null, indexWidth: 2, output);
@@ -1294,7 +1328,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                         _queueSnapshot.Items.Any(item => item.DestinationPath.Equals(path, StringComparison.OrdinalIgnoreCase)) ||
                         _historySnapshot.Entries.Any(item => item.DestinationPath.Equals(path, StringComparison.OrdinalIgnoreCase)));
             var duplicate = DownloadDuplicateDetector.Find(
-                SelectionIdentity(_metadata, selection, output, caption),
+                SelectionIdentity(_metadata, selection, output, caption, embedChapters),
                 destination,
                 _queueSnapshot.Items,
                 _historySnapshot.Entries);
@@ -1306,7 +1340,13 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                 return;
             }
 
-            var queueItem = CreateQueueItem(_metadata, selection, destination, output, caption);
+            var queueItem = CreateQueueItem(
+                _metadata,
+                selection,
+                destination,
+                output,
+                caption,
+                embedChapters);
             var queueError = await UpsertQueueItemAsync(queueItem);
             if (queueError is not null)
             {
@@ -1320,7 +1360,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                 selection,
                 destination,
                 output,
-                caption);
+                caption,
+                embedChapters);
             StatusMessage = $"Queued: {Path.GetFileName(destination)}";
             ProgressDetail = $"Global concurrency: {SelectedMaxConcurrentDownloads}";
             PumpQueue();
@@ -1868,16 +1909,17 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             }
 
             var finalWork = prepared.Work;
-            var work = finalWork.Caption is null
+            var work = !finalWork.RequiresMetadataFinalization
                 ? finalWork
                 : finalWork with
                 {
-                    Destination = CaptionMediaSourcePath(finalWork.Destination),
-                    Caption = null
+                    Destination = PostProcessMediaSourcePath(finalWork.Destination, finalWork.EmbedChapters),
+                    Caption = null,
+                    EmbedChapters = false
                 };
-            if (finalWork.Caption is not null && File.Exists(finalWork.Destination))
+            if (finalWork.RequiresMetadataFinalization && File.Exists(finalWork.Destination))
             {
-                var recovered = await EmbedCaptionAsync(finalWork, work.Destination, cancellation.Token);
+                var recovered = await FinalizeMetadataAsync(finalWork, work.Destination, cancellation.Token);
                 if (recovered.Error is not null)
                 {
                     await CompleteQueueRunAsync(
@@ -1908,7 +1950,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                 (work.Selection.RequiresMuxing ||
                  RequiresMp4Normalization(work.Selection) ||
                  work.Output.RequiresTranscode ||
-                 finalWork.Caption is not null));
+                 finalWork.RequiresMetadataFinalization));
             if (!diskForecast.IsSuccess)
             {
                 await CompleteQueueRunAsync(
@@ -2084,7 +2126,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             else
             {
                 var request = TrackRequest(work.Metadata, work.Selection.Format, work.Destination);
-                var result = finalWork.Caption is null
+                var result = !finalWork.RequiresMetadataFinalization
                     ? await _downloader.DownloadAsync(request, progress, cancellation.Token)
                     : await EnsureTrackDownloadedAsync(request, progress, cancellation.Token);
                 downloadError = result.Error;
@@ -2107,9 +2149,9 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                 return;
             }
 
-            if (finalWork.Caption is not null)
+            if (finalWork.RequiresMetadataFinalization)
             {
-                var embedded = await EmbedCaptionAsync(finalWork, work.Destination, cancellation.Token);
+                var embedded = await FinalizeMetadataAsync(finalWork, work.Destination, cancellation.Token);
                 downloadError = embedded.Error;
                 completedBytes = embedded.BytesWritten;
                 if (downloadError is not null)
@@ -2239,6 +2281,15 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                 "The selected caption track is no longer available. Analyze the video again."));
         }
 
+        if (sourceIdentity.EmbedChapters &&
+            (resolved.Value.Metadata.Chapters.Count == 0 ||
+             resolved.Value.Metadata.Duration is not { } duration || duration <= TimeSpan.Zero))
+        {
+            return (null, new TubeForgeError(
+                "Queue.ChaptersUnavailable",
+                "Chapter metadata is no longer available. Analyze the video again."));
+        }
+
         StreamFormat? audio = null;
         var audioFormatId = sourceIdentity.AudioFormatId;
         if (audioFormatId is not null)
@@ -2268,7 +2319,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             selection,
             item.DestinationPath,
             sourceIdentity.Output,
-            sourceIdentity.Caption);
+            sourceIdentity.Caption,
+            sourceIdentity.EmbedChapters);
         _preparedQueueWork[itemId] = work;
         return (work, null);
     }
@@ -2308,9 +2360,9 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     {
         if (_preparedQueueWork.TryGetValue(itemId, out var work))
         {
-            var mediaDestination = work.Caption is null
+            var mediaDestination = !work.RequiresMetadataFinalization
                 ? work.Destination
-                : CaptionMediaSourcePath(work.Destination);
+                : PostProcessMediaSourcePath(work.Destination, work.EmbedChapters);
             return File.Exists(work.Destination)
                 ? CompletedOrPartialLength(work.Destination)
                 : SelectionPartialLength(mediaDestination, work.Selection, work.Output);
@@ -2405,7 +2457,12 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         {
             Id = Guid.NewGuid(),
             VideoId = work.Metadata.Id.Value,
-            SourceIdentity = SelectionIdentity(work.Metadata, work.Selection, work.Output, work.Caption),
+            SourceIdentity = SelectionIdentity(
+                work.Metadata,
+                work.Selection,
+                work.Output,
+                work.Caption,
+                work.EmbedChapters),
             DisplayTitle = work.Metadata.Title,
             DestinationPath = work.Destination,
             BytesWritten = bytesWritten,
@@ -2653,14 +2710,17 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         FormatItemViewModel selection,
         string destination,
         OutputProfile output = default,
-        CaptionEmbedSelection? caption = null)
+        CaptionEmbedSelection? caption = null,
+        bool embedChapters = false)
     {
         var now = DateTimeOffset.UtcNow;
         var format = selection.Format;
-        var sourceIdentity = SelectionIdentity(metadata, selection, output, caption);
+        var sourceIdentity = SelectionIdentity(metadata, selection, output, caption, embedChapters);
         var expectedLength = CombinedLength(selection);
         var partialLength = SelectionPartialLength(
-            caption is null ? destination : CaptionMediaSourcePath(destination),
+            caption is null && !embedChapters
+                ? destination
+                : PostProcessMediaSourcePath(destination, embedChapters),
             selection,
             output);
 
@@ -2754,23 +2814,112 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         return adaptive.Error;
     }
 
-    private async Task<(TubeForgeError? Error, long BytesWritten)> EmbedCaptionAsync(
+    private async Task<(TubeForgeError? Error, long BytesWritten)> FinalizeMetadataAsync(
         QueuedDownloadWork work,
         string mediaPath,
         CancellationToken cancellationToken)
     {
-        if (work.Caption is not { } caption)
+        if (!work.RequiresMetadataFinalization)
         {
             return (new TubeForgeError(
-                "Queue.InvalidCaptionSelection",
-                "The queued caption selection is invalid."), 0);
+                "Queue.InvalidMetadataSelection",
+                "The queued media metadata selection is invalid."), 0);
         }
 
         var container = FinalMediaContainer(work.Selection, work.Output);
-        var captionPath = CaptionSubtitlePath(work.Destination);
+        var captionPath = work.Caption is null ? null : CaptionSubtitlePath(work.Destination);
         if (File.Exists(work.Destination))
         {
-            var recovered = await _mediaProcessor.EmbedSubtitleAsync(
+            var recovered = await FinalizeWithMetadataProcessorAsync(
+                work,
+                mediaPath,
+                captionPath,
+                container,
+                cancellationToken);
+            if (!recovered.IsSuccess)
+            {
+                return (recovered.Error, CompletedOrPartialLength(work.Destination));
+            }
+
+            TryDeleteIntermediate(mediaPath);
+            if (captionPath is not null)
+            {
+                TryDeleteIntermediate(captionPath);
+            }
+            return (null, recovered.Value.BytesWritten);
+        }
+
+        if (work.Caption is { } caption)
+        {
+            var track = work.Metadata.CaptionTracks.FirstOrDefault(candidate => CaptionMatches(candidate, caption));
+            if (track is null || captionPath is null)
+            {
+                return (new TubeForgeError(
+                    "Queue.CaptionUnavailable",
+                    "The selected caption track is no longer available. Analyze the video again."),
+                    CompletedOrPartialLength(mediaPath));
+            }
+
+            try
+            {
+                File.Delete(captionPath);
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+                return (new TubeForgeError(
+                    "Caption.WriteFailed",
+                    "TubeForge could not prepare the embedded caption file.",
+                    exception.GetType().Name),
+                    CompletedOrPartialLength(mediaPath));
+            }
+
+            StatusMessage = $"Downloading {track.LanguageCode.ToUpperInvariant()} soft subtitles";
+            var downloaded = await _captionDownloader.DownloadAsync(new CaptionDownloadRequest
+            {
+                SourceUrl = track.Url,
+                DestinationPath = captionPath,
+                OutputFormat = CaptionOutputFormat.SubRip
+            }, cancellationToken);
+            if (!downloaded.IsSuccess)
+            {
+                return (downloaded.Error, CompletedOrPartialLength(mediaPath));
+            }
+        }
+
+        StatusMessage = work.Caption is not null && work.EmbedChapters
+            ? "Embedding soft subtitles and chapters"
+            : work.EmbedChapters
+                ? "Embedding chapters"
+                : $"Embedding {work.Caption!.Value.LanguageCode.ToUpperInvariant()} soft subtitles";
+        var embedded = await FinalizeWithMetadataProcessorAsync(
+            work,
+            mediaPath,
+            captionPath,
+            container,
+            cancellationToken);
+        if (!embedded.IsSuccess)
+        {
+            return (embedded.Error, CompletedOrPartialLength(mediaPath));
+        }
+
+        TryDeleteIntermediate(mediaPath);
+        if (captionPath is not null)
+        {
+            TryDeleteIntermediate(captionPath);
+        }
+        return (null, embedded.Value.BytesWritten);
+    }
+
+    private Task<Result<MediaProcessReceipt>> FinalizeWithMetadataProcessorAsync(
+        QueuedDownloadWork work,
+        string mediaPath,
+        string? captionPath,
+        MediaContainer container,
+        CancellationToken cancellationToken)
+    {
+        if (!work.EmbedChapters && work.Caption is { } caption && captionPath is not null)
+        {
+            return _mediaProcessor.EmbedSubtitleAsync(
                 mediaPath,
                 captionPath,
                 work.Destination,
@@ -2778,67 +2927,18 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                 caption,
                 cancellationToken,
                 allowExistingValidatedOutput: true);
-            if (!recovered.IsSuccess)
-            {
-                return (recovered.Error, CompletedOrPartialLength(work.Destination));
-            }
-
-            TryDeleteIntermediate(mediaPath);
-            TryDeleteIntermediate(captionPath);
-            return (null, recovered.Value.BytesWritten);
         }
 
-        var track = work.Metadata.CaptionTracks.FirstOrDefault(candidate => CaptionMatches(candidate, caption));
-        if (track is null)
-        {
-            return (new TubeForgeError(
-                "Queue.CaptionUnavailable",
-                "The selected caption track is no longer available. Analyze the video again."),
-                CompletedOrPartialLength(mediaPath));
-        }
-
-        try
-        {
-            File.Delete(captionPath);
-        }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
-        {
-            return (new TubeForgeError(
-                "Caption.WriteFailed",
-                "TubeForge could not prepare the embedded caption file.",
-                exception.GetType().Name),
-                CompletedOrPartialLength(mediaPath));
-        }
-
-        StatusMessage = $"Downloading {track.LanguageCode.ToUpperInvariant()} soft subtitles";
-        var downloaded = await _captionDownloader.DownloadAsync(new CaptionDownloadRequest
-        {
-            SourceUrl = track.Url,
-            DestinationPath = captionPath,
-            OutputFormat = CaptionOutputFormat.SubRip
-        }, cancellationToken);
-        if (!downloaded.IsSuccess)
-        {
-            return (downloaded.Error, CompletedOrPartialLength(mediaPath));
-        }
-
-        StatusMessage = $"Embedding {track.LanguageCode.ToUpperInvariant()} soft subtitles";
-        var embedded = await _mediaProcessor.EmbedSubtitleAsync(
+        return _mediaProcessor.EmbedMetadataAsync(
             mediaPath,
-            captionPath,
             work.Destination,
             container,
-            caption,
+            work.Metadata.Chapters,
+            work.Metadata.Duration ?? TimeSpan.Zero,
+            captionPath,
+            work.Caption,
             cancellationToken,
             allowExistingValidatedOutput: true);
-        if (!embedded.IsSuccess)
-        {
-            return (embedded.Error, CompletedOrPartialLength(mediaPath));
-        }
-
-        TryDeleteIntermediate(mediaPath);
-        TryDeleteIntermediate(captionPath);
-        return (null, embedded.Value.BytesWritten);
     }
 
     private static void TryDeleteIntermediate(string path)
@@ -2864,8 +2964,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     private static string VideoSourcePath(string destination, FormatItemViewModel selection) =>
         destination + ".source" + NativeOutputExtension(selection);
 
-    private static string CaptionMediaSourcePath(string destination) =>
-        destination + ".caption-source" + Path.GetExtension(destination);
+    private static string PostProcessMediaSourcePath(string destination, bool embedChapters) =>
+        destination + (embedChapters ? ".chapter-source" : ".caption-source") + Path.GetExtension(destination);
 
     private static string CaptionSubtitlePath(string destination) =>
         destination + ".caption-source.srt";
@@ -2896,13 +2996,15 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         VideoMetadata metadata,
         FormatItemViewModel selection,
         OutputProfile output = default,
-        CaptionEmbedSelection? caption = null) =>
+        CaptionEmbedSelection? caption = null,
+        bool embedChapters = false) =>
         DownloadSourceIdentity.Create(
             metadata.Id,
             selection.Format.FormatId,
             selection.AudioFormat?.FormatId,
             output,
-            caption);
+            caption,
+            embedChapters);
 
     private Result<string> RenderFileName(
         VideoMetadata metadata,
@@ -3230,6 +3332,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         CollectionItems.Clear();
         CaptionTracks = [];
         SelectedCaptionTrack = null;
+        EmbedChapters = false;
         _videoTitle = string.Empty;
         _videoChannel = string.Empty;
         _videoDuration = null;
@@ -3692,6 +3795,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         OnPropertyChanged(nameof(VideoMetaLine));
         OnPropertyChanged(nameof(ThumbnailUrl));
         OnPropertyChanged(nameof(HasCaptions));
+        OnPropertyChanged(nameof(HasChapters));
+        OnPropertyChanged(nameof(CanEmbedChapters));
         OnPropertyChanged(nameof(FormatCountLabel));
         RefreshCommands();
     }
@@ -3872,5 +3977,9 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         FormatItemViewModel Selection,
         string Destination,
         OutputProfile Output = default,
-        CaptionEmbedSelection? Caption = null);
+        CaptionEmbedSelection? Caption = null,
+        bool EmbedChapters = false)
+    {
+        public bool RequiresMetadataFinalization => Caption is not null || EmbedChapters;
+    }
 }

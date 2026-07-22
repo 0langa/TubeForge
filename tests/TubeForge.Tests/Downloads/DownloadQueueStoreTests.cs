@@ -242,6 +242,29 @@ public static class DownloadQueueStoreTests
     }
 
     [Test]
+    public static async Task PersistsChapterEmbedAndAcceptsLargerCompletedMedia()
+    {
+        using var directory = new TestDirectory();
+        var store = new DownloadQueueStore(Path.Combine(directory.Path, "queue.json"));
+        var now = DateTimeOffset.UtcNow;
+        var completed = Item(Guid.NewGuid(), DownloadQueueStatus.Completed, now) with
+        {
+            FormatId = 18,
+            SourceIdentity = "Fixture123_:18^chapters",
+            ExpectedLength = 1_024,
+            BytesReceived = 1_536
+        };
+
+        var save = await store.SaveAsync(new DownloadQueueSnapshot { Items = [completed] });
+
+        Assert.True(save.IsSuccess, save.Error?.Message);
+        var load = await new DownloadQueueStore(store.StoragePath).LoadAsync();
+        Assert.True(load.IsSuccess, load.Error?.Message);
+        Assert.Equal("Fixture123_:18^chapters", load.Value.Items[0].SourceIdentity);
+        Assert.Equal(1_536L, load.Value.Items[0].ExpectedLength);
+    }
+
+    [Test]
     public static async Task RejectsOversizedMp3BeforeConversionCompletes()
     {
         using var directory = new TestDirectory();

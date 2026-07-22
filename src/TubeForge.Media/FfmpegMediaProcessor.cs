@@ -1,5 +1,7 @@
 using System.ComponentModel;
 using System.Diagnostics;
+using System.Globalization;
+using System.Text;
 using TubeForge.Core.Errors;
 using TubeForge.Core.Media;
 using TubeForge.Core.Results;
@@ -144,6 +146,128 @@ public sealed class FfmpegMediaProcessor
             cancellationToken,
             allowExistingValidatedOutput,
             ValidateSubtitleStreamAsync);
+    }
+
+    public async Task<Result<MediaProcessReceipt>> EmbedMetadataAsync(
+        string mediaPath,
+        string destinationPath,
+        MediaContainer outputContainer,
+        IReadOnlyList<VideoChapter> chapters,
+        TimeSpan duration,
+        string? subtitlePath = null,
+        CaptionEmbedSelection? caption = null,
+        CancellationToken cancellationToken = default,
+        bool allowExistingValidatedOutput = false)
+    {
+        ArgumentNullException.ThrowIfNull(chapters);
+        if ((subtitlePath is null) != (caption is null) || caption is { IsValid: false })
+        {
+            return Failure(
+                "Media.InvalidCaptionSelection",
+                "Select a valid caption language and subtitle file before embedding subtitles.");
+        }
+
+        var chapterMetadata = BuildChapterMetadata(chapters, duration);
+        if (!chapterMetadata.IsSuccess)
+        {
+            return Result<MediaProcessReceipt>.Failure(chapterMetadata.Error!);
+        }
+
+        string? chapterPath = null;
+        try
+        {
+            var destinationFullPath = Path.GetFullPath(destinationPath);
+            var directory = Path.GetDirectoryName(destinationFullPath);
+            if (string.IsNullOrWhiteSpace(directory))
+            {
+                return Failure("Download.InvalidDestination", "The output directory is invalid.");
+            }
+
+            Directory.CreateDirectory(directory);
+            chapterPath = destinationFullPath + "." + Guid.NewGuid().ToString("N") + ".chapters.ffmetadata";
+            await File.WriteAllTextAsync(
+                chapterPath,
+                chapterMetadata.Value,
+                new UTF8Encoding(encoderShouldEmitUTF8Identifier: false),
+                cancellationToken).ConfigureAwait(false);
+
+            var inputs = subtitlePath is null
+                ? new[] { mediaPath, chapterPath }
+                : new[] { mediaPath, subtitlePath, chapterPath };
+            var chapterInput = subtitlePath is null ? 1 : 2;
+            return await ProcessAsync(
+                inputs,
+                destinationPath,
+                outputContainer,
+                arguments =>
+                {
+                    AddInput(arguments, mediaPath);
+                    if (subtitlePath is not null)
+                    {
+                        AddInput(arguments, subtitlePath);
+                    }
+
+                    AddInput(arguments, chapterPath);
+                    arguments.Add("-map");
+                    arguments.Add("0:v:0");
+                    arguments.Add("-map");
+                    arguments.Add("0:a?");
+                    if (subtitlePath is not null)
+                    {
+                        arguments.Add("-map");
+                        arguments.Add("1:0");
+                    }
+
+                    arguments.Add("-c:v");
+                    arguments.Add("copy");
+                    arguments.Add("-c:a");
+                    arguments.Add("copy");
+                    if (caption is { } selectedCaption)
+                    {
+                        arguments.Add("-c:s");
+                        arguments.Add(SubtitleCodec(outputContainer));
+                        arguments.Add("-metadata:s:s:0");
+                        arguments.Add($"language={selectedCaption.LanguageCode}");
+                        arguments.Add("-disposition:s:0");
+                        arguments.Add("0");
+                    }
+
+                    arguments.Add("-map_metadata");
+                    arguments.Add(chapterInput.ToString(CultureInfo.InvariantCulture));
+                    arguments.Add("-map_chapters");
+                    arguments.Add(chapterInput.ToString(CultureInfo.InvariantCulture));
+                    if (outputContainer == MediaContainer.Mp4)
+                    {
+                        arguments.Add("-movflags");
+                        arguments.Add("+faststart");
+                    }
+                },
+                cancellationToken,
+                allowExistingValidatedOutput,
+                (path, token) => ValidateEmbeddedMetadataAsync(
+                    path,
+                    caption is not null,
+                    chapters.Count,
+                    token)).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            return Failure("Operation.Cancelled", "Media metadata embedding was cancelled.");
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return Failure(
+                "Media.MetadataWriteFailed",
+                "TubeForge could not prepare chapter metadata.",
+                exception.GetType().Name);
+        }
+        finally
+        {
+            if (chapterPath is not null)
+            {
+                TryDelete(chapterPath);
+            }
+        }
     }
 
     private async Task<Result<MediaProcessReceipt>> ProcessAsync(
@@ -352,6 +476,128 @@ public sealed class FfmpegMediaProcessor
                 "Media.SubtitleValidationFailed",
                 "FFmpeg did not verify an embedded soft-subtitle stream.",
                 $"FFmpeg exited with code {exitCode}.");
+    }
+
+    private async Task<TubeForgeError?> ValidateEmbeddedMetadataAsync(
+        string path,
+        bool expectsSubtitle,
+        int expectedChapterCount,
+        CancellationToken cancellationToken)
+    {
+        if (expectsSubtitle)
+        {
+            var subtitleError = await ValidateSubtitleStreamAsync(path, cancellationToken)
+                .ConfigureAwait(false);
+            if (subtitleError is not null)
+            {
+                return subtitleError;
+            }
+        }
+
+        var probePath = Path.GetFullPath(path) + "." + Guid.NewGuid().ToString("N") + ".probe.ffmetadata";
+        try
+        {
+            var arguments = new[]
+            {
+                "-hide_banner",
+                "-loglevel", "error",
+                "-xerror",
+                "-nostdin",
+                "-i", Path.GetFullPath(path),
+                "-f", "ffmetadata",
+                probePath
+            };
+            var exitCode = await _processRunner.RunAsync(
+                    _executablePath,
+                    arguments,
+                    Path.GetDirectoryName(Path.GetFullPath(path))!,
+                    cancellationToken)
+                .ConfigureAwait(false);
+            if (exitCode != 0 || !File.Exists(probePath))
+            {
+                return ChapterValidationFailure(exitCode);
+            }
+
+            var metadata = await File.ReadAllTextAsync(probePath, cancellationToken).ConfigureAwait(false);
+            var actualCount = metadata.Split("[CHAPTER]", StringSplitOptions.None).Length - 1;
+            return actualCount == expectedChapterCount
+                ? null
+                : ChapterValidationFailure(exitCode, $"Expected {expectedChapterCount} chapters; found {actualCount}.");
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return ChapterValidationFailure(-1, exception.GetType().Name);
+        }
+        finally
+        {
+            TryDelete(probePath);
+        }
+    }
+
+    private static Result<string> BuildChapterMetadata(
+        IReadOnlyList<VideoChapter> chapters,
+        TimeSpan duration)
+    {
+        if (chapters.Count is < 1 or > 1_000 || duration <= TimeSpan.Zero)
+        {
+            return Result<string>.Failure(new TubeForgeError(
+                "Media.InvalidChapters",
+                "Chapter metadata is empty or exceeds its safe limits."));
+        }
+
+        var durationMilliseconds = (long)Math.Floor(duration.TotalMilliseconds);
+        var builder = new StringBuilder(";FFMETADATA1\n");
+        long previousStart = -1;
+        for (var index = 0; index < chapters.Count; index++)
+        {
+            var chapter = chapters[index];
+            var start = (long)Math.Floor(chapter.StartTime.TotalMilliseconds);
+            var end = index + 1 < chapters.Count
+                ? (long)Math.Floor(chapters[index + 1].StartTime.TotalMilliseconds)
+                : durationMilliseconds;
+            if (string.IsNullOrWhiteSpace(chapter.Title) || chapter.Title.Length > 500 ||
+                chapter.Title.Any(char.IsControl) ||
+                start < 0 || start <= previousStart || end <= start || end > durationMilliseconds)
+            {
+                return Result<string>.Failure(new TubeForgeError(
+                    "Media.InvalidChapters",
+                    "Chapter timestamps or titles are invalid for this media duration."));
+            }
+
+            builder.AppendLine("[CHAPTER]");
+            builder.AppendLine("TIMEBASE=1/1000");
+            builder.Append("START=").AppendLine(start.ToString(CultureInfo.InvariantCulture));
+            builder.Append("END=").AppendLine(end.ToString(CultureInfo.InvariantCulture));
+            builder.Append("title=").AppendLine(EscapeMetadataValue(chapter.Title));
+            previousStart = start;
+        }
+
+        return Result<string>.Success(builder.ToString());
+    }
+
+    private static string EscapeMetadataValue(string value) => value
+        .Replace("\\", "\\\\", StringComparison.Ordinal)
+        .Replace("\r", string.Empty, StringComparison.Ordinal)
+        .Replace("\n", "\\n", StringComparison.Ordinal)
+        .Replace("=", "\\=", StringComparison.Ordinal)
+        .Replace(";", "\\;", StringComparison.Ordinal)
+        .Replace("#", "\\#", StringComparison.Ordinal);
+
+    private static TubeForgeError ChapterValidationFailure(int exitCode, string? detail = null) =>
+        new(
+            "Media.ChapterValidationFailed",
+            "FFmpeg did not verify the embedded chapter metadata.",
+            detail ?? $"FFmpeg exited with code {exitCode}.");
+
+    private static void TryDelete(string path)
+    {
+        try
+        {
+            File.Delete(path);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+        }
     }
 
     private static void AddStreamCopyOutput(ICollection<string> arguments, MediaContainer container)

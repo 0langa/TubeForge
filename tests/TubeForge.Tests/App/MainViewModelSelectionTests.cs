@@ -219,6 +219,42 @@ public static class MainViewModelSelectionTests
         Assert.False(viewModel.EmbedSelectedCaption);
     }
 
+    [Test]
+    public static void ChapterEmbeddingRequiresTimedChaptersAndResetsForAudioOnly()
+    {
+        using var viewModel = new MainViewModel();
+        SetFormats(viewModel, BuildCompleteCatalog());
+        Assert.True(YouTubeVideoId.TryCreate("Fixture123_", out var videoId));
+        SetMetadata(viewModel, new VideoMetadata
+        {
+            Id = videoId,
+            Title = "Fixture",
+            Duration = TimeSpan.FromMinutes(2),
+            Formats = BuildCompleteCatalog(),
+            Chapters =
+            [
+                new VideoChapter { Title = "Intro", StartTime = TimeSpan.Zero },
+                new VideoChapter { Title = "Main", StartTime = TimeSpan.FromMinutes(1) }
+            ]
+        });
+
+        Assert.True(viewModel.HasChapters);
+        Assert.True(viewModel.CanEmbedChapters);
+        viewModel.EmbedChapters = true;
+        Assert.True(viewModel.EmbedChapters);
+
+        viewModel.SelectedDownloadMode = viewModel.DownloadModes.First(option =>
+            option.Value == DownloadMode.VideoOnly);
+        Assert.True(viewModel.CanEmbedChapters);
+        Assert.True(viewModel.EmbedChapters);
+
+        viewModel.SelectedDownloadMode = viewModel.DownloadModes.First(option =>
+            option.Value == DownloadMode.AudioOnly);
+
+        Assert.False(viewModel.CanEmbedChapters);
+        Assert.False(viewModel.EmbedChapters);
+    }
+
     private static void ExerciseAudioOnly(MainViewModel viewModel, ref int terminalCombinations)
     {
         foreach (var bitrate in viewModel.BitrateOptions.ToArray())
@@ -336,6 +372,13 @@ public static class MainViewModelSelectionTests
         refresh.Invoke(viewModel, null);
         viewModel.SelectedDownloadMode = viewModel.DownloadModes[1];
         viewModel.SelectedDownloadMode = viewModel.DownloadModes[0];
+    }
+
+    private static void SetMetadata(MainViewModel viewModel, VideoMetadata metadata)
+    {
+        var field = typeof(MainViewModel).GetField("_metadata", BindingFlags.Instance | BindingFlags.NonPublic)
+            ?? throw new MissingFieldException(typeof(MainViewModel).FullName, "_metadata");
+        field.SetValue(viewModel, metadata);
     }
 
     private static IReadOnlyList<StreamFormat> BuildCompleteCatalog()

@@ -52,6 +52,20 @@ public static class DownloadSourceIdentityTests
         Assert.Equal(
             $"dQw4w9WgXcQ:401+140@{OutputProfile.H264AacMp4.Identity}~m.en-US",
             captionValue);
+
+        var chaptersValue = DownloadSourceIdentity.Create(
+            videoId,
+            401,
+            140,
+            OutputProfile.H264AacMp4,
+            caption,
+            embedChapters: true);
+        Assert.True(DownloadSourceIdentity.TryParse(chaptersValue, out var chaptered));
+        Assert.True(chaptered.EmbedChapters);
+        Assert.Equal(caption, chaptered.Caption);
+        Assert.Equal(
+            $"dQw4w9WgXcQ:401+140@{OutputProfile.H264AacMp4.Identity}~m.en-US^chapters",
+            chaptersValue);
     }
 
     [Test]
@@ -67,7 +81,9 @@ public static class DownloadSourceIdentityTests
                      "dQw4w9WgXcQ:140@flac-0", "dQw4w9WgXcQ:140@unknown-192",
                      "dQw4w9WgXcQ:401+140@h264-aac-mp4-100", "dQw4w9WgXcQ:18~",
                      "dQw4w9WgXcQ:18~x.en", "dQw4w9WgXcQ:18~m.-en",
-                     "dQw4w9WgXcQ:18~m.en--US", "dQw4w9WgXcQ:18~m.en~a.de"
+                     "dQw4w9WgXcQ:18~m.en--US", "dQw4w9WgXcQ:18~m.en~a.de",
+                     "dQw4w9WgXcQ:18^", "dQw4w9WgXcQ:18^chapter",
+                     "dQw4w9WgXcQ:18^chapters^chapters", "dQw4w9WgXcQ:18^chapters~m.en"
                  })
         {
             Assert.False(DownloadSourceIdentity.TryParse(value, out _));

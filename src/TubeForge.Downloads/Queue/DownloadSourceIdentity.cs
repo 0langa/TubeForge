@@ -8,14 +8,16 @@ public readonly record struct DownloadSourceIdentity(
     int PrimaryFormatId,
     int? AudioFormatId,
     OutputProfile Output = default,
-    CaptionEmbedSelection? Caption = null)
+    CaptionEmbedSelection? Caption = null,
+    bool EmbedChapters = false)
 {
     public static string Create(
         YouTubeVideoId videoId,
         int primaryFormatId,
         int? audioFormatId = null,
         OutputProfile output = default,
-        CaptionEmbedSelection? caption = null)
+        CaptionEmbedSelection? caption = null,
+        bool embedChapters = false)
     {
         if (primaryFormatId <= 0)
         {
@@ -43,7 +45,8 @@ public readonly record struct DownloadSourceIdentity(
         var media = output.Kind == OutputProfileKind.Native
             ? streams
             : $"{streams}@{output.Identity}";
-        return caption is null ? media : $"{media}~{caption.Value.Identity}";
+        var captioned = caption is null ? media : $"{media}~{caption.Value.Identity}";
+        return embedChapters ? $"{captioned}^chapters" : captioned;
     }
 
     public static bool TryParse(string? value, out DownloadSourceIdentity identity)
@@ -62,6 +65,24 @@ public readonly record struct DownloadSourceIdentity(
         }
 
         var formatPart = value[(colon + 1)..];
+        var embedChapters = false;
+        var caret = formatPart.IndexOf('^');
+        if (caret != formatPart.LastIndexOf('^'))
+        {
+            return false;
+        }
+
+        if (caret >= 0)
+        {
+            if (!formatPart[(caret + 1)..].Equals("chapters", StringComparison.Ordinal))
+            {
+                return false;
+            }
+
+            embedChapters = true;
+            formatPart = formatPart[..caret];
+        }
+
         CaptionEmbedSelection? caption = null;
         var tilde = formatPart.IndexOf('~');
         if (tilde != formatPart.LastIndexOf('~'))
@@ -125,7 +146,13 @@ public readonly record struct DownloadSourceIdentity(
             audioFormatId = parsedAudioFormatId;
         }
 
-        identity = new DownloadSourceIdentity(videoId, primaryFormatId, audioFormatId, output, caption);
+        identity = new DownloadSourceIdentity(
+            videoId,
+            primaryFormatId,
+            audioFormatId,
+            output,
+            caption,
+            embedChapters);
         return true;
     }
 }
