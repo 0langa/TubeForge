@@ -95,6 +95,54 @@ public sealed class FfmpegMediaProcessor
             cancellationToken,
             allowExistingValidatedOutput);
 
+    public Task<Result<MediaProcessReceipt>> TrimStreamCopyAsync(
+        string mediaPath,
+        string destinationPath,
+        MediaContainer outputContainer,
+        MediaTrimRange trim,
+        CancellationToken cancellationToken = default,
+        bool allowExistingValidatedOutput = false)
+    {
+        if (!trim.IsValid)
+        {
+            return Task.FromResult(Failure(
+                "Media.InvalidTrimRange",
+                "Choose a trim end that is later than its start."));
+        }
+
+        return ProcessAsync(
+            [mediaPath],
+            destinationPath,
+            outputContainer,
+            arguments =>
+            {
+                arguments.Add("-ss");
+                arguments.Add(Seconds(trim.Start));
+                AddInput(arguments, mediaPath);
+                arguments.Add("-t");
+                arguments.Add(Seconds(trim.Duration));
+                arguments.Add("-map");
+                arguments.Add("0:v?");
+                arguments.Add("-map");
+                arguments.Add("0:a?");
+                arguments.Add("-map");
+                arguments.Add("0:s?");
+                arguments.Add("-c");
+                arguments.Add("copy");
+                arguments.Add("-avoid_negative_ts");
+                arguments.Add("make_zero");
+                arguments.Add("-map_metadata");
+                arguments.Add("-1");
+                if (outputContainer == MediaContainer.Mp4)
+                {
+                    arguments.Add("-movflags");
+                    arguments.Add("+faststart");
+                }
+            },
+            cancellationToken,
+            allowExistingValidatedOutput);
+    }
+
     public Task<Result<MediaProcessReceipt>> EmbedSubtitleAsync(
         string mediaPath,
         string subtitlePath,
@@ -447,6 +495,9 @@ public sealed class FfmpegMediaProcessor
         arguments.Add("-i");
         arguments.Add(Path.GetFullPath(path));
     }
+
+    private static string Seconds(TimeSpan value) =>
+        value.TotalSeconds.ToString("0.###", CultureInfo.InvariantCulture);
 
     private async Task<TubeForgeError?> ValidateSubtitleStreamAsync(
         string path,

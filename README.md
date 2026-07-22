@@ -26,6 +26,8 @@ Working now:
 - preset-first download setup for Best original, Windows MP4, Small file, MP3 320, and fully custom selection in the current development branch;
 - caption-track metadata plus manual/auto language selection, atomic SRT/WebVTT sidecar saves, and opt-in single-video soft-subtitle embedding for MP4/MKV/WebM in the current development branch;
 - opt-in chapter embedding and lossless chapter splitting for single-video MP4/MKV/WebM outputs, with atomic publication, sanitized numbered names, and queue recovery validation;
+- bounded start/end trim controls with keyframe-aligned stream copy for original outputs, precise trim during selected transcodes, and synchronized caption/chapter rebasing;
+- disabled-by-default SponsorBlock integration using a privacy-preserving video-ID hash prefix, selectable categories, local candidate matching, and either chapter markers or explicit transcode removal;
 - on-demand validated thumbnail saves and stable JSON metadata sidecars with chapters but without signed stream URLs;
 - bounded playlist/channel enumeration with per-video selection, source ordering, indexed filenames, and batch queue preparation;
 - shared per-provider request limits and bounded `Retry-After` backoff that stops persistent rate-limited bulk preparation;
@@ -102,6 +104,12 @@ Verify bundled-FFmpeg subtitle, chapter metadata, and chapter splitting for MP4,
 
 ```powershell
 .\scripts\Test-ChapterEmbedding.ps1 -Configuration Release
+```
+
+Verify bundled-FFmpeg trim and SponsorBlock segment removal using synthetic local media:
+
+```powershell
+.\scripts\Test-TimelineEditing.ps1 -Configuration Release
 ```
 
 Run the desktop application:

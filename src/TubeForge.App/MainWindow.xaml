@@ -279,6 +279,78 @@
                         <Border Style="{StaticResource Card}" Margin="0,14,0,0"
                                 Visibility="{Binding HasVideo, Converter={StaticResource BooleanToVisibilityConverter}}">
                             <StackPanel>
+                                <TextBlock Text="SponsorBlock" FontSize="13" FontWeight="SemiBold" />
+                                <TextBlock Text="Optional third-party community timeline data. No request is made until you enable this for a download."
+                                           Margin="0,5,0,0" FontSize="10" TextWrapping="Wrap"
+                                           Foreground="{StaticResource MutedTextBrush}" />
+                                <CheckBox Content="Use SponsorBlock for next media download"
+                                          IsChecked="{Binding EnableSponsorBlock}"
+                                          IsEnabled="{Binding CanUseSponsorBlock}"
+                                          Margin="0,12,0,0"
+                                          AutomationProperties.Name="Use SponsorBlock for next media download" />
+                                <TextBlock Text="MODE" Style="{StaticResource FieldLabel}" Margin="0,12,0,5" />
+                                <ComboBox ItemsSource="{Binding SponsorBlockModeOptions}"
+                                          SelectedItem="{Binding SelectedSponsorBlockMode}"
+                                          IsEnabled="{Binding EnableSponsorBlock}"
+                                          AutomationProperties.Name="SponsorBlock processing mode" />
+                                <WrapPanel Margin="0,10,0,0" IsEnabled="{Binding EnableSponsorBlock}">
+                                    <CheckBox Content="Sponsor" IsChecked="{Binding SponsorCategory}" Margin="0,0,14,6" />
+                                    <CheckBox Content="Intro" IsChecked="{Binding IntroCategory}" Margin="0,0,14,6" />
+                                    <CheckBox Content="Outro" IsChecked="{Binding OutroCategory}" Margin="0,0,14,6" />
+                                    <CheckBox Content="Self-promo" IsChecked="{Binding SelfPromotionCategory}" Margin="0,0,14,6" />
+                                    <CheckBox Content="Interaction" IsChecked="{Binding InteractionCategory}" Margin="0,0,14,6" />
+                                    <CheckBox Content="Preview" IsChecked="{Binding PreviewCategory}" Margin="0,0,14,6" />
+                                    <CheckBox Content="Filler" IsChecked="{Binding FillerCategory}" Margin="0,0,14,6" />
+                                </WrapPanel>
+                                <TextBlock Text="{Binding SponsorBlockModeNotice}"
+                                           Margin="0,4,0,0" FontSize="10" TextWrapping="Wrap"
+                                           Foreground="{StaticResource MutedTextBrush}" />
+                                <TextBlock Text="Privacy: TubeForge sends SponsorBlock a four-character SHA-256 prefix, not the full video ID. The response can include multiple candidates and is matched locally; payloads and IDs are never logged."
+                                           Margin="0,8,0,0" FontSize="10" TextWrapping="Wrap"
+                                           Foreground="{StaticResource MutedTextBrush}" />
+                            </StackPanel>
+                        </Border>
+
+                        <Border Style="{StaticResource Card}" Margin="0,14,0,0"
+                                Visibility="{Binding HasVideo, Converter={StaticResource BooleanToVisibilityConverter}}">
+                            <StackPanel>
+                                <TextBlock Text="Trim" FontSize="13" FontWeight="SemiBold" />
+                                <TextBlock Text="Keep only a selected part of the next single-video download."
+                                           Margin="0,5,0,0" FontSize="10" TextWrapping="Wrap"
+                                           Foreground="{StaticResource MutedTextBrush}" />
+                                <CheckBox Content="Trim next media download"
+                                          IsChecked="{Binding EnableTrim}"
+                                          IsEnabled="{Binding CanTrim}"
+                                          Margin="0,12,0,0"
+                                          AutomationProperties.Name="Trim next media download" />
+                                <Grid Margin="0,12,0,0" IsEnabled="{Binding EnableTrim}">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="12" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel>
+                                        <TextBlock Text="START (HH:MM:SS)" Style="{StaticResource FieldLabel}" />
+                                        <TextBox Text="{Binding TrimStartText, UpdateSourceTrigger=PropertyChanged}"
+                                                 Margin="0,6,0,0"
+                                                 AutomationProperties.Name="Trim start time" />
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="2">
+                                        <TextBlock Text="END (HH:MM:SS)" Style="{StaticResource FieldLabel}" />
+                                        <TextBox Text="{Binding TrimEndText, UpdateSourceTrigger=PropertyChanged}"
+                                                 Margin="0,6,0,0"
+                                                 AutomationProperties.Name="Trim end time" />
+                                    </StackPanel>
+                                </Grid>
+                                <TextBlock Text="Original-quality outputs use lossless stream copy and may align the start to a nearby keyframe. A selected conversion preset re-encodes the chosen range for a precise cut."
+                                           Margin="0,8,0,0" FontSize="10" TextWrapping="Wrap"
+                                           Foreground="{StaticResource MutedTextBrush}" />
+                            </StackPanel>
+                        </Border>
+
+                        <Border Style="{StaticResource Card}" Margin="0,14,0,0"
+                                Visibility="{Binding HasVideo, Converter={StaticResource BooleanToVisibilityConverter}}">
+                            <StackPanel>
                                 <TextBlock Text="Sidecars" FontSize="13" FontWeight="SemiBold" />
                                 <TextBlock Text="Save the highest thumbnail or a stable JSON metadata record beside the media."
                                            Margin="0,5,0,0" FontSize="10" TextWrapping="Wrap"

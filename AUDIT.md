@@ -16,7 +16,7 @@ TubeForge is no longer a thin prototype. Current `main` builds cleanly and alrea
 - MP3, AAC/M4A, Opus/OGG, WAV, and FLAC audio conversion through bundled FFmpeg, with fail-closed output validation and queue recovery.
 - Optional resolution-aware H.264/AAC MP4, H.265/AAC MP4, and VP9/Opus WebM conversion presets, with native stream copy remaining default.
 - Preset-first setup for Best original, Windows MP4, Small file, MP3 320, and fully custom selection.
-- Caption SRT/WebVTT sidecars plus opt-in single-video MP4/MKV/WebM soft-subtitle embedding, thumbnails, JSON sidecars, chapters in metadata, filename templates, duplicate detection, resumable `.part` files, segmented transfer, disk forecasting, queue recovery, unified system/manual/off proxy controls, installer, release scripts, optional Authenticode signing, GitHub release update checks, and redacted diagnostics.
+- Caption SRT/WebVTT sidecars plus opt-in single-video MP4/MKV/WebM soft-subtitle embedding, chapter embed/split, bounded trim, disabled-by-default SponsorBlock chapter/removal modes, thumbnails, JSON sidecars, filename templates, duplicate detection, resumable `.part` files, segmented transfer, disk forecasting, queue recovery, unified system/manual/off proxy controls, installer, release scripts, optional Authenticode signing, GitHub release update checks, and redacted diagnostics.
 
 Verified during this audit:
 
@@ -30,13 +30,13 @@ Result: passed, 0 warnings, 0 errors.
 dotnet run --project tests\TubeForge.Tests --configuration Release --no-build -- --all
 ```
 
-Result after proxy/network controls: 203/203 passed in 42288 ms.
+Result after trim/SponsorBlock implementation: 217/217 passed in 24496 ms.
 
 ```powershell
 dotnet run --project tools\TubeForge.Performance --configuration Release --no-build -- --core-only
 ```
 
-Result after proxy/network controls: passed. Core parser p95 0.6765 ms against 25 ms budget.
+Result after trim/SponsorBlock implementation: passed. Core parser p95 0.2693 ms against 25 ms budget.
 
 Not verified in this audit: live YouTube canary downloads, installer publication, installer execution, desktop visual/performance probe, update flow against a real GitHub release, code signing, VirusTotal/SmartScreen reputation, store/winget distribution, long-run queue soak, or accessibility with Narrator/NVDA.
 
@@ -76,8 +76,8 @@ Popular tools define user expectations beyond "download a public YouTube video":
 | Active live capture | Explicitly unsupported | Present in VideoProc/yt-dlp-style workflows | High |
 | M3U8/HLS | Not present | Common in broader downloaders | High |
 | Multi-site support | YouTube-only | Major competitors support hundreds/thousands of sites | Strategic gap |
-| SponsorBlock | Not present | Common in yt-dlp GUIs | Medium |
-| Trim/cut/split | Not present | Common in SnapDownloader/VideoProc, chapter split in MediaHuman | Medium |
+| SponsorBlock | Disabled-by-default category selection with chapter markers or transcode removal on current v2 branch | Common in yt-dlp GUIs | Medium, needs installed-app/live third-party proof |
+| Trim/cut/split | Bounded start/end trim plus chapter split on current v2 branch; copy cuts are keyframe-aligned and selected transcodes are precise | Common in SnapDownloader/VideoProc, chapter split in MediaHuman | Low, needs installed-app proof |
 | Captions/subtitles | Sidecar SRT/WebVTT plus one selected soft-subtitle track in single-video MP4/MKV/WebM on current v2 branch | Expected | Medium, multi-language batch, burn-in, and installed-app proof remain |
 | Chapter handling | Opt-in embed and lossless split on current v2 branch | Embed chapters or split by chapters common | Low, batch controls and installed-app proof remain |
 | Thumbnails/metadata sidecars | Present | Expected | Low |
@@ -195,21 +195,22 @@ Recommendation:
 - Capture sanitized installed-app evidence for metadata and media through an operator-controlled proxy before v2 release.
 - Continue emitting only proxy mode in diagnostics; never endpoint or credential data.
 
-### P2: SponsorBlock And Trim Workflows Missing
+### P2: SponsorBlock And Trim Implemented; Release Proof Remains
 
-yt-dlp GUIs increasingly expose SponsorBlock removal/chapter marking, and premium apps expose trimming. TubeForge now records, embeds, and splits chapters for single-video MP4/MKV/WebM downloads.
+yt-dlp GUIs increasingly expose SponsorBlock removal/chapter marking, and premium apps expose trimming. The current v2 branch adds both while preserving fail-closed publication and explicit user choice.
 
 Wrong/optimizable:
 
-- No SponsorBlock API integration.
-- No "trim before save" or post-download cut workflow.
+- SponsorBlock is a third-party network dependency and still needs sanitized live/installed-app proof before release.
+- Original-output trim is keyframe-aligned stream copy; frame-accurate trim intentionally requires a selected transcode profile.
+- SponsorBlock removal requires an explicit transcode profile and is mutually exclusive with embedded captions/chapters so timed metadata cannot silently drift.
 - Chapter embed/split UI currently targets single-video outputs; batch controls remain open.
 
 Recommendation:
 
-- Chapter embed/split is implemented with queue recovery, atomic folder publication, sanitized chapter filename tokens, and bundled-FFmpeg validation.
-- Add trim/cut later through FFmpeg copy where possible, transcode only when needed.
-- Add SponsorBlock as opt-in network feature, disabled by default, with privacy notice.
+- Keep SponsorBlock disabled by default with the current privacy notice and four-character hash-prefix request described by the [official API](https://wiki.sponsor.ajay.app/w/API_Docs); match returned candidates locally and never persist payloads.
+- Preserve the current trim distinction in UI: keyframe-aligned copy for original outputs and precise cut during a selected re-encode.
+- Capture sanitized installed-app evidence for trim, SponsorBlock chapter marking, and SponsorBlock removal before v2 release.
 
 ### P2: Caption Embed Implemented; Batch And Burn-In Remain
 

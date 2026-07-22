@@ -265,6 +265,50 @@ public static class DownloadQueueStoreTests
     }
 
     [Test]
+    public static async Task PersistsTrimRangeAcrossQueueRestart()
+    {
+        using var directory = new TestDirectory();
+        var store = new DownloadQueueStore(Path.Combine(directory.Path, "queue.json"));
+        var queued = Item(Guid.NewGuid(), DownloadQueueStatus.Queued, DateTimeOffset.UtcNow) with
+        {
+            FormatId = 18,
+            SourceIdentity = "Fixture123_:18%5000-60000"
+        };
+
+        var save = await store.SaveAsync(new DownloadQueueSnapshot { Items = [queued] });
+
+        Assert.True(save.IsSuccess, save.Error?.Message);
+        var load = await new DownloadQueueStore(store.StoragePath).LoadAsync();
+        Assert.True(load.IsSuccess, load.Error?.Message);
+        Assert.Equal("Fixture123_:18%5000-60000", load.Value.Items[0].SourceIdentity);
+    }
+
+    [Test]
+    public static async Task PersistsSponsorBlockSelectionWithoutSegmentPayloads()
+    {
+        using var directory = new TestDirectory();
+        var store = new DownloadQueueStore(Path.Combine(directory.Path, "queue.json"));
+        var identity = "Fixture123_:18&chapters.sponsor,intro";
+        var queued = Item(Guid.NewGuid(), DownloadQueueStatus.Completed, DateTimeOffset.UtcNow) with
+        {
+            FormatId = 18,
+            SourceIdentity = identity,
+            ExpectedLength = 1_024,
+            BytesReceived = 1_536
+        };
+
+        var save = await store.SaveAsync(new DownloadQueueSnapshot { Items = [queued] });
+
+        Assert.True(save.IsSuccess, save.Error?.Message);
+        var load = await new DownloadQueueStore(store.StoragePath).LoadAsync();
+        Assert.True(load.IsSuccess, load.Error?.Message);
+        Assert.Equal(identity, load.Value.Items[0].SourceIdentity);
+        Assert.Equal(1_536L, load.Value.Items[0].ExpectedLength);
+        var json = await File.ReadAllTextAsync(store.StoragePath);
+        Assert.False(json.Contains("segment", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Test]
     public static async Task RejectsOversizedMp3BeforeConversionCompletes()
     {
         using var directory = new TestDirectory();

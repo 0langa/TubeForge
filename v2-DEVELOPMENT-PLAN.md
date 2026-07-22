@@ -9,11 +9,13 @@ Status date: 2026-07-22.
 - Phase 0 complete. Sanitized baseline evidence: [`docs/V2_BASELINE_EVIDENCE.md`](docs/V2_BASELINE_EVIDENCE.md).
 - Phase 1 core implementation complete in working tree: expanded audio outputs plus resolution-aware H.264/AAC MP4, H.265/AAC MP4, and VP9/Opus WebM profiles.
 - General output profiles persist through queue restart, validate before publication/recovery, clean failed temporary files, and use allowlisted FFmpeg arguments from the pinned LGPL build.
-- Verification: Release build 0 warnings/errors; 203/203 deterministic tests; core parser p95 0.6765 ms against 25 ms; bundled FFmpeg encode/decode smoke passed for all four new audio outputs, all three video profiles, and MP4/MKV/WebM soft-subtitle/chapter embed/split workflows.
+- Verification: Release build 0 warnings/errors; 217/217 deterministic tests; core parser p95 0.2693 ms against 25 ms; bundled FFmpeg encode/decode smoke passed for all four new audio outputs, all three video profiles, MP4/MKV/WebM soft-subtitle/chapter embed/split workflows, trim, and SponsorBlock removal.
 - Phase 1 release proof remains open: installed-app live media matrix and measured quality/time/file-size evidence. Broader custom/device presets remain deferred to UX work.
 - Preset-first UX is implemented for Best original, Windows MP4, Small file, MP3 320, and Custom; deterministic tests cover applied state and manual override behavior.
 - Phase 2 subtitle slice implemented: selected manual/auto track can be embedded as a soft subtitle in a single-video MP4, MKV, or WebM download. Queue identity persists language/type without storing caption URLs; FFmpeg validates a subtitle stream before publication or recovery.
 - Phase 2 chapter workflows implemented: embed/split intent survives queue restart; embedding combines with a selected soft subtitle in one atomic FFmpeg pass; splitting keeps the full file and atomically publishes a sibling folder using sanitized `{chapterIndex}` / `{chapterTitle}` names. Both paths validate outputs before publication or recovery.
+- Phase 2 timeline editing implemented: bounded start/end trim persists through queue restart, uses keyframe-aligned stream copy for original outputs, applies precise trim during a selected transcode, and rebases embedded captions and chapters.
+- Phase 2 SponsorBlock integration implemented as a disabled-by-default third-party opt-in. A four-character SHA-256 video-ID prefix is sent to the official API, candidates are matched locally, selected categories can become chapter markers or be removed during an explicit audio/video transcode, and neither IDs nor response payloads enter diagnostics or queue state.
 - Phase 5 implemented: Settings exposes system/manual/off proxy policy, bounded metadata timeout/media retry/per-host concurrency controls, and applies one credential-free proxy object to metadata, collections, captions, thumbnails, media, and updates. Schema migration is safe, diagnostics emit mode only, and loopback tests prove metadata and media proxy paths.
 
 ## v2 Product Definition
@@ -140,23 +142,25 @@ Add:
 
 Add:
 
-- Start/end trim controls.
-- FFmpeg stream-copy trim when keyframe-compatible.
-- Transcode fallback only when user selects a transcode profile.
+- [x] Start/end trim controls.
+- [x] FFmpeg stream-copy trim when keyframe-compatible.
+- [x] Precise trim during re-encoding only when the user selects a transcode profile.
+- [x] Rebase and clip embedded captions and chapters to the selected interval.
 
 ### 2.4 SponsorBlock
 
 Add as opt-in:
 
-- Fetch SponsorBlock segments only after user enables feature.
-- Categories selectable: sponsor, intro, outro, self-promo, interaction, preview, filler.
-- Modes: write chapters, remove segments, or ignore.
-- Diagnostics redact video IDs and response payloads.
+- [x] Fetch SponsorBlock segments only after user enables the feature.
+- [x] Categories selectable: sponsor, intro, outro, self-promo, interaction, preview, filler.
+- [x] Modes: write chapters, remove segments, or ignore.
+- [x] Keep removal explicit and safe: it requires an audio/video transcode profile and cannot be combined with embedded timed metadata.
+- [x] Diagnostics and persisted queue state omit video IDs and response payloads.
 
 Exit gate:
 
-- Timeline edits preserve sync across video, audio, captions, and chapters.
-- User-facing labels distinguish lossless copy cuts from re-encoded cuts.
+- [x] Timeline edits preserve sync across video, audio, captions, and chapters for supported combinations.
+- [x] User-facing labels distinguish keyframe-aligned copy cuts from precise re-encoded cuts.
 
 ## Phase 3: Authenticated User-Owned Content Strategy
 
@@ -221,7 +225,7 @@ Tasks:
   - [x] Manual HTTP/HTTPS proxy.
   - [x] No proxy.
   - [x] Reject proxy credentials because no secure credential store is implemented.
-- [x] Apply the same network policy to metadata, collections, captions, thumbnails, media, and updates; SponsorBlock will use it when implemented.
+- [x] Apply the same network policy to metadata, collections, captions, thumbnails, media, updates, and SponsorBlock.
 - [x] Add bounded metadata-timeout and media-retry settings for power users.
 - [x] Add per-host concurrency explanation and controls.
 

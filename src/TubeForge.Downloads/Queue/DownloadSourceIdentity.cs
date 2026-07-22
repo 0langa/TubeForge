@@ -10,7 +10,9 @@ public readonly record struct DownloadSourceIdentity(
     OutputProfile Output = default,
     CaptionEmbedSelection? Caption = null,
     bool EmbedChapters = false,
-    bool SplitChapters = false)
+    bool SplitChapters = false,
+    MediaTrimRange? Trim = null,
+    SponsorBlockSelection? SponsorBlock = null)
 {
     public static string Create(
         YouTubeVideoId videoId,
@@ -19,7 +21,9 @@ public readonly record struct DownloadSourceIdentity(
         OutputProfile output = default,
         CaptionEmbedSelection? caption = null,
         bool embedChapters = false,
-        bool splitChapters = false)
+        bool splitChapters = false,
+        MediaTrimRange? trim = null,
+        SponsorBlockSelection? sponsorBlock = null)
     {
         if (primaryFormatId <= 0)
         {
@@ -41,6 +45,16 @@ public readonly record struct DownloadSourceIdentity(
             throw new ArgumentException("The embedded caption selection is invalid.", nameof(caption));
         }
 
+        if (trim is { IsValid: false })
+        {
+            throw new ArgumentException("The trim range is invalid.", nameof(trim));
+        }
+
+        if (sponsorBlock is { IsValid: false })
+        {
+            throw new ArgumentException("The SponsorBlock selection is invalid.", nameof(sponsorBlock));
+        }
+
         var streams = audioFormatId is null
             ? $"{videoId.Value}:{primaryFormatId}"
             : $"{videoId.Value}:{primaryFormatId}+{audioFormatId.Value}";
@@ -55,7 +69,9 @@ public readonly record struct DownloadSourceIdentity(
             (false, true) => "split",
             _ => null
         };
-        return chapterMode is null ? captioned : $"{captioned}^{chapterMode}";
+        var chaptered = chapterMode is null ? captioned : $"{captioned}^{chapterMode}";
+        var trimmed = trim is null ? chaptered : $"{chaptered}%{trim.Value.Identity}";
+        return sponsorBlock is null ? trimmed : $"{trimmed}&{sponsorBlock.Value.Identity}";
     }
 
     public static bool TryParse(string? value, out DownloadSourceIdentity identity)
@@ -74,6 +90,46 @@ public readonly record struct DownloadSourceIdentity(
         }
 
         var formatPart = value[(colon + 1)..];
+        SponsorBlockSelection? sponsorBlock = null;
+        var ampersand = formatPart.IndexOf('&');
+        if (ampersand != formatPart.LastIndexOf('&'))
+        {
+            return false;
+        }
+
+        if (ampersand >= 0)
+        {
+            if (ampersand == formatPart.Length - 1 ||
+                !SponsorBlockSelection.TryParseIdentity(
+                    formatPart[(ampersand + 1)..],
+                    out var parsedSponsorBlock))
+            {
+                return false;
+            }
+
+            sponsorBlock = parsedSponsorBlock;
+            formatPart = formatPart[..ampersand];
+        }
+
+        MediaTrimRange? trim = null;
+        var percent = formatPart.IndexOf('%');
+        if (percent != formatPart.LastIndexOf('%'))
+        {
+            return false;
+        }
+
+        if (percent >= 0)
+        {
+            if (percent == formatPart.Length - 1 ||
+                !MediaTrimRange.TryParseIdentity(formatPart[(percent + 1)..], out var parsedTrim))
+            {
+                return false;
+            }
+
+            trim = parsedTrim;
+            formatPart = formatPart[..percent];
+        }
+
         var embedChapters = false;
         var splitChapters = false;
         var caret = formatPart.IndexOf('^');
@@ -165,7 +221,9 @@ public readonly record struct DownloadSourceIdentity(
             output,
             caption,
             embedChapters,
-            splitChapters);
+            splitChapters,
+            trim,
+            sponsorBlock);
         return true;
     }
 }

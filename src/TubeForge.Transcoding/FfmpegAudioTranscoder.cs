@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Diagnostics;
+using System.Globalization;
 using TubeForge.Core.Errors;
 using TubeForge.Core.Media;
 using TubeForge.Core.Results;
@@ -85,13 +86,20 @@ public sealed class FfmpegAudioTranscoder
                 "-loglevel",
                 "error",
                 "-xerror",
-                "-nostdin",
-                "-i",
-                source,
+                "-nostdin"
+            };
+            AppendTrimInput(arguments, source, request.Trim);
+            arguments.AddRange([
                 "-map",
                 "0:a:0",
                 "-vn"
-            };
+            ]);
+            if (request.RemovedSegments.Count > 0)
+            {
+                arguments.AddRange([
+                    "-af", $"aselect=not({RemovalExpression(request.RemovedSegments)}),asetpts=N/SR/TB"
+                ]);
+            }
             AppendEncoderArguments(arguments, request.Output);
             arguments.AddRange(["-map_metadata", "-1", temporary]);
 
@@ -156,7 +164,8 @@ public sealed class FfmpegAudioTranscoder
 
     private static TubeForgeError? ValidateRequest(AudioTranscodeRequest request)
     {
-        if (!request.Output.IsValid || !request.Output.IsAudioTranscode)
+        if (!request.Output.IsValid || !request.Output.IsAudioTranscode ||
+            request.Trim is { IsValid: false } || !RemovalRangesAreValid(request.RemovedSegments))
         {
             return new TubeForgeError("Media.InvalidTranscodeProfile", "Select a supported converted audio output profile.");
         }
@@ -188,6 +197,42 @@ public sealed class FfmpegAudioTranscoder
         }
 
         return null;
+    }
+
+    private static bool RemovalRangesAreValid(IReadOnlyList<MediaTrimRange>? ranges)
+    {
+        if (ranges is null || ranges.Count > 1_000 || ranges.Any(range => !range.IsValid))
+        {
+            return false;
+        }
+
+        return ranges.Zip(ranges.Skip(1)).All(pair => pair.First.End <= pair.Second.Start);
+    }
+
+    private static string RemovalExpression(IReadOnlyList<MediaTrimRange> ranges) =>
+        string.Join('+', ranges.Select(range =>
+            $"between(t\\,{range.Start.TotalSeconds.ToString("0.###", CultureInfo.InvariantCulture)}" +
+            $"\\,{range.End.TotalSeconds.ToString("0.###", CultureInfo.InvariantCulture)})"));
+
+    private static void AppendTrimInput(
+        List<string> arguments,
+        string source,
+        MediaTrimRange? trim)
+    {
+        if (trim is { } range)
+        {
+            arguments.AddRange([
+                "-ss", range.Start.TotalSeconds.ToString("0.###", CultureInfo.InvariantCulture)
+            ]);
+        }
+
+        arguments.AddRange(["-i", source]);
+        if (trim is { } selectedRange)
+        {
+            arguments.AddRange([
+                "-t", selectedRange.Duration.TotalSeconds.ToString("0.###", CultureInfo.InvariantCulture)
+            ]);
+        }
     }
 
     private static void AppendEncoderArguments(List<string> arguments, OutputProfile output)

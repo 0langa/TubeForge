@@ -81,6 +81,41 @@ public static class DownloadSourceIdentityTests
         Assert.Equal(
             $"dQw4w9WgXcQ:401+140@{OutputProfile.H264AacMp4.Identity}~m.en-US^chapters+split",
             splitValue);
+
+        Assert.True(MediaTrimRange.TryCreate(
+            TimeSpan.FromSeconds(5),
+            TimeSpan.FromMinutes(1),
+            out var trimRange));
+        var trimmedValue = DownloadSourceIdentity.Create(
+            videoId,
+            401,
+            140,
+            OutputProfile.H264AacMp4,
+            caption,
+            embedChapters: true,
+            splitChapters: true,
+            trim: trimRange);
+        Assert.True(DownloadSourceIdentity.TryParse(trimmedValue, out var trimmed));
+        Assert.Equal(trimRange, trimmed.Trim);
+        Assert.Equal(
+            $"dQw4w9WgXcQ:401+140@{OutputProfile.H264AacMp4.Identity}~m.en-US^chapters+split%5000-60000",
+            trimmedValue);
+
+        var sponsorBlock = new SponsorBlockSelection(
+            SponsorBlockMode.Remove,
+            SponsorBlockCategories.Sponsor | SponsorBlockCategories.Intro);
+        var sponsorValue = DownloadSourceIdentity.Create(
+            videoId,
+            401,
+            140,
+            OutputProfile.H264AacMp4,
+            trim: trimRange,
+            sponsorBlock: sponsorBlock);
+        Assert.True(DownloadSourceIdentity.TryParse(sponsorValue, out var sponsored));
+        Assert.Equal(sponsorBlock, sponsored.SponsorBlock);
+        Assert.Equal(
+            $"dQw4w9WgXcQ:401+140@{OutputProfile.H264AacMp4.Identity}%5000-60000&remove.sponsor,intro",
+            sponsorValue);
     }
 
     [Test]
@@ -99,7 +134,10 @@ public static class DownloadSourceIdentityTests
                      "dQw4w9WgXcQ:18~m.en--US", "dQw4w9WgXcQ:18~m.en~a.de",
                      "dQw4w9WgXcQ:18^", "dQw4w9WgXcQ:18^chapter",
                      "dQw4w9WgXcQ:18^chapters^chapters", "dQw4w9WgXcQ:18^chapters~m.en",
-                     "dQw4w9WgXcQ:18^split+chapters", "dQw4w9WgXcQ:18^chapters+split+split"
+                     "dQw4w9WgXcQ:18^split+chapters", "dQw4w9WgXcQ:18^chapters+split+split",
+                     "dQw4w9WgXcQ:18%0-0", "dQw4w9WgXcQ:18%1000-2000%3000-4000",
+                     "dQw4w9WgXcQ:18&", "dQw4w9WgXcQ:18&remove.sponsor,sponsor",
+                     "dQw4w9WgXcQ:18&remove.unknown", "dQw4w9WgXcQ:18&chapters.intro&remove.sponsor"
                  })
         {
             Assert.False(DownloadSourceIdentity.TryParse(value, out _));

@@ -10,6 +10,10 @@ public sealed record AudioTranscodeRequest
 
     public required OutputProfile Output { get; init; }
 
+    public MediaTrimRange? Trim { get; init; }
+
+    public IReadOnlyList<MediaTrimRange> RemovedSegments { get; init; } = [];
+
     public bool AllowExistingValidatedOutput { get; init; }
 }
 

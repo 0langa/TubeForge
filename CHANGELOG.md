@@ -13,6 +13,10 @@
 - Add unified system/manual/off proxy settings across metadata, collections, captions, thumbnails, media, and updates, plus bounded metadata timeout, media retries, and per-host concurrency.
 - Reject credential-bearing proxy endpoints, migrate older settings to safe system-proxy defaults, and keep endpoint data out of diagnostics.
 - Add loopback end-to-end proxy proof for metadata alongside the existing media transfer proxy gate.
+- Add bounded start/end trimming with recoverable keyframe-aligned stream copy for original outputs and precise cuts during an explicitly selected transcode.
+- Rebase and clip embedded SRT captions and chapter timelines when trimming so supported timed metadata stays synchronized.
+- Add disabled-by-default SponsorBlock category selection with privacy-prefix requests, local candidate matching, chapter-marker mode, and transcode-only segment removal.
+- Keep SponsorBlock response payloads out of persisted queue state and diagnostics, and add deterministic plus real bundled-FFmpeg timeline-editing proof.
 
 ## 1.2.5 - 2026-07-21
 

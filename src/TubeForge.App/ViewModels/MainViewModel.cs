@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Diagnostics;
+using System.Globalization;
 using System.Net;
 using System.Net.Http;
 using System.IO;
@@ -27,18 +28,26 @@ using TubeForge.YouTube;
 using TubeForge.YouTube.Captions;
 using TubeForge.YouTube.Collections;
 using TubeForge.YouTube.Sidecars;
+using TubeForge.YouTube.SponsorBlock;
 
 namespace TubeForge.App.ViewModels;
 
 public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
 {
     private static readonly Uri YouTubeOrigin = new("https://www.youtube.com/");
+    private static readonly Uri SponsorBlockOrigin = new("https://sponsor.ajay.app/");
 
     private static readonly IReadOnlyList<FilterOption<NetworkProxyMode>> ProxyModeChoices =
     [
         new("Use Windows system proxy", NetworkProxyMode.System),
         new("Manual HTTP/HTTPS proxy", NetworkProxyMode.Manual),
         new("No proxy", NetworkProxyMode.None)
+    ];
+
+    private static readonly IReadOnlyList<FilterOption<SponsorBlockMode>> SponsorBlockModeChoices =
+    [
+        new("Write chapters", SponsorBlockMode.Chapters),
+        new("Remove segments", SponsorBlockMode.Remove)
     ];
 
     private static readonly IReadOnlyList<DownloadModeOption> BaseModeChoices =
@@ -105,6 +114,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     private readonly CaptionDownloadEngine _captionDownloader;
     private readonly YouTubeCollectionResolver _collectionResolver;
     private readonly ThumbnailDownloadEngine _thumbnailDownloader;
+    private readonly SponsorBlockClient _sponsorBlockClient;
     private readonly DownloadQueueStore _queueStore;
     private readonly DownloadHistoryStore _historyStore;
     private readonly TubeForgeSettingsStore _settingsStore;
@@ -192,6 +202,18 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     private bool _embedSelectedCaption;
     private bool _embedChapters;
     private bool _splitChapters;
+    private bool _enableTrim;
+    private string _trimStartText = "00:00:00";
+    private string _trimEndText = "00:00:00";
+    private bool _enableSponsorBlock;
+    private FilterOption<SponsorBlockMode> _selectedSponsorBlockMode = SponsorBlockModeChoices[0];
+    private bool _sponsorCategory = true;
+    private bool _introCategory;
+    private bool _outroCategory;
+    private bool _selfPromotionCategory;
+    private bool _interactionCategory;
+    private bool _previewCategory;
+    private bool _fillerCategory;
     private bool _isSavingCaption;
     private bool _isSavingSidecar;
     private YouTubeCollectionResult? _collection;
@@ -239,6 +261,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         };
         _sidecarHttpClient = new HttpClient(sidecarHandler) { Timeout = TimeSpan.FromSeconds(60) };
         _thumbnailDownloader = new ThumbnailDownloadEngine(_sidecarHttpClient);
+        _sponsorBlockClient = new SponsorBlockClient(_sidecarHttpClient);
         var updateHandler = new SocketsHttpHandler
         {
             AutomaticDecompression = DecompressionMethods.All,
@@ -782,6 +805,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                 OnPropertyChanged(nameof(CanEmbedSelectedCaption));
                 OnPropertyChanged(nameof(CanEmbedChapters));
                 OnPropertyChanged(nameof(CanSplitChapters));
+                OnPropertyChanged(nameof(CanTrim));
+                OnPropertyChanged(nameof(CanUseSponsorBlock));
                 if (!CanEmbedSelectedCaption)
                 {
                     EmbedSelectedCaption = false;
@@ -793,6 +818,14 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                 if (!CanSplitChapters)
                 {
                     SplitChapters = false;
+                }
+                if (!CanTrim)
+                {
+                    EnableTrim = false;
+                }
+                if (!CanUseSponsorBlock)
+                {
+                    EnableSponsorBlock = false;
                 }
 
                 RefreshCommands();
@@ -852,6 +885,97 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     {
         get => _splitChapters;
         set => Set(ref _splitChapters, value && CanSplitChapters);
+    }
+
+    public bool CanTrim =>
+        _metadata?.Duration is { } duration && duration > TimeSpan.Zero &&
+        SelectedFormat is not null;
+
+    public bool EnableTrim
+    {
+        get => _enableTrim;
+        set => Set(ref _enableTrim, value && CanTrim);
+    }
+
+    public string TrimStartText
+    {
+        get => _trimStartText;
+        set => Set(ref _trimStartText, value ?? string.Empty);
+    }
+
+    public string TrimEndText
+    {
+        get => _trimEndText;
+        set => Set(ref _trimEndText, value ?? string.Empty);
+    }
+
+    public IReadOnlyList<FilterOption<SponsorBlockMode>> SponsorBlockModeOptions => SponsorBlockModeChoices;
+
+    public bool CanUseSponsorBlock => HasVideo && SelectedFormat is not null;
+
+    public bool EnableSponsorBlock
+    {
+        get => _enableSponsorBlock;
+        set => Set(ref _enableSponsorBlock, value && CanUseSponsorBlock);
+    }
+
+    public FilterOption<SponsorBlockMode> SelectedSponsorBlockMode
+    {
+        get => _selectedSponsorBlockMode;
+        set
+        {
+            if (value is not null && Set(ref _selectedSponsorBlockMode, value))
+            {
+                OnPropertyChanged(nameof(SponsorBlockModeNotice));
+            }
+        }
+    }
+
+    public string SponsorBlockModeNotice =>
+        SelectedSponsorBlockMode.Value == SponsorBlockMode.Remove
+            ? "Removal requires a selected audio/video conversion preset and cannot combine with embedded captions or chapters."
+            : "Chapter mode keeps media unchanged and adds local timeline markers after the opt-in lookup.";
+
+    public bool SponsorCategory
+    {
+        get => _sponsorCategory;
+        set => Set(ref _sponsorCategory, value);
+    }
+
+    public bool IntroCategory
+    {
+        get => _introCategory;
+        set => Set(ref _introCategory, value);
+    }
+
+    public bool OutroCategory
+    {
+        get => _outroCategory;
+        set => Set(ref _outroCategory, value);
+    }
+
+    public bool SelfPromotionCategory
+    {
+        get => _selfPromotionCategory;
+        set => Set(ref _selfPromotionCategory, value);
+    }
+
+    public bool InteractionCategory
+    {
+        get => _interactionCategory;
+        set => Set(ref _interactionCategory, value);
+    }
+
+    public bool PreviewCategory
+    {
+        get => _previewCategory;
+        set => Set(ref _previewCategory, value);
+    }
+
+    public bool FillerCategory
+    {
+        get => _fillerCategory;
+        set => Set(ref _fillerCategory, value);
     }
 
     public DownloadModeOption SelectedDownloadMode
@@ -1336,6 +1460,12 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             _videoTitle = _metadata.Title;
             _videoChannel = _metadata.Channel;
             _videoDuration = _metadata.Duration;
+            _trimStartText = "00:00:00";
+            _trimEndText = _metadata.Duration is { } trimDuration
+                ? FormatTimelineInput(trimDuration)
+                : "00:00:00";
+            OnPropertyChanged(nameof(TrimStartText));
+            OnPropertyChanged(nameof(TrimEndText));
             _thumbnailUrl = _metadata.ThumbnailUrl;
             _allFormats = _metadata.Formats;
             RefreshDownloadModes();
@@ -1442,6 +1572,18 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         var caption = SelectedCaptionEmbedSelection();
         var embedChapters = EmbedChapters && CanEmbedChapters;
         var splitChapters = SplitChapters && CanSplitChapters;
+        if (!TryGetSelectedTrim(out var trim, out var trimError))
+        {
+            ErrorMessage = $"{trimError!.Message} ({trimError.Code})";
+            StatusMessage = "Download not queued";
+            return;
+        }
+        if (!TryGetSponsorBlockSelection(output, out var sponsorBlock, out var sponsorError))
+        {
+            ErrorMessage = $"{sponsorError!.Message} ({sponsorError.Code})";
+            StatusMessage = "Download not queued";
+            return;
+        }
         try
         {
             var renderedName = RenderFileName(_metadata, selection, index: null, indexWidth: 2, output);
@@ -1463,7 +1605,15 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                         _queueSnapshot.Items.Any(item => item.DestinationPath.Equals(path, StringComparison.OrdinalIgnoreCase)) ||
                         _historySnapshot.Entries.Any(item => item.DestinationPath.Equals(path, StringComparison.OrdinalIgnoreCase)));
             var duplicate = DownloadDuplicateDetector.Find(
-                SelectionIdentity(_metadata, selection, output, caption, embedChapters, splitChapters),
+                SelectionIdentity(
+                    _metadata,
+                    selection,
+                    output,
+                    caption,
+                    embedChapters,
+                    splitChapters,
+                    trim,
+                    sponsorBlock),
                 destination,
                 _queueSnapshot.Items,
                 _historySnapshot.Entries);
@@ -1482,7 +1632,9 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                 output,
                 caption,
                 embedChapters,
-                splitChapters);
+                splitChapters,
+                trim,
+                sponsorBlock);
             var queueError = await UpsertQueueItemAsync(queueItem);
             if (queueError is not null)
             {
@@ -1491,14 +1643,18 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                 return;
             }
 
-            _preparedQueueWork[queueItem.Id] = new QueuedDownloadWork(
-                _metadata,
-                selection,
-                destination,
-                output,
-                caption,
-                embedChapters,
-                splitChapters);
+            if (sponsorBlock is null)
+            {
+                _preparedQueueWork[queueItem.Id] = new QueuedDownloadWork(
+                    _metadata,
+                    selection,
+                    destination,
+                    output,
+                    caption,
+                    embedChapters,
+                    splitChapters,
+                    trim);
+            }
             StatusMessage = $"Queued: {Path.GetFileName(destination)}";
             ProgressDetail = $"Global concurrency: {SelectedMaxConcurrentDownloads}";
             PumpQueue();
@@ -2047,21 +2203,46 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             }
 
             var finalWork = prepared.Work;
-            var work = !finalWork.RequiresMetadataFinalization
-                ? finalWork
-                : finalWork with
-                {
-                    Destination = PostProcessMediaSourcePath(finalWork.Destination, finalWork.EmbedChapters),
-                    Caption = null,
-                    EmbedChapters = false
-                };
-            if ((finalWork.RequiresMetadataFinalization || finalWork.SplitChapters) &&
+            var mediaDestination = finalWork.RequiresMetadataFinalization
+                ? PostProcessMediaSourcePath(
+                    finalWork.Destination,
+                    finalWork.EmbedChapters || finalWork.SponsorBlock is { Mode: SponsorBlockMode.Chapters })
+                : finalWork.Destination;
+            var downloadDestination = finalWork.RequiresNativeTrim
+                ? TrimSourcePath(mediaDestination)
+                : mediaDestination;
+            var work = finalWork with
+            {
+                Destination = downloadDestination,
+                Caption = null,
+                EmbedChapters = false
+            };
+            if ((finalWork.RequiresMetadataFinalization || finalWork.RequiresNativeTrim || finalWork.SplitChapters) &&
                 File.Exists(finalWork.Destination))
             {
                 var recoveredBytes = new FileInfo(finalWork.Destination).Length;
                 if (finalWork.RequiresMetadataFinalization)
                 {
-                    var recovered = await FinalizeMetadataAsync(finalWork, work.Destination, cancellation.Token);
+                    var recovered = await FinalizeMetadataAsync(finalWork, mediaDestination, cancellation.Token);
+                    if (recovered.Error is not null)
+                    {
+                        await CompleteQueueRunAsync(
+                            itemId,
+                            DownloadQueueStatus.Failed,
+                            recovered.Error,
+                            recovered.BytesWritten);
+                        return;
+                    }
+
+                    recoveredBytes = recovered.BytesWritten;
+                }
+                else if (finalWork.RequiresNativeTrim)
+                {
+                    var recovered = await FinalizeNativeTrimAsync(
+                        finalWork,
+                        downloadDestination,
+                        mediaDestination,
+                        cancellation.Token);
                     if (recovered.Error is not null)
                     {
                         await CompleteQueueRunAsync(
@@ -2109,6 +2290,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                 (work.Selection.RequiresMuxing ||
                  RequiresMp4Normalization(work.Selection) ||
                  work.Output.RequiresTranscode ||
+                 finalWork.RequiresNativeTrim ||
                  finalWork.RequiresMetadataFinalization),
                 finalWork.SplitChapters ? 1 : 0);
             if (!diskForecast.IsSuccess)
@@ -2149,6 +2331,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                         SourcePath = sourcePath,
                         DestinationPath = work.Destination,
                         Output = work.Output,
+                        Trim = finalWork.Trim,
+                        RemovedSegments = finalWork.RemovedSponsorSegments,
                         AllowExistingValidatedOutput = true
                     }, cancellation.Token);
                     downloadError = transcodeResult.Error;
@@ -2188,6 +2372,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                         SourcePath = sourcePath,
                         DestinationPath = work.Destination,
                         Output = work.Output,
+                        Trim = finalWork.Trim,
+                        RemovedSegments = finalWork.RemovedSponsorSegments,
                         AllowExistingValidatedOutput = true
                     }, cancellation.Token);
                     downloadError = transcodeResult.Error;
@@ -2309,9 +2495,28 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                 return;
             }
 
+            if (finalWork.RequiresNativeTrim)
+            {
+                var trimmed = await FinalizeNativeTrimAsync(
+                    finalWork,
+                    work.Destination,
+                    mediaDestination,
+                    cancellation.Token);
+                downloadError = trimmed.Error;
+                completedBytes = trimmed.BytesWritten;
+                if (downloadError is not null)
+                {
+                    var status = downloadError.Code == "Operation.Cancelled"
+                        ? CancellationStatus(itemId)
+                        : DownloadQueueStatus.Failed;
+                    await CompleteQueueRunAsync(itemId, status, downloadError, completedBytes);
+                    return;
+                }
+            }
+
             if (finalWork.RequiresMetadataFinalization)
             {
-                var embedded = await FinalizeMetadataAsync(finalWork, work.Destination, cancellation.Token);
+                var embedded = await FinalizeMetadataAsync(finalWork, mediaDestination, cancellation.Token);
                 downloadError = embedded.Error;
                 completedBytes = embedded.BytesWritten;
                 if (downloadError is not null)
@@ -2470,6 +2675,32 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                 "Chapter metadata is no longer available. Analyze the video again."));
         }
 
+        if (sourceIdentity.Trim is { } trim &&
+            (resolved.Value.Metadata.Duration is not { } mediaDuration || trim.End > mediaDuration))
+        {
+            return (null, new TubeForgeError(
+                "Queue.InvalidTrim",
+                "The queued trim range is outside the current media duration."));
+        }
+
+        if (sourceIdentity.SponsorBlock is { Mode: SponsorBlockMode.Remove } &&
+            (!sourceIdentity.Output.RequiresTranscode || sourceIdentity.Caption is not null ||
+             sourceIdentity.EmbedChapters || sourceIdentity.SplitChapters))
+        {
+            return (null, new TubeForgeError(
+                "Queue.InvalidSponsorBlockSelection",
+                "SponsorBlock removal requires conversion without embedded captions or chapter workflows."));
+        }
+
+        if (sourceIdentity.SponsorBlock is { Mode: SponsorBlockMode.Chapters } &&
+            (primary.Kind == StreamKind.AudioOnly ||
+             resolved.Value.Metadata.Duration is not { } sponsorDuration || sponsorDuration <= TimeSpan.Zero))
+        {
+            return (null, new TubeForgeError(
+                "Queue.InvalidSponsorBlockSelection",
+                "SponsorBlock chapter markers require a timed video output."));
+        }
+
         StreamFormat? audio = null;
         var audioFormatId = sourceIdentity.AudioFormatId;
         if (audioFormatId is not null)
@@ -2494,6 +2725,47 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         }
 
         var selection = new FormatItemViewModel(primary, audio);
+        IReadOnlyList<SponsorBlockSegment> sponsorSegments = [];
+        if (sourceIdentity.SponsorBlock is { } sponsorBlock)
+        {
+            var sponsorResult = await _rateLimitedRequests.ExecuteAsync(
+                SponsorBlockOrigin,
+                token => _sponsorBlockClient.GetSegmentsAsync(videoId, sponsorBlock, token),
+                cancellationToken: cancellationToken);
+            if (!sponsorResult.IsSuccess)
+            {
+                return (null, sponsorResult.Error);
+            }
+
+            try
+            {
+                sponsorSegments = MediaTimelineEditor.NormalizeSponsorSegments(
+                    sponsorResult.Value,
+                    resolved.Value.Metadata.Duration ?? TimeSpan.Zero,
+                    sourceIdentity.Trim);
+                if (sponsorBlock.Mode == SponsorBlockMode.Remove && sponsorSegments.Count > 0)
+                {
+                    var removed = MediaTimelineEditor.MergeRemovalRanges(sponsorSegments)
+                        .Aggregate(TimeSpan.Zero, (total, range) => total + range.Duration);
+                    var outputDuration = sourceIdentity.Trim?.Duration ??
+                        resolved.Value.Metadata.Duration ?? TimeSpan.Zero;
+                    if (removed >= outputDuration)
+                    {
+                        return (null, new TubeForgeError(
+                            "SponsorBlock.NoMediaRemaining",
+                            "The selected SponsorBlock categories would remove the entire output."));
+                    }
+                }
+            }
+            catch (ArgumentException exception)
+            {
+                return (null, new TubeForgeError(
+                    "SponsorBlock.InvalidTimeline",
+                    "SponsorBlock returned segments outside the current media timeline.",
+                    exception.GetType().Name));
+            }
+        }
+
         var work = new QueuedDownloadWork(
             resolved.Value.Metadata,
             selection,
@@ -2501,7 +2773,10 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             sourceIdentity.Output,
             sourceIdentity.Caption,
             sourceIdentity.EmbedChapters,
-            sourceIdentity.SplitChapters);
+            sourceIdentity.SplitChapters,
+            sourceIdentity.Trim,
+            sourceIdentity.SponsorBlock,
+            sponsorSegments);
         _preparedQueueWork[itemId] = work;
         return (work, null);
     }
@@ -2543,10 +2818,15 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         {
             var mediaDestination = !work.RequiresMetadataFinalization
                 ? work.Destination
-                : PostProcessMediaSourcePath(work.Destination, work.EmbedChapters);
+                : PostProcessMediaSourcePath(
+                    work.Destination,
+                    work.EmbedChapters || work.SponsorBlock is { Mode: SponsorBlockMode.Chapters });
+            var downloadDestination = work.RequiresNativeTrim
+                ? TrimSourcePath(mediaDestination)
+                : mediaDestination;
             return File.Exists(work.Destination)
                 ? CompletedOrPartialLength(work.Destination)
-                : SelectionPartialLength(mediaDestination, work.Selection, work.Output);
+                : SelectionPartialLength(downloadDestination, work.Selection, work.Output);
         }
 
         return _queueSnapshot.Items.FirstOrDefault(item => item.Id == itemId)?.BytesReceived;
@@ -2644,7 +2924,9 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                 work.Output,
                 work.Caption,
                 work.EmbedChapters,
-                work.SplitChapters),
+                work.SplitChapters,
+                work.Trim,
+                work.SponsorBlock),
             DisplayTitle = work.Metadata.Title,
             DestinationPath = work.Destination,
             BytesWritten = bytesWritten,
@@ -2894,7 +3176,9 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         OutputProfile output = default,
         CaptionEmbedSelection? caption = null,
         bool embedChapters = false,
-        bool splitChapters = false)
+        bool splitChapters = false,
+        MediaTrimRange? trim = null,
+        SponsorBlockSelection? sponsorBlock = null)
     {
         var now = DateTimeOffset.UtcNow;
         var format = selection.Format;
@@ -2904,12 +3188,19 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             output,
             caption,
             embedChapters,
-            splitChapters);
+            splitChapters,
+            trim,
+            sponsorBlock);
         var expectedLength = CombinedLength(selection);
+        var embedsTimeline = embedChapters || sponsorBlock is { Mode: SponsorBlockMode.Chapters };
+        var mediaDestination = caption is null && !embedsTimeline
+            ? destination
+            : PostProcessMediaSourcePath(destination, embedsTimeline);
+        var downloadDestination = trim is not null && !output.RequiresTranscode
+            ? TrimSourcePath(mediaDestination)
+            : mediaDestination;
         var partialLength = SelectionPartialLength(
-            caption is null && !embedChapters
-                ? destination
-                : PostProcessMediaSourcePath(destination, embedChapters),
+            downloadDestination,
             selection,
             output);
 
@@ -3014,6 +3305,15 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                 "The queued chapter split selection is invalid.");
         }
 
+        var timeline = TimelineChapters(work);
+        if (timeline.Count == 0)
+        {
+            return new TubeForgeError(
+                "Queue.InvalidChapterSplit",
+                "No chapter overlaps the selected trim range.");
+        }
+
+        var outputDuration = work.Trim?.Duration ?? duration;
         var format = work.Selection.Format;
         var quality = work.Output.IsAudioTranscode
             ? work.Output.BitrateKbps > 0 ? $"{work.Output.BitrateKbps}kbps" : "lossless"
@@ -3021,14 +3321,14 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                 ? format.Height is > 0 ? $"{format.Height}p" : "video"
                 : format.Bitrate is > 0 ? $"{Math.Round(format.Bitrate.Value / 1000d):0}kbps" : "audio";
         var extension = OutputExtension(work.Selection, work.Output);
-        StatusMessage = $"Creating {work.Metadata.Chapters.Count} lossless chapter files";
+        StatusMessage = $"Creating {timeline.Count} lossless chapter files";
         var result = await _chapterSplitter.SplitAsync(new ChapterSplitRequest
         {
             SourcePath = work.Destination,
             DestinationDirectory = ChapterSplitDirectoryPath(work.Destination),
             OutputContainer = FinalMediaContainer(work.Selection, work.Output),
-            Chapters = work.Metadata.Chapters,
-            Duration = duration,
+            Chapters = timeline,
+            Duration = outputDuration,
             FileNameContext = new FileNameTemplateContext
             {
                 Title = work.Metadata.Title,
@@ -3036,11 +3336,41 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                 VideoId = work.Metadata.Id.Value,
                 Quality = quality,
                 Container = extension.TrimStart('.'),
-                IndexWidth = Math.Max(2, work.Metadata.Chapters.Count.ToString().Length)
+                IndexWidth = Math.Max(2, timeline.Count.ToString().Length)
             },
             AllowExistingValidatedOutput = true
         }, cancellationToken);
         return result.Error;
+    }
+
+    private async Task<(TubeForgeError? Error, long BytesWritten)> FinalizeNativeTrimAsync(
+        QueuedDownloadWork work,
+        string sourcePath,
+        string destinationPath,
+        CancellationToken cancellationToken)
+    {
+        if (!work.RequiresNativeTrim || work.Trim is not { } trim)
+        {
+            return (new TubeForgeError(
+                "Queue.InvalidTrim",
+                "The queued trim selection is invalid."), 0);
+        }
+
+        StatusMessage = "Trimming with lossless stream copy · start may align to a keyframe";
+        var result = await _mediaProcessor.TrimStreamCopyAsync(
+            sourcePath,
+            destinationPath,
+            FinalMediaContainer(work.Selection, work.Output),
+            trim,
+            cancellationToken,
+            allowExistingValidatedOutput: true);
+        if (!result.IsSuccess)
+        {
+            return (result.Error, CompletedOrPartialLength(sourcePath));
+        }
+
+        TryDeleteIntermediate(sourcePath);
+        return (null, result.Value.BytesWritten);
     }
 
     private async Task<(TubeForgeError? Error, long BytesWritten)> FinalizeMetadataAsync(
@@ -3113,13 +3443,42 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             {
                 return (downloaded.Error, CompletedOrPartialLength(mediaPath));
             }
+
+            if (work.Trim is { } trim)
+            {
+                try
+                {
+                    var captionContent = await File.ReadAllTextAsync(captionPath, cancellationToken)
+                        .ConfigureAwait(false);
+                    var trimmedCaption = SubRipTimelineTrimmer.Trim(captionContent, trim);
+                    if (!trimmedCaption.IsSuccess)
+                    {
+                        return (trimmedCaption.Error, CompletedOrPartialLength(mediaPath));
+                    }
+
+                    await File.WriteAllTextAsync(
+                        captionPath,
+                        trimmedCaption.Value,
+                        new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: false),
+                        cancellationToken).ConfigureAwait(false);
+                }
+                catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+                {
+                    return (new TubeForgeError(
+                        "Caption.WriteFailed",
+                        "TubeForge could not align the embedded subtitles to the trim range.",
+                        exception.GetType().Name), CompletedOrPartialLength(mediaPath));
+                }
+            }
         }
 
         StatusMessage = work.Caption is not null && work.EmbedChapters
             ? "Embedding soft subtitles and chapters"
             : work.EmbedChapters
                 ? "Embedding chapters"
-                : $"Embedding {work.Caption!.Value.LanguageCode.ToUpperInvariant()} soft subtitles";
+                : work.RequiresSponsorChapters
+                    ? "Writing SponsorBlock timeline chapters"
+                    : $"Embedding {work.Caption!.Value.LanguageCode.ToUpperInvariant()} soft subtitles";
         var embedded = await FinalizeWithMetadataProcessorAsync(
             work,
             mediaPath,
@@ -3146,7 +3505,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         MediaContainer container,
         CancellationToken cancellationToken)
     {
-        if (!work.EmbedChapters && work.Caption is { } caption && captionPath is not null)
+        if (!work.EmbedChapters && !work.RequiresSponsorChapters &&
+            work.Caption is { } caption && captionPath is not null)
         {
             return _mediaProcessor.EmbedSubtitleAsync(
                 mediaPath,
@@ -3158,16 +3518,41 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                 allowExistingValidatedOutput: true);
         }
 
+        var chapters = TimelineChapters(work);
         return _mediaProcessor.EmbedMetadataAsync(
             mediaPath,
             work.Destination,
             container,
-            work.Metadata.Chapters,
-            work.Metadata.Duration ?? TimeSpan.Zero,
+            chapters,
+            work.Trim?.Duration ?? work.Metadata.Duration ?? TimeSpan.Zero,
             captionPath,
             work.Caption,
             cancellationToken,
             allowExistingValidatedOutput: true);
+    }
+
+    private static IReadOnlyList<VideoChapter> TimelineChapters(QueuedDownloadWork work)
+    {
+        var duration = work.Trim?.Duration ?? work.Metadata.Duration ?? TimeSpan.Zero;
+        IReadOnlyList<VideoChapter> chapters;
+        if (work.Trim is not { } trim || work.Metadata.Duration is not { } sourceDuration)
+        {
+            chapters = work.Metadata.Chapters;
+        }
+        else
+        {
+            chapters = MediaTimelineEditor.TrimChapters(
+                work.Metadata.Chapters,
+                sourceDuration,
+                trim);
+        }
+
+        return work.RequiresSponsorChapters
+            ? MediaTimelineEditor.AddSponsorBlockChapters(
+                chapters,
+                work.SafeSponsorSegments,
+                duration)
+            : chapters;
     }
 
     private static void TryDeleteIntermediate(string path)
@@ -3195,6 +3580,9 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
 
     private static string PostProcessMediaSourcePath(string destination, bool embedChapters) =>
         destination + (embedChapters ? ".chapter-source" : ".caption-source") + Path.GetExtension(destination);
+
+    private static string TrimSourcePath(string destination) =>
+        destination + ".trim-source" + Path.GetExtension(destination);
 
     private static string CaptionSubtitlePath(string destination) =>
         destination + ".caption-source.srt";
@@ -3232,7 +3620,9 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         OutputProfile output = default,
         CaptionEmbedSelection? caption = null,
         bool embedChapters = false,
-        bool splitChapters = false) =>
+        bool splitChapters = false,
+        MediaTrimRange? trim = null,
+        SponsorBlockSelection? sponsorBlock = null) =>
         DownloadSourceIdentity.Create(
             metadata.Id,
             selection.Format.FormatId,
@@ -3240,7 +3630,9 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             output,
             caption,
             embedChapters,
-            splitChapters);
+            splitChapters,
+            trim,
+            sponsorBlock);
 
     private Result<string> RenderFileName(
         VideoMetadata metadata,
@@ -3570,6 +3962,12 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         SelectedCaptionTrack = null;
         EmbedChapters = false;
         SplitChapters = false;
+        EnableTrim = false;
+        EnableSponsorBlock = false;
+        _trimStartText = "00:00:00";
+        _trimEndText = "00:00:00";
+        OnPropertyChanged(nameof(TrimStartText));
+        OnPropertyChanged(nameof(TrimEndText));
         _videoTitle = string.Empty;
         _videoChannel = string.Empty;
         _videoDuration = null;
@@ -4035,6 +4433,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         OnPropertyChanged(nameof(HasChapters));
         OnPropertyChanged(nameof(CanEmbedChapters));
         OnPropertyChanged(nameof(CanSplitChapters));
+        OnPropertyChanged(nameof(CanTrim));
+        OnPropertyChanged(nameof(CanUseSponsorBlock));
         OnPropertyChanged(nameof(FormatCountLabel));
         RefreshCommands();
     }
@@ -4081,6 +4481,104 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
 
     private void OnPropertyChanged([CallerMemberName] string? propertyName = null) =>
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
+
+    private bool TryGetSelectedTrim(
+        out MediaTrimRange? trim,
+        out TubeForgeError? error)
+    {
+        trim = null;
+        error = null;
+        if (!EnableTrim)
+        {
+            return true;
+        }
+
+        if (_metadata?.Duration is not { } duration || duration <= TimeSpan.Zero ||
+            !TimeSpan.TryParse(TrimStartText.Trim(), CultureInfo.InvariantCulture, out var start) ||
+            !TimeSpan.TryParse(TrimEndText.Trim(), CultureInfo.InvariantCulture, out var end))
+        {
+            error = new TubeForgeError(
+                "Timeline.InvalidTrim",
+                "Enter trim times as HH:MM:SS, for example 00:01:30.");
+            return false;
+        }
+
+        start = TimeSpan.FromMilliseconds(Math.Floor(start.TotalMilliseconds));
+        end = TimeSpan.FromMilliseconds(Math.Floor(end.TotalMilliseconds));
+        if (!MediaTrimRange.TryCreate(start, end, out var selected) || end > duration)
+        {
+            error = new TubeForgeError(
+                "Timeline.InvalidTrim",
+                "Choose a trim end after its start and within the video duration.");
+            return false;
+        }
+
+        trim = selected;
+        return true;
+    }
+
+    private bool TryGetSponsorBlockSelection(
+        OutputProfile output,
+        out SponsorBlockSelection? selection,
+        out TubeForgeError? error)
+    {
+        selection = null;
+        error = null;
+        if (!EnableSponsorBlock)
+        {
+            return true;
+        }
+
+        var categories = SponsorBlockCategories.None;
+        categories |= SponsorCategory ? SponsorBlockCategories.Sponsor : SponsorBlockCategories.None;
+        categories |= IntroCategory ? SponsorBlockCategories.Intro : SponsorBlockCategories.None;
+        categories |= OutroCategory ? SponsorBlockCategories.Outro : SponsorBlockCategories.None;
+        categories |= SelfPromotionCategory ? SponsorBlockCategories.SelfPromotion : SponsorBlockCategories.None;
+        categories |= InteractionCategory ? SponsorBlockCategories.Interaction : SponsorBlockCategories.None;
+        categories |= PreviewCategory ? SponsorBlockCategories.Preview : SponsorBlockCategories.None;
+        categories |= FillerCategory ? SponsorBlockCategories.Filler : SponsorBlockCategories.None;
+        if (categories == SponsorBlockCategories.None)
+        {
+            error = new TubeForgeError(
+                "SponsorBlock.InvalidSelection",
+                "Choose at least one SponsorBlock category.");
+            return false;
+        }
+
+        var mode = SelectedSponsorBlockMode.Value ?? SponsorBlockMode.Chapters;
+        if (mode == SponsorBlockMode.Remove && !output.RequiresTranscode)
+        {
+            error = new TubeForgeError(
+                "SponsorBlock.TranscodeRequired",
+                "Select an audio or video conversion preset before removing SponsorBlock segments.");
+            return false;
+        }
+
+        if (mode == SponsorBlockMode.Remove &&
+            (EmbedSelectedCaption || EmbedChapters || SplitChapters))
+        {
+            error = new TubeForgeError(
+                "SponsorBlock.IncompatibleTimelineMetadata",
+                "SponsorBlock removal cannot combine with embedded captions or chapter workflows.");
+            return false;
+        }
+
+        if (mode == SponsorBlockMode.Chapters &&
+            (SelectedFormat is null || IsAudioOnly ||
+             !IsCaptionContainerSupported(FinalMediaContainer(SelectedFormat, output))))
+        {
+            error = new TubeForgeError(
+                "SponsorBlock.VideoRequired",
+                "SponsorBlock chapter markers require an MP4, MKV, or WebM video output.");
+            return false;
+        }
+
+        selection = new SponsorBlockSelection(mode, categories);
+        return true;
+    }
+
+    private static string FormatTimelineInput(TimeSpan value) =>
+        value.ToString("c", CultureInfo.InvariantCulture);
 
     private static string FormatDuration(TimeSpan value) => value.TotalHours >= 1
         ? value.ToString(@"h\:mm\:ss")
@@ -4218,8 +4716,23 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         OutputProfile Output = default,
         CaptionEmbedSelection? Caption = null,
         bool EmbedChapters = false,
-        bool SplitChapters = false)
+        bool SplitChapters = false,
+        MediaTrimRange? Trim = null,
+        SponsorBlockSelection? SponsorBlock = null,
+        IReadOnlyList<SponsorBlockSegment>? SponsorSegments = null)
     {
-        public bool RequiresMetadataFinalization => Caption is not null || EmbedChapters;
+        public IReadOnlyList<SponsorBlockSegment> SafeSponsorSegments => SponsorSegments ?? [];
+
+        public bool RequiresSponsorChapters =>
+            SponsorBlock is { Mode: SponsorBlockMode.Chapters } && SafeSponsorSegments.Count > 0;
+
+        public bool RequiresMetadataFinalization => Caption is not null || EmbedChapters || RequiresSponsorChapters;
+
+        public bool RequiresNativeTrim => Trim is not null && !Output.RequiresTranscode;
+
+        public IReadOnlyList<MediaTrimRange> RemovedSponsorSegments =>
+            SponsorBlock is { Mode: SponsorBlockMode.Remove }
+                ? MediaTimelineEditor.MergeRemovalRanges(SafeSponsorSegments)
+                : [];
     }
 }

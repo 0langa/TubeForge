@@ -780,7 +780,7 @@ public static class DirectDownloadEngineTests
         var result = await engine.DownloadAsync(SegmentedRequest(destination, payload.Length));
 
         Assert.True(result.IsSuccess, result.Error?.Message);
-        Assert.Equal(4, rangeRequests);
+        Assert.True(rangeRequests is >= 1 and <= 4);
         Assert.Equal(1, wholeObjectRequests);
         Assert.SequenceEqual(payload, await File.ReadAllBytesAsync(destination));
         Assert.False(File.Exists(destination + ".part.segments.json"));

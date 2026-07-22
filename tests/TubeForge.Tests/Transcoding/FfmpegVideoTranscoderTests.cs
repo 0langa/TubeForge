@@ -69,6 +69,74 @@ public static class FfmpegVideoTranscoderTests
     }
 
     [Test]
+    public static async Task AppliesTrimDuringVideoReencoding()
+    {
+        using var directory = new TestDirectory();
+        var executable = Path.Combine(directory.Path, "ffmpeg.exe");
+        var source = Path.Combine(directory.Path, "source.mkv");
+        var destination = Path.Combine(directory.Path, "output.mp4");
+        await File.WriteAllBytesAsync(executable, []);
+        await File.WriteAllBytesAsync(source, [0x01]);
+        var runner = new ValidVideoProcessRunner();
+        Assert.True(MediaTrimRange.TryCreate(
+            TimeSpan.FromSeconds(2.5),
+            TimeSpan.FromSeconds(12.75),
+            out var trim));
+
+        var result = await new FfmpegVideoTranscoder(executable, runner).TranscodeAsync(
+            new VideoTranscodeRequest
+            {
+                SourcePath = source,
+                DestinationPath = destination,
+                Output = OutputProfile.H264AacMp4,
+                Trim = trim,
+                RemovedSegments =
+                [
+                    new MediaTrimRange(TimeSpan.FromSeconds(3), TimeSpan.FromSeconds(4)),
+                    new MediaTrimRange(TimeSpan.FromSeconds(6), TimeSpan.FromSeconds(7))
+                ]
+            });
+
+        Assert.True(result.IsSuccess, result.Error?.Message);
+        Assert.True(ContainsAdjacent(runner.Arguments, "-ss", "2.5"));
+        Assert.True(ContainsAdjacent(runner.Arguments, "-t", "10.25"));
+        Assert.True(ContainsAdjacent(runner.Arguments, "-c:v", "libopenh264"));
+        Assert.True(runner.Arguments.Any(argument =>
+            argument.Contains("select=not(between(t\\,3\\,4)+between(t\\,6\\,7))", StringComparison.Ordinal)));
+        Assert.True(runner.Arguments.Any(argument => argument.Contains("aselect=not", StringComparison.Ordinal)));
+    }
+
+    [Test]
+    public static async Task CombinesSponsorRemovalWithH265PaddingFilter()
+    {
+        using var directory = new TestDirectory();
+        var executable = Path.Combine(directory.Path, "ffmpeg.exe");
+        var source = Path.Combine(directory.Path, "source.mkv");
+        var destination = Path.Combine(directory.Path, "output.mp4");
+        await File.WriteAllBytesAsync(executable, []);
+        await File.WriteAllBytesAsync(source, [0x01]);
+        var runner = new ValidVideoProcessRunner();
+
+        var result = await new FfmpegVideoTranscoder(executable, runner).TranscodeAsync(
+            new VideoTranscodeRequest
+            {
+                SourcePath = source,
+                DestinationPath = destination,
+                Output = OutputProfile.H265AacMp4,
+                RemovedSegments =
+                [
+                    new MediaTrimRange(TimeSpan.FromSeconds(3), TimeSpan.FromSeconds(4))
+                ]
+            });
+
+        Assert.True(result.IsSuccess, result.Error?.Message);
+        Assert.True(runner.Arguments.Any(argument =>
+            argument.Contains("select=not", StringComparison.Ordinal) &&
+            argument.Contains("pad=ceil(iw/8)*8:ceil(ih/8)*8", StringComparison.Ordinal)));
+        Assert.Equal(1, runner.Arguments.Count(argument => argument == "-vf"));
+    }
+
+    [Test]
     public static async Task RecoversPublishedOutputWhenSourceWasAlreadyRemoved()
     {
         using var directory = new TestDirectory();

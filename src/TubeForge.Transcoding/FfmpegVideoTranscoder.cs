@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Diagnostics;
+using System.Globalization;
 using TubeForge.Core.Errors;
 using TubeForge.Core.Media;
 using TubeForge.Core.Results;
@@ -84,15 +85,16 @@ public sealed class FfmpegVideoTranscoder
                 "-loglevel",
                 "error",
                 "-xerror",
-                "-nostdin",
-                "-i",
-                source,
+                "-nostdin"
+            };
+            AppendTrimInput(arguments, source, request.Trim);
+            arguments.AddRange([
                 "-map",
                 "0:v:0",
                 "-map",
                 "0:a:0"
-            };
-            AppendEncoderArguments(arguments, request.Output);
+            ]);
+            AppendEncoderArguments(arguments, request.Output, request.RemovedSegments);
             arguments.AddRange(["-map_metadata", "-1", temporary]);
 
             var exitCode = await _processRunner.RunAsync(
@@ -156,7 +158,8 @@ public sealed class FfmpegVideoTranscoder
 
     private static TubeForgeError? ValidateRequest(VideoTranscodeRequest request)
     {
-        if (!request.Output.IsValid || !request.Output.IsVideoTranscode)
+        if (!request.Output.IsValid || !request.Output.IsVideoTranscode ||
+            request.Trim is { IsValid: false } || !RemovalRangesAreValid(request.RemovedSegments))
         {
             return new TubeForgeError(
                 "Media.InvalidTranscodeProfile",
@@ -192,8 +195,66 @@ public sealed class FfmpegVideoTranscoder
         return null;
     }
 
-    private static void AppendEncoderArguments(List<string> arguments, OutputProfile output)
+    private static void AppendTrimInput(
+        List<string> arguments,
+        string source,
+        MediaTrimRange? trim)
     {
+        if (trim is { } range)
+        {
+            arguments.AddRange([
+                "-ss", range.Start.TotalSeconds.ToString("0.###", CultureInfo.InvariantCulture)
+            ]);
+        }
+
+        arguments.AddRange(["-i", source]);
+        if (trim is { } selectedRange)
+        {
+            arguments.AddRange([
+                "-t", selectedRange.Duration.TotalSeconds.ToString("0.###", CultureInfo.InvariantCulture)
+            ]);
+        }
+    }
+
+    private static bool RemovalRangesAreValid(IReadOnlyList<MediaTrimRange>? ranges)
+    {
+        if (ranges is null || ranges.Count > 1_000 || ranges.Any(range => !range.IsValid))
+        {
+            return false;
+        }
+
+        return ranges.Zip(ranges.Skip(1)).All(pair => pair.First.End <= pair.Second.Start);
+    }
+
+    private static void AppendEncoderArguments(
+        List<string> arguments,
+        OutputProfile output,
+        IReadOnlyList<MediaTrimRange> removedSegments)
+    {
+        var filters = new List<string>();
+        if (removedSegments.Count > 0)
+        {
+            filters.Add($"select=not({RemovalExpression(removedSegments)})");
+            filters.Add("setpts=N/FRAME_RATE/TB");
+        }
+
+        if (output.Kind == OutputProfileKind.H265AacMp4)
+        {
+            filters.Add("pad=ceil(iw/8)*8:ceil(ih/8)*8");
+        }
+
+        if (filters.Count > 0)
+        {
+            arguments.AddRange(["-vf", string.Join(',', filters)]);
+        }
+
+        if (removedSegments.Count > 0)
+        {
+            arguments.AddRange([
+                "-af", $"aselect=not({RemovalExpression(removedSegments)}),asetpts=N/SR/TB"
+            ]);
+        }
+
         switch (output.Kind)
         {
             case OutputProfileKind.H264AacMp4:
@@ -212,7 +273,6 @@ public sealed class FfmpegVideoTranscoder
                 break;
             case OutputProfileKind.H265AacMp4:
                 arguments.AddRange([
-                    "-vf", "pad=ceil(iw/8)*8:ceil(ih/8)*8",
                     "-c:v", "libkvazaar",
                     "-b:v", $"{output.VideoBitrateKbps}k",
                     "-pix_fmt", "yuv420p",
@@ -241,6 +301,11 @@ public sealed class FfmpegVideoTranscoder
                 throw new InvalidOperationException("Unsupported video output profile.");
         }
     }
+
+    private static string RemovalExpression(IReadOnlyList<MediaTrimRange> ranges) =>
+        string.Join('+', ranges.Select(range =>
+            $"between(t\\,{range.Start.TotalSeconds.ToString("0.###", CultureInfo.InvariantCulture)}" +
+            $"\\,{range.End.TotalSeconds.ToString("0.###", CultureInfo.InvariantCulture)})"));
 
     private static Result<bool> ValidateOutput(string path, OutputProfile output) =>
         MediaContainerValidator.Validate(

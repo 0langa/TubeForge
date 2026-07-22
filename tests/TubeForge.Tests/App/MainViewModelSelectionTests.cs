@@ -262,6 +262,63 @@ public static class MainViewModelSelectionTests
         Assert.False(viewModel.SplitChapters);
     }
 
+    [Test]
+    public static void TrimControlsValidateAgainstAnalyzedDuration()
+    {
+        using var viewModel = new MainViewModel();
+        SetFormats(viewModel, BuildCompleteCatalog());
+        Assert.True(YouTubeVideoId.TryCreate("Fixture123_", out var videoId));
+        SetMetadata(viewModel, new VideoMetadata
+        {
+            Id = videoId,
+            Title = "Fixture",
+            Duration = TimeSpan.FromMinutes(2),
+            Formats = BuildCompleteCatalog()
+        });
+
+        Assert.True(viewModel.CanTrim);
+        viewModel.EnableTrim = true;
+        viewModel.TrimStartText = "00:00:05.500";
+        viewModel.TrimEndText = "00:01:00";
+        var valid = InvokeSelectedTrim(viewModel);
+        Assert.True(valid.Success);
+        Assert.Equal(new MediaTrimRange(
+            TimeSpan.FromSeconds(5.5),
+            TimeSpan.FromMinutes(1)), valid.Range);
+
+        viewModel.TrimEndText = "00:03:00";
+        var invalid = InvokeSelectedTrim(viewModel);
+        Assert.False(invalid.Success);
+        Assert.Equal("Timeline.InvalidTrim", invalid.Error?.Code);
+    }
+
+    [Test]
+    public static void SponsorBlockRemovalRequiresExplicitTranscodeProfile()
+    {
+        using var viewModel = new MainViewModel();
+        SetFormats(viewModel, BuildCompleteCatalog());
+        Assert.True(YouTubeVideoId.TryCreate("Fixture123_", out var videoId));
+        SetMetadata(viewModel, new VideoMetadata
+        {
+            Id = videoId,
+            Title = "Fixture",
+            Duration = TimeSpan.FromMinutes(2),
+            Formats = BuildCompleteCatalog()
+        });
+        viewModel.EnableSponsorBlock = true;
+        viewModel.SelectedSponsorBlockMode = viewModel.SponsorBlockModeOptions.First(option =>
+            option.Value == SponsorBlockMode.Remove);
+
+        var native = InvokeSponsorBlockSelection(viewModel, OutputProfile.Native);
+        Assert.False(native.Success);
+        Assert.Equal("SponsorBlock.TranscodeRequired", native.Error?.Code);
+
+        var converted = InvokeSponsorBlockSelection(viewModel, OutputProfile.H264AacMp4);
+        Assert.True(converted.Success);
+        Assert.Equal(SponsorBlockMode.Remove, converted.Selection?.Mode);
+        Assert.Equal(SponsorBlockCategories.Sponsor, converted.Selection?.Categories);
+    }
+
     private static void ExerciseAudioOnly(MainViewModel viewModel, ref int terminalCombinations)
     {
         foreach (var bitrate in viewModel.BitrateOptions.ToArray())
@@ -386,6 +443,42 @@ public static class MainViewModelSelectionTests
         var field = typeof(MainViewModel).GetField("_metadata", BindingFlags.Instance | BindingFlags.NonPublic)
             ?? throw new MissingFieldException(typeof(MainViewModel).FullName, "_metadata");
         field.SetValue(viewModel, metadata);
+    }
+
+    private static (bool Success, MediaTrimRange? Range, TubeForge.Core.Errors.TubeForgeError? Error)
+        InvokeSelectedTrim(MainViewModel viewModel)
+    {
+        var method = typeof(MainViewModel).GetMethod(
+            "TryGetSelectedTrim",
+            BindingFlags.Instance | BindingFlags.NonPublic)
+            ?? throw new MissingMethodException(typeof(MainViewModel).FullName, "TryGetSelectedTrim");
+        object?[] arguments = [null, null];
+        var success = (bool)method.Invoke(viewModel, arguments)!;
+        return (
+            success,
+            (MediaTrimRange?)arguments[0],
+            (TubeForge.Core.Errors.TubeForgeError?)arguments[1]);
+    }
+
+    private static (
+        bool Success,
+        SponsorBlockSelection? Selection,
+        TubeForge.Core.Errors.TubeForgeError? Error) InvokeSponsorBlockSelection(
+            MainViewModel viewModel,
+            OutputProfile output)
+    {
+        var method = typeof(MainViewModel).GetMethod(
+            "TryGetSponsorBlockSelection",
+            BindingFlags.Instance | BindingFlags.NonPublic)
+            ?? throw new MissingMethodException(
+                typeof(MainViewModel).FullName,
+                "TryGetSponsorBlockSelection");
+        object?[] arguments = [output, null, null];
+        var success = (bool)method.Invoke(viewModel, arguments)!;
+        return (
+            success,
+            (SponsorBlockSelection?)arguments[1],
+            (TubeForge.Core.Errors.TubeForgeError?)arguments[2]);
     }
 
     private static IReadOnlyList<StreamFormat> BuildCompleteCatalog()

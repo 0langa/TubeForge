@@ -89,6 +89,37 @@ public static class FfmpegMediaProcessorTests
     }
 
     [Test]
+    public static async Task TrimsWithBoundedStreamCopyAndAtomicPublication()
+    {
+        using var directory = new MediaTestDirectory();
+        var executable = Path.Combine(directory.Path, "ffmpeg.exe");
+        var media = Path.Combine(directory.Path, "source.mp4");
+        var output = Path.Combine(directory.Path, "output.mp4");
+        await File.WriteAllBytesAsync(executable, []);
+        await File.WriteAllBytesAsync(media, SyntheticMp4.Track(
+            "vide", "VIDEO"u8, 1, 90_000, 90_000));
+        var runner = new CopyingProcessRunner(media);
+        Assert.True(MediaTrimRange.TryCreate(
+            TimeSpan.FromSeconds(5.25),
+            TimeSpan.FromSeconds(35.75),
+            out var trim));
+
+        var result = await new FfmpegMediaProcessor(executable, runner).TrimStreamCopyAsync(
+            media,
+            output,
+            MediaContainer.Mp4,
+            trim);
+
+        Assert.True(result.IsSuccess, result.Error?.Message);
+        Assert.True(File.Exists(output));
+        Assert.True(ContainsAdjacent(runner.Arguments, "-ss", "5.25"));
+        Assert.True(ContainsAdjacent(runner.Arguments, "-t", "30.5"));
+        Assert.True(ContainsAdjacent(runner.Arguments, "-c", "copy"));
+        Assert.True(ContainsAdjacent(runner.Arguments, "-avoid_negative_ts", "make_zero"));
+        Assert.Equal(0, Directory.GetFiles(directory.Path, "*.processing.*").Length);
+    }
+
+    [Test]
     public static async Task EmbedsSoftSubtitlesWithContainerSpecificCodecAndAtomicPublication()
     {
         foreach (var testCase in new[]

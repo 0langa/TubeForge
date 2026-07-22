@@ -65,6 +65,49 @@ public static class FfmpegAudioTranscoderTests
     }
 
     [Test]
+    public static async Task AppliesTrimDuringAudioReencoding()
+    {
+        var directory = CreateTemporaryDirectory();
+        try
+        {
+            var executable = Path.Combine(directory, "ffmpeg.exe");
+            var source = Path.Combine(directory, "source.m4a");
+            var destination = Path.Combine(directory, "output.mp3");
+            await File.WriteAllBytesAsync(executable, []);
+            await File.WriteAllBytesAsync(source, [0x01]);
+            var runner = new ValidAudioProcessRunner();
+            Assert.True(MediaTrimRange.TryCreate(
+                TimeSpan.FromSeconds(1.25),
+                TimeSpan.FromSeconds(9.5),
+                out var trim));
+
+            var result = await new FfmpegAudioTranscoder(executable, runner).TranscodeAsync(
+                new AudioTranscodeRequest
+                {
+                    SourcePath = source,
+                    DestinationPath = destination,
+                    Output = OutputProfile.Mp3(192),
+                    Trim = trim,
+                    RemovedSegments =
+                    [
+                        new MediaTrimRange(TimeSpan.FromSeconds(3), TimeSpan.FromSeconds(4))
+                    ]
+                });
+
+            Assert.True(result.IsSuccess, result.Error?.Message);
+            Assert.True(ContainsAdjacent(runner.Arguments, "-ss", "1.25"));
+            Assert.True(ContainsAdjacent(runner.Arguments, "-t", "8.25"));
+            Assert.True(ContainsAdjacent(runner.Arguments, "-c:a", "libmp3lame"));
+            Assert.True(runner.Arguments.Any(argument =>
+                argument.Contains("aselect=not(between(t\\,3\\,4))", StringComparison.Ordinal)));
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Test]
     public static async Task CancelledConversionPublishesNoOutput()
     {
         var directory = CreateTemporaryDirectory();
