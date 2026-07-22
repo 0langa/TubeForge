@@ -236,6 +236,14 @@
                                 <TextBlock Text="CAPTION FORMAT" Style="{StaticResource FieldLabel}" Margin="0,12,0,5" />
                                 <ComboBox ItemsSource="{Binding CaptionFormats}" SelectedItem="{Binding SelectedCaptionFormat}"
                                           AutomationProperties.Name="Caption output format" />
+                                <CheckBox Content="Embed selected track in next media download"
+                                          IsChecked="{Binding EmbedSelectedCaption}"
+                                          IsEnabled="{Binding CanEmbedSelectedCaption}"
+                                          Margin="0,12,0,0"
+                                          AutomationProperties.Name="Embed selected caption as a soft subtitle" />
+                                <TextBlock Text="Single-video Audio + video outputs only. Media stays stream-copy unless its selected output preset requires conversion."
+                                           Margin="24,4,0,0" FontSize="10" TextWrapping="Wrap"
+                                           Foreground="{StaticResource MutedTextBrush}" />
                                 <Button Style="{StaticResource SecondaryButton}" Content="Save caption" Margin="0,12,0,0"
                                         Command="{Binding DownloadCaptionCommand}"
                                         AutomationProperties.Name="Save selected caption" />

@@ -9,9 +9,10 @@ Status date: 2026-07-22.
 - Phase 0 complete. Sanitized baseline evidence: [`docs/V2_BASELINE_EVIDENCE.md`](docs/V2_BASELINE_EVIDENCE.md).
 - Phase 1 core implementation complete in working tree: expanded audio outputs plus resolution-aware H.264/AAC MP4, H.265/AAC MP4, and VP9/Opus WebM profiles.
 - General output profiles persist through queue restart, validate before publication/recovery, clean failed temporary files, and use allowlisted FFmpeg arguments from the pinned LGPL build.
-- Verification: Release build 0 warnings/errors; 187/187 deterministic tests; core parser p95 0.1128 ms against 25 ms; bundled FFmpeg encode/decode smoke passed for all four new audio outputs and all three video profiles.
+- Verification: Release build 0 warnings/errors; 192/192 deterministic tests; core parser p95 0.2201 ms against 25 ms; bundled FFmpeg encode/decode smoke passed for all four new audio outputs, all three video profiles, and MP4/MKV/WebM soft-subtitle streams.
 - Phase 1 release proof remains open: installed-app live media matrix and measured quality/time/file-size evidence. Broader custom/device presets remain deferred to UX work.
 - Preset-first UX is implemented for Best original, Windows MP4, Small file, MP3 320, and Custom; deterministic tests cover applied state and manual override behavior.
+- Phase 2 subtitle slice implemented: selected manual/auto track can be embedded as a soft subtitle in a single-video MP4, MKV, or WebM download. Queue identity persists language/type without storing caption URLs; FFmpeg validates a subtitle stream before publication or recovery.
 
 ## v2 Product Definition
 
@@ -120,10 +121,10 @@ Goal: match modern YouTube downloader workflows around subtitles and timeline ed
 
 Add:
 
-- Save sidecar: current behavior.
-- Embed soft subtitles: MP4/MKV/WebM where safe.
-- Multi-language caption selection for single videos and batch queue.
-- Keep burn-in subtitle support out of v2 unless video transcode lands cleanly first.
+- [x] Save sidecar: current behavior.
+- [x] Embed one selected soft-subtitle track in single-video MP4/MKV/WebM outputs.
+- [ ] Multi-language caption selection for single videos and batch queue.
+- [ ] Keep burn-in subtitle support out of v2 unless video transcode lands cleanly first.
 
 ### 2.2 Chapter Workflows
 

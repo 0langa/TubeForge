@@ -7,13 +7,15 @@ public readonly record struct DownloadSourceIdentity(
     YouTubeVideoId VideoId,
     int PrimaryFormatId,
     int? AudioFormatId,
-    OutputProfile Output = default)
+    OutputProfile Output = default,
+    CaptionEmbedSelection? Caption = null)
 {
     public static string Create(
         YouTubeVideoId videoId,
         int primaryFormatId,
         int? audioFormatId = null,
-        OutputProfile output = default)
+        OutputProfile output = default,
+        CaptionEmbedSelection? caption = null)
     {
         if (primaryFormatId <= 0)
         {
@@ -30,12 +32,18 @@ public readonly record struct DownloadSourceIdentity(
             throw new ArgumentException("The output profile is invalid.", nameof(output));
         }
 
+        if (caption is { IsValid: false })
+        {
+            throw new ArgumentException("The embedded caption selection is invalid.", nameof(caption));
+        }
+
         var streams = audioFormatId is null
             ? $"{videoId.Value}:{primaryFormatId}"
             : $"{videoId.Value}:{primaryFormatId}+{audioFormatId.Value}";
-        return output.Kind == OutputProfileKind.Native
+        var media = output.Kind == OutputProfileKind.Native
             ? streams
             : $"{streams}@{output.Identity}";
+        return caption is null ? media : $"{media}~{caption.Value.Identity}";
     }
 
     public static bool TryParse(string? value, out DownloadSourceIdentity identity)
@@ -54,6 +62,25 @@ public readonly record struct DownloadSourceIdentity(
         }
 
         var formatPart = value[(colon + 1)..];
+        CaptionEmbedSelection? caption = null;
+        var tilde = formatPart.IndexOf('~');
+        if (tilde != formatPart.LastIndexOf('~'))
+        {
+            return false;
+        }
+
+        if (tilde >= 0)
+        {
+            if (tilde == formatPart.Length - 1 ||
+                !CaptionEmbedSelection.TryParseIdentity(formatPart[(tilde + 1)..], out var parsedCaption))
+            {
+                return false;
+            }
+
+            caption = parsedCaption;
+            formatPart = formatPart[..tilde];
+        }
+
         var at = formatPart.IndexOf('@');
         if (at != formatPart.LastIndexOf('@'))
         {
@@ -98,7 +125,7 @@ public readonly record struct DownloadSourceIdentity(
             audioFormatId = parsedAudioFormatId;
         }
 
-        identity = new DownloadSourceIdentity(videoId, primaryFormatId, audioFormatId, output);
+        identity = new DownloadSourceIdentity(videoId, primaryFormatId, audioFormatId, output, caption);
         return true;
     }
 }

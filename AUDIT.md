@@ -16,7 +16,7 @@ TubeForge is no longer a thin prototype. Current `main` builds cleanly and alrea
 - MP3, AAC/M4A, Opus/OGG, WAV, and FLAC audio conversion through bundled FFmpeg, with fail-closed output validation and queue recovery.
 - Optional resolution-aware H.264/AAC MP4, H.265/AAC MP4, and VP9/Opus WebM conversion presets, with native stream copy remaining default.
 - Preset-first setup for Best original, Windows MP4, Small file, MP3 320, and fully custom selection.
-- Captions, thumbnails, JSON sidecars, chapters in metadata, filename templates, duplicate detection, resumable `.part` files, segmented transfer, disk forecasting, queue recovery, installer, release scripts, optional Authenticode signing, GitHub release update checks, and redacted diagnostics.
+- Caption SRT/WebVTT sidecars plus opt-in single-video MP4/MKV/WebM soft-subtitle embedding, thumbnails, JSON sidecars, chapters in metadata, filename templates, duplicate detection, resumable `.part` files, segmented transfer, disk forecasting, queue recovery, installer, release scripts, optional Authenticode signing, GitHub release update checks, and redacted diagnostics.
 
 Verified during this audit:
 
@@ -30,13 +30,13 @@ Result: passed, 0 warnings, 0 errors.
 dotnet run --project tests\TubeForge.Tests --configuration Release --no-build -- --all
 ```
 
-Result after preset-first UX implementation: 187/187 passed in 19068 ms.
+Result after soft-subtitle embedding implementation: 192/192 passed in 31779 ms.
 
 ```powershell
 dotnet run --project tools\TubeForge.Performance --configuration Release --no-build -- --core-only
 ```
 
-Result after preset-first UX implementation: passed. Core parser p95 0.1128 ms against 25 ms budget.
+Result after soft-subtitle embedding implementation: passed. Core parser p95 0.2201 ms against 25 ms budget.
 
 Not verified in this audit: live YouTube canary downloads, installer publication, installer execution, desktop visual/performance probe, update flow against a real GitHub release, code signing, VirusTotal/SmartScreen reputation, store/winget distribution, long-run queue soak, or accessibility with Narrator/NVDA.
 
@@ -78,7 +78,7 @@ Popular tools define user expectations beyond "download a public YouTube video":
 | Multi-site support | YouTube-only | Major competitors support hundreds/thousands of sites | Strategic gap |
 | SponsorBlock | Not present | Common in yt-dlp GUIs | Medium |
 | Trim/cut/split | Not present | Common in SnapDownloader/VideoProc, chapter split in MediaHuman | Medium |
-| Captions/subtitles | Present sidecar SRT/WebVTT | Expected | Medium, needs embed/merge/burn choices |
+| Captions/subtitles | Sidecar SRT/WebVTT plus one selected soft-subtitle track in single-video MP4/MKV/WebM on current v2 branch | Expected | Medium, multi-language batch, burn-in, and installed-app proof remain |
 | Chapter handling | Metadata sidecar only | Embed chapters or split by chapters common | Medium |
 | Thumbnails/metadata sidecars | Present | Expected | Low |
 | Queue/resume | Strong | Required | Low |
@@ -204,7 +204,7 @@ Wrong/optimizable:
 - No SponsorBlock API integration.
 - No "download chapters separately".
 - No "trim before save" or post-download cut workflow.
-- No embedded chapters/subtitles.
+- No embedded chapters.
 
 Recommendation:
 
@@ -212,20 +212,20 @@ Recommendation:
 - Add trim/cut later through FFmpeg copy where possible, transcode only when needed.
 - Add SponsorBlock as opt-in network feature, disabled by default, with privacy notice.
 
-### P2: Caption Support Needs Embed/Merge Options
+### P2: Caption Embed Implemented; Batch And Burn-In Remain
 
-TubeForge can save SRT/WebVTT sidecars. Market tools often embed subtitles, merge subtitles into containers, or burn subtitles in.
+TubeForge can save SRT/WebVTT sidecars and opt in one selected manual/auto track as a soft subtitle in a single-video MP4, MKV, or WebM output. Market tools also support multi-language batch selection and burn-in.
 
 Wrong/optimizable:
 
-- Sidecar-only UX may disappoint users expecting one playable file.
 - No multi-language batch caption selection in UI.
-- No subtitle embed validation in MP4/MKV/WebM outputs.
+- No burn-in option.
+- Bundled-FFmpeg synthetic smoke verifies MP4 `mov_text`, MKV `srt`, and WebM `webvtt`; installed-app live media proof remains open.
 
 Recommendation:
 
-- Add "save sidecar", "embed soft subtitles", and "burn subtitles" choices.
-- For v2, prefer sidecar + soft-subtitle embed; burn-in requires video transcode and should be separate.
+- Add multi-language selection to single-video and collection queue workflows.
+- Keep burn-in separate because it requires video transcode and permanent image changes.
 
 ### P2: Queue UX Still Looks Workmanlike Compared With Premium Apps
 

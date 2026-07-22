@@ -93,13 +93,67 @@ public sealed class FfmpegMediaProcessor
             cancellationToken,
             allowExistingValidatedOutput);
 
+    public Task<Result<MediaProcessReceipt>> EmbedSubtitleAsync(
+        string mediaPath,
+        string subtitlePath,
+        string destinationPath,
+        MediaContainer outputContainer,
+        CaptionEmbedSelection caption,
+        CancellationToken cancellationToken = default,
+        bool allowExistingValidatedOutput = false)
+    {
+        if (!caption.IsValid)
+        {
+            return Task.FromResult(Failure(
+                "Media.InvalidCaptionSelection",
+                "Select a valid caption language before embedding subtitles."));
+        }
+
+        return ProcessAsync(
+            [mediaPath, subtitlePath],
+            destinationPath,
+            outputContainer,
+            arguments =>
+            {
+                AddInput(arguments, mediaPath);
+                AddInput(arguments, subtitlePath);
+                arguments.Add("-map");
+                arguments.Add("0:v:0");
+                arguments.Add("-map");
+                arguments.Add("0:a?");
+                arguments.Add("-map");
+                arguments.Add("1:0");
+                arguments.Add("-c:v");
+                arguments.Add("copy");
+                arguments.Add("-c:a");
+                arguments.Add("copy");
+                arguments.Add("-c:s");
+                arguments.Add(SubtitleCodec(outputContainer));
+                arguments.Add("-metadata:s:s:0");
+                arguments.Add($"language={caption.LanguageCode}");
+                arguments.Add("-disposition:s:0");
+                arguments.Add("0");
+                arguments.Add("-map_metadata");
+                arguments.Add("-1");
+                if (outputContainer == MediaContainer.Mp4)
+                {
+                    arguments.Add("-movflags");
+                    arguments.Add("+faststart");
+                }
+            },
+            cancellationToken,
+            allowExistingValidatedOutput,
+            ValidateSubtitleStreamAsync);
+    }
+
     private async Task<Result<MediaProcessReceipt>> ProcessAsync(
         IReadOnlyList<string> inputs,
         string destinationPath,
         MediaContainer outputContainer,
         Action<ICollection<string>> addOperationArguments,
         CancellationToken cancellationToken,
-        bool allowExistingValidatedOutput)
+        bool allowExistingValidatedOutput,
+        Func<string, CancellationToken, Task<TubeForgeError?>>? extraValidation = null)
     {
         if (outputContainer is not (MediaContainer.Mp4 or MediaContainer.WebM or MediaContainer.Mkv))
         {
@@ -125,9 +179,24 @@ public sealed class FfmpegMediaProcessor
                 var existingValidation = ValidateOutput(destinationFullPath, outputContainer);
                 if (allowExistingValidatedOutput && existingValidation is null)
                 {
+                    if (extraValidation is not null)
+                    {
+                        var extraError = await extraValidation(destinationFullPath, cancellationToken)
+                            .ConfigureAwait(false);
+                        if (extraError is not null)
+                        {
+                            return Result<MediaProcessReceipt>.Failure(extraError);
+                        }
+                    }
+
                     return Result<MediaProcessReceipt>.Success(new MediaProcessReceipt(
                         destinationFullPath,
                         new FileInfo(destinationFullPath).Length));
+                }
+
+                if (allowExistingValidatedOutput && existingValidation is not null)
+                {
+                    return Result<MediaProcessReceipt>.Failure(existingValidation);
                 }
 
                 return Failure(
@@ -190,6 +259,17 @@ public sealed class FfmpegMediaProcessor
                 return Result<MediaProcessReceipt>.Failure(validation);
             }
 
+
+            if (extraValidation is not null)
+            {
+                var extraError = await extraValidation(temporaryPath, cancellationToken)
+                    .ConfigureAwait(false);
+                if (extraError is not null)
+                {
+                    return Result<MediaProcessReceipt>.Failure(extraError);
+                }
+            }
+
             File.Move(temporaryPath, destinationFullPath, overwrite: false);
             temporaryPath = null;
             return Result<MediaProcessReceipt>.Success(new MediaProcessReceipt(
@@ -244,6 +324,36 @@ public sealed class FfmpegMediaProcessor
         arguments.Add(Path.GetFullPath(path));
     }
 
+    private async Task<TubeForgeError?> ValidateSubtitleStreamAsync(
+        string path,
+        CancellationToken cancellationToken)
+    {
+        var arguments = new[]
+        {
+            "-hide_banner",
+            "-loglevel", "error",
+            "-xerror",
+            "-nostdin",
+            "-i", Path.GetFullPath(path),
+            "-map", "0:s:0",
+            "-c", "copy",
+            "-f", "null",
+            "-"
+        };
+        var exitCode = await _processRunner.RunAsync(
+                _executablePath,
+                arguments,
+                Path.GetDirectoryName(Path.GetFullPath(path))!,
+                cancellationToken)
+            .ConfigureAwait(false);
+        return exitCode == 0
+            ? null
+            : new TubeForgeError(
+                "Media.SubtitleValidationFailed",
+                "FFmpeg did not verify an embedded soft-subtitle stream.",
+                $"FFmpeg exited with code {exitCode}.");
+    }
+
     private static void AddStreamCopyOutput(ICollection<string> arguments, MediaContainer container)
     {
         arguments.Add("-c");
@@ -277,6 +387,14 @@ public sealed class FfmpegMediaProcessor
         MediaContainer.WebM => "WebM",
         MediaContainer.Mkv => "MKV",
         _ => "MP4"
+    };
+
+    private static string SubtitleCodec(MediaContainer container) => container switch
+    {
+        MediaContainer.Mp4 => "mov_text",
+        MediaContainer.Mkv => "srt",
+        MediaContainer.WebM => "webvtt",
+        _ => throw new InvalidOperationException("Unsupported subtitle container.")
     };
 
     private static TubeForgeError? ValidateOutput(string path, MediaContainer container) => container switch

@@ -196,6 +196,29 @@ public static class MainViewModelSelectionTests
         Assert.Equal(DownloadPresetKind.Custom, viewModel.SelectedDownloadPreset.Value);
     }
 
+    [Test]
+    public static void SoftSubtitleSelectionRequiresSupportedVideoOutputAndResetsForAudioOnly()
+    {
+        using var viewModel = new MainViewModel();
+        SetFormats(viewModel, BuildCompleteCatalog());
+        viewModel.SelectedCaptionTrack = new CaptionTrackOption(new CaptionTrack
+        {
+            Url = new Uri("https://www.youtube.com/api/timedtext?v=Fixture123_&lang=en"),
+            LanguageCode = "en",
+            Name = "English"
+        });
+
+        Assert.True(viewModel.CanEmbedSelectedCaption);
+        viewModel.EmbedSelectedCaption = true;
+        Assert.True(viewModel.EmbedSelectedCaption);
+
+        viewModel.SelectedDownloadMode = viewModel.DownloadModes.First(option =>
+            option.Value == DownloadMode.AudioOnly);
+
+        Assert.False(viewModel.CanEmbedSelectedCaption);
+        Assert.False(viewModel.EmbedSelectedCaption);
+    }
+
     private static void ExerciseAudioOnly(MainViewModel viewModel, ref int terminalCombinations)
     {
         foreach (var bitrate in viewModel.BitrateOptions.ToArray())
