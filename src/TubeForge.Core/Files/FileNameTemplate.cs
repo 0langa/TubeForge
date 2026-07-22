@@ -20,6 +20,10 @@ public sealed record FileNameTemplateContext
     public int? Index { get; init; }
 
     public int IndexWidth { get; init; } = 2;
+
+    public int? ChapterIndex { get; init; }
+
+    public string ChapterTitle { get; init; } = string.Empty;
 }
 
 public static class FileNameTemplate
@@ -120,6 +124,10 @@ public static class FileNameTemplate
         "index" => context.Index?.ToString(
             "D" + context.IndexWidth.ToString(CultureInfo.InvariantCulture),
             CultureInfo.InvariantCulture) ?? string.Empty,
+        "chapterIndex" => context.ChapterIndex?.ToString(
+            "D" + context.IndexWidth.ToString(CultureInfo.InvariantCulture),
+            CultureInfo.InvariantCulture) ?? string.Empty,
+        "chapterTitle" => context.ChapterTitle,
         _ => null
     };
 

@@ -10,7 +10,8 @@ public static class DiskSpacePolicy
     public static long? CalculateRequiredAdditionalBytes(
         long? expectedSourceBytes,
         long existingSourceBytes,
-        bool requiresMuxing)
+        bool requiresMuxing,
+        int additionalOutputCopies = 0)
     {
         if (expectedSourceBytes is null)
         {
@@ -27,10 +28,16 @@ public static class DiskSpacePolicy
             throw new ArgumentOutOfRangeException(nameof(existingSourceBytes));
         }
 
+        if (additionalOutputCopies is < 0 or > 4)
+        {
+            throw new ArgumentOutOfRangeException(nameof(additionalOutputCopies));
+        }
+
         try
         {
             var remainingSource = Math.Max(0, expectedSourceBytes.Value - existingSourceBytes);
-            var muxOutput = requiresMuxing ? expectedSourceBytes.Value : 0;
+            var outputCopies = (requiresMuxing ? 1 : 0) + additionalOutputCopies;
+            var muxOutput = checked(expectedSourceBytes.Value * outputCopies);
             var reserve = Math.Max(MinimumReserveBytes, expectedSourceBytes.Value / 20);
             return checked(remainingSource + muxOutput + reserve);
         }
@@ -44,13 +51,15 @@ public static class DiskSpacePolicy
         string destinationPath,
         long? expectedSourceBytes,
         long existingSourceBytes,
-        bool requiresMuxing)
+        bool requiresMuxing,
+        int additionalOutputCopies = 0)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(destinationPath);
         var required = CalculateRequiredAdditionalBytes(
             expectedSourceBytes,
             existingSourceBytes,
-            requiresMuxing);
+            requiresMuxing,
+            additionalOutputCopies);
         if (required is null)
         {
             return Evaluate(0, availableBytes: null);

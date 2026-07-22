@@ -265,6 +265,14 @@
                                 <TextBlock Text="Single-video outputs only. MP4, MKV, and WebM are finalized atomically with bundled FFmpeg."
                                            Margin="24,4,0,0" FontSize="10" TextWrapping="Wrap"
                                            Foreground="{StaticResource MutedTextBrush}" />
+                                <CheckBox Content="Create separate chapter files after download"
+                                          IsChecked="{Binding SplitChapters}"
+                                          IsEnabled="{Binding CanSplitChapters}"
+                                          Margin="0,12,0,0"
+                                          AutomationProperties.Name="Create separate media files for video chapters" />
+                                <TextBlock Text="Keeps the full media file and atomically adds a sibling chapters folder using lossless stream copy; starts align to decodable keyframes."
+                                           Margin="24,4,0,0" FontSize="10" TextWrapping="Wrap"
+                                           Foreground="{StaticResource MutedTextBrush}" />
                             </StackPanel>
                         </Border>
 

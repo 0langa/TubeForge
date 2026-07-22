@@ -643,7 +643,7 @@ public sealed class FfmpegMediaProcessor
         _ => throw new InvalidOperationException("Unsupported subtitle container.")
     };
 
-    private static TubeForgeError? ValidateOutput(string path, MediaContainer container) => container switch
+    internal static TubeForgeError? ValidateOutput(string path, MediaContainer container) => container switch
     {
         MediaContainer.WebM => ValidateEbmlOutput(path, MediaContainer.WebM),
         MediaContainer.Mkv => ValidateEbmlOutput(path, MediaContainer.Mkv),

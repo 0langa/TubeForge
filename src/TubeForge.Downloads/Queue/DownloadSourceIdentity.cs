@@ -9,7 +9,8 @@ public readonly record struct DownloadSourceIdentity(
     int? AudioFormatId,
     OutputProfile Output = default,
     CaptionEmbedSelection? Caption = null,
-    bool EmbedChapters = false)
+    bool EmbedChapters = false,
+    bool SplitChapters = false)
 {
     public static string Create(
         YouTubeVideoId videoId,
@@ -17,7 +18,8 @@ public readonly record struct DownloadSourceIdentity(
         int? audioFormatId = null,
         OutputProfile output = default,
         CaptionEmbedSelection? caption = null,
-        bool embedChapters = false)
+        bool embedChapters = false,
+        bool splitChapters = false)
     {
         if (primaryFormatId <= 0)
         {
@@ -46,7 +48,14 @@ public readonly record struct DownloadSourceIdentity(
             ? streams
             : $"{streams}@{output.Identity}";
         var captioned = caption is null ? media : $"{media}~{caption.Value.Identity}";
-        return embedChapters ? $"{captioned}^chapters" : captioned;
+        var chapterMode = (embedChapters, splitChapters) switch
+        {
+            (true, true) => "chapters+split",
+            (true, false) => "chapters",
+            (false, true) => "split",
+            _ => null
+        };
+        return chapterMode is null ? captioned : $"{captioned}^{chapterMode}";
     }
 
     public static bool TryParse(string? value, out DownloadSourceIdentity identity)
@@ -66,6 +75,7 @@ public readonly record struct DownloadSourceIdentity(
 
         var formatPart = value[(colon + 1)..];
         var embedChapters = false;
+        var splitChapters = false;
         var caret = formatPart.IndexOf('^');
         if (caret != formatPart.LastIndexOf('^'))
         {
@@ -74,12 +84,14 @@ public readonly record struct DownloadSourceIdentity(
 
         if (caret >= 0)
         {
-            if (!formatPart[(caret + 1)..].Equals("chapters", StringComparison.Ordinal))
+            var chapterMode = formatPart[(caret + 1)..];
+            if (chapterMode is not ("chapters" or "split" or "chapters+split"))
             {
                 return false;
             }
 
-            embedChapters = true;
+            embedChapters = chapterMode is "chapters" or "chapters+split";
+            splitChapters = chapterMode is "split" or "chapters+split";
             formatPart = formatPart[..caret];
         }
 
@@ -152,7 +164,8 @@ public readonly record struct DownloadSourceIdentity(
             audioFormatId,
             output,
             caption,
-            embedChapters);
+            embedChapters,
+            splitChapters);
         return true;
     }
 }

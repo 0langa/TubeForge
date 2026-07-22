@@ -240,19 +240,26 @@ public static class MainViewModelSelectionTests
 
         Assert.True(viewModel.HasChapters);
         Assert.True(viewModel.CanEmbedChapters);
+        Assert.True(viewModel.CanSplitChapters);
         viewModel.EmbedChapters = true;
+        viewModel.SplitChapters = true;
         Assert.True(viewModel.EmbedChapters);
+        Assert.True(viewModel.SplitChapters);
 
         viewModel.SelectedDownloadMode = viewModel.DownloadModes.First(option =>
             option.Value == DownloadMode.VideoOnly);
         Assert.True(viewModel.CanEmbedChapters);
+        Assert.True(viewModel.CanSplitChapters);
         Assert.True(viewModel.EmbedChapters);
+        Assert.True(viewModel.SplitChapters);
 
         viewModel.SelectedDownloadMode = viewModel.DownloadModes.First(option =>
             option.Value == DownloadMode.AudioOnly);
 
         Assert.False(viewModel.CanEmbedChapters);
+        Assert.False(viewModel.CanSplitChapters);
         Assert.False(viewModel.EmbedChapters);
+        Assert.False(viewModel.SplitChapters);
     }
 
     private static void ExerciseAudioOnly(MainViewModel viewModel, ref int terminalCombinations)

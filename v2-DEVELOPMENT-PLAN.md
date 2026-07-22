@@ -9,11 +9,11 @@ Status date: 2026-07-22.
 - Phase 0 complete. Sanitized baseline evidence: [`docs/V2_BASELINE_EVIDENCE.md`](docs/V2_BASELINE_EVIDENCE.md).
 - Phase 1 core implementation complete in working tree: expanded audio outputs plus resolution-aware H.264/AAC MP4, H.265/AAC MP4, and VP9/Opus WebM profiles.
 - General output profiles persist through queue restart, validate before publication/recovery, clean failed temporary files, and use allowlisted FFmpeg arguments from the pinned LGPL build.
-- Verification: Release build 0 warnings/errors; 196/196 deterministic tests; core parser p95 0.8129 ms against 25 ms; bundled FFmpeg encode/decode smoke passed for all four new audio outputs, all three video profiles, and MP4/MKV/WebM soft-subtitle/chapter metadata streams.
+- Verification: Release build 0 warnings/errors; 198/198 deterministic tests; core parser p95 0.8129 ms against 25 ms; bundled FFmpeg encode/decode smoke passed for all four new audio outputs, all three video profiles, and MP4/MKV/WebM soft-subtitle/chapter embed/split workflows.
 - Phase 1 release proof remains open: installed-app live media matrix and measured quality/time/file-size evidence. Broader custom/device presets remain deferred to UX work.
 - Preset-first UX is implemented for Best original, Windows MP4, Small file, MP3 320, and Custom; deterministic tests cover applied state and manual override behavior.
 - Phase 2 subtitle slice implemented: selected manual/auto track can be embedded as a soft subtitle in a single-video MP4, MKV, or WebM download. Queue identity persists language/type without storing caption URLs; FFmpeg validates a subtitle stream before publication or recovery.
-- Phase 2 chapter-embed slice implemented: chapter intent survives queue restart, combines with a selected soft subtitle in one atomic FFmpeg pass, and validates extracted chapter count before publication or recovery. Split output and chapter filename tokens remain open.
+- Phase 2 chapter workflows implemented: embed/split intent survives queue restart; embedding combines with a selected soft subtitle in one atomic FFmpeg pass; splitting keeps the full file and atomically publishes a sibling folder using sanitized `{chapterIndex}` / `{chapterTitle}` names. Both paths validate outputs before publication or recovery.
 
 ## v2 Product Definition
 
@@ -132,8 +132,8 @@ Add:
 Add:
 
 - [x] Embed chapters in output when container supports it.
-- [ ] Split by chapters into separate files.
-- [ ] Filename template token for chapter index/title.
+- [x] Split by chapters into separate files while retaining the full media output.
+- [x] Filename template tokens for chapter index/title.
 
 ### 2.3 Trim/Cut
 

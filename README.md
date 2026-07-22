@@ -25,7 +25,7 @@ Working now:
 - optional resolution-aware H.264/AAC MP4, H.265/AAC MP4, and VP9/Opus WebM conversion presets in the current development branch, with original-quality stream copy remaining default;
 - preset-first download setup for Best original, Windows MP4, Small file, MP3 320, and fully custom selection in the current development branch;
 - caption-track metadata plus manual/auto language selection, atomic SRT/WebVTT sidecar saves, and opt-in single-video soft-subtitle embedding for MP4/MKV/WebM in the current development branch;
-- opt-in chapter embedding for single-video MP4/MKV/WebM outputs, combined atomically with soft subtitles when selected and revalidated before queue recovery;
+- opt-in chapter embedding and lossless chapter splitting for single-video MP4/MKV/WebM outputs, with atomic publication, sanitized numbered names, and queue recovery validation;
 - on-demand validated thumbnail saves and stable JSON metadata sidecars with chapters but without signed stream URLs;
 - bounded playlist/channel enumeration with per-video selection, source ordering, indexed filenames, and batch queue preparation;
 - shared per-provider request limits and bounded `Retry-After` backoff that stops persistent rate-limited bulk preparation;
@@ -97,7 +97,7 @@ dotnet build TubeForge.slnx --configuration Release
 dotnet run --project tools/TubeForge.Performance --configuration Release --no-build
 ```
 
-Verify bundled-FFmpeg subtitle plus chapter metadata for MP4, MKV, and WebM using synthetic local media:
+Verify bundled-FFmpeg subtitle, chapter metadata, and chapter splitting for MP4, MKV, and WebM using synthetic local media:
 
 ```powershell
 .\scripts\Test-ChapterEmbedding.ps1 -Configuration Release

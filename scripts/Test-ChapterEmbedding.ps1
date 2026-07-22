@@ -81,8 +81,30 @@ try {
             throw "Validation failed for $($case.Name): chapters=$chapterCount."
         }
 
+        $splitDirectory = Join-Path $probeRoot ("split-" + $case.Name)
+        New-Item -ItemType Directory -Path $splitDirectory | Out-Null
+        foreach ($chapter in @(
+            @{ Index = 1; Start = "0" }
+            @{ Index = 2; Start = "1" }
+        )) {
+            $splitPath = Join-Path $splitDirectory ("0" + $chapter.Index + "." + $case.Name)
+            & $ffmpegPath -hide_banner -loglevel error -xerror -nostdin `
+                -ss $chapter.Start -i $outputPath -t 1 `
+                -map "0:v?" -map "0:a?" -map "0:s?" `
+                -c copy -avoid_negative_ts make_zero -reset_timestamps 1 `
+                -f $case.Format $splitPath
+            if ($LASTEXITCODE -ne 0) {
+                throw "Chapter split failed for $($case.Name) chapter $($chapter.Index)."
+            }
+
+            & $ffmpegPath -hide_banner -loglevel error -xerror -nostdin -i $splitPath -f null -
+            if ($LASTEXITCODE -ne 0) {
+                throw "Chapter split validation failed for $($case.Name) chapter $($chapter.Index)."
+            }
+        }
+
         $bytes = (Get-Item -LiteralPath $outputPath).Length
-        Write-Output "PASS $($case.Name): chapters=$chapterCount subtitle=present bytes=$bytes"
+        Write-Output "PASS $($case.Name): chapters=$chapterCount subtitle=present split=2 bytes=$bytes"
     }
 }
 finally {

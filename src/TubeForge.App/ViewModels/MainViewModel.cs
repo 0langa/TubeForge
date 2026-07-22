@@ -92,6 +92,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     private readonly DirectDownloadEngine _downloader;
     private readonly AdaptiveDownloadEngine _adaptiveDownloader;
     private readonly FfmpegMediaProcessor _mediaProcessor;
+    private readonly FfmpegChapterSplitter _chapterSplitter;
     private readonly FfmpegAudioTranscoder _audioTranscoder;
     private readonly FfmpegVideoTranscoder _videoTranscoder;
     private readonly CaptionDownloadEngine _captionDownloader;
@@ -177,6 +178,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     private CaptionFormatOption _selectedCaptionFormat = CaptionOutputChoices[0];
     private bool _embedSelectedCaption;
     private bool _embedChapters;
+    private bool _splitChapters;
     private bool _isSavingCaption;
     private bool _isSavingSidecar;
     private YouTubeCollectionResult? _collection;
@@ -202,6 +204,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         _downloader = new DirectDownloadEngine(_httpClient);
         _mediaProcessor = new FfmpegMediaProcessor(
             FfmpegMediaProcessor.BundledExecutablePath(AppContext.BaseDirectory));
+        _chapterSplitter = new FfmpegChapterSplitter(_mediaProcessor.ExecutablePath);
         _audioTranscoder = new FfmpegAudioTranscoder(
             FfmpegAudioTranscoder.BundledExecutablePath(AppContext.BaseDirectory));
         _videoTranscoder = new FfmpegVideoTranscoder(
@@ -712,6 +715,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             {
                 OnPropertyChanged(nameof(CanEmbedSelectedCaption));
                 OnPropertyChanged(nameof(CanEmbedChapters));
+                OnPropertyChanged(nameof(CanSplitChapters));
                 if (!CanEmbedSelectedCaption)
                 {
                     EmbedSelectedCaption = false;
@@ -719,6 +723,10 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                 if (!CanEmbedChapters)
                 {
                     EmbedChapters = false;
+                }
+                if (!CanSplitChapters)
+                {
+                    SplitChapters = false;
                 }
 
                 RefreshCommands();
@@ -772,6 +780,14 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         set => Set(ref _embedChapters, value && CanEmbedChapters);
     }
 
+    public bool CanSplitChapters => CanEmbedChapters;
+
+    public bool SplitChapters
+    {
+        get => _splitChapters;
+        set => Set(ref _splitChapters, value && CanSplitChapters);
+    }
+
     public DownloadModeOption SelectedDownloadMode
     {
         get => _selectedDownloadMode;
@@ -789,6 +805,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             OnPropertyChanged(nameof(IsAudioVideo));
             OnPropertyChanged(nameof(CanEmbedSelectedCaption));
             OnPropertyChanged(nameof(CanEmbedChapters));
+            OnPropertyChanged(nameof(CanSplitChapters));
             if (!CanEmbedSelectedCaption)
             {
                 EmbedSelectedCaption = false;
@@ -796,6 +813,10 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             if (!CanEmbedChapters)
             {
                 EmbedChapters = false;
+            }
+            if (!CanSplitChapters)
+            {
+                SplitChapters = false;
             }
             OnPropertyChanged(nameof(ModeNotice));
             RebuildFormatFilters(resetSelections: true);
@@ -909,6 +930,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                 MarkPresetCustom();
                 OnPropertyChanged(nameof(CanEmbedSelectedCaption));
                 OnPropertyChanged(nameof(CanEmbedChapters));
+                OnPropertyChanged(nameof(CanSplitChapters));
                 if (!CanEmbedSelectedCaption)
                 {
                     EmbedSelectedCaption = false;
@@ -916,6 +938,10 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                 if (!CanEmbedChapters)
                 {
                     EmbedChapters = false;
+                }
+                if (!CanSplitChapters)
+                {
+                    SplitChapters = false;
                 }
                 OnPropertyChanged(nameof(ModeNotice));
             }
@@ -1308,6 +1334,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         var output = OutputProfileFor(selection);
         var caption = SelectedCaptionEmbedSelection();
         var embedChapters = EmbedChapters && CanEmbedChapters;
+        var splitChapters = SplitChapters && CanSplitChapters;
         try
         {
             var renderedName = RenderFileName(_metadata, selection, index: null, indexWidth: 2, output);
@@ -1324,11 +1351,12 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                 renderedName.Value,
                 OutputExtension(selection, output),
                 path => File.Exists(path) ||
+                        (splitChapters && Directory.Exists(ChapterSplitDirectoryPath(path))) ||
                         File.Exists(path + ".part") ||
                         _queueSnapshot.Items.Any(item => item.DestinationPath.Equals(path, StringComparison.OrdinalIgnoreCase)) ||
                         _historySnapshot.Entries.Any(item => item.DestinationPath.Equals(path, StringComparison.OrdinalIgnoreCase)));
             var duplicate = DownloadDuplicateDetector.Find(
-                SelectionIdentity(_metadata, selection, output, caption, embedChapters),
+                SelectionIdentity(_metadata, selection, output, caption, embedChapters, splitChapters),
                 destination,
                 _queueSnapshot.Items,
                 _historySnapshot.Entries);
@@ -1346,7 +1374,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                 destination,
                 output,
                 caption,
-                embedChapters);
+                embedChapters,
+                splitChapters);
             var queueError = await UpsertQueueItemAsync(queueItem);
             if (queueError is not null)
             {
@@ -1361,7 +1390,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                 destination,
                 output,
                 caption,
-                embedChapters);
+                embedChapters,
+                splitChapters);
             StatusMessage = $"Queued: {Path.GetFileName(destination)}";
             ProgressDetail = $"Global concurrency: {SelectedMaxConcurrentDownloads}";
             PumpQueue();
@@ -1917,25 +1947,46 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                     Caption = null,
                     EmbedChapters = false
                 };
-            if (finalWork.RequiresMetadataFinalization && File.Exists(finalWork.Destination))
+            if ((finalWork.RequiresMetadataFinalization || finalWork.SplitChapters) &&
+                File.Exists(finalWork.Destination))
             {
-                var recovered = await FinalizeMetadataAsync(finalWork, work.Destination, cancellation.Token);
-                if (recovered.Error is not null)
+                var recoveredBytes = new FileInfo(finalWork.Destination).Length;
+                if (finalWork.RequiresMetadataFinalization)
                 {
-                    await CompleteQueueRunAsync(
-                        itemId,
-                        DownloadQueueStatus.Failed,
-                        recovered.Error,
-                        recovered.BytesWritten);
-                    return;
+                    var recovered = await FinalizeMetadataAsync(finalWork, work.Destination, cancellation.Token);
+                    if (recovered.Error is not null)
+                    {
+                        await CompleteQueueRunAsync(
+                            itemId,
+                            DownloadQueueStatus.Failed,
+                            recovered.Error,
+                            recovered.BytesWritten);
+                        return;
+                    }
+
+                    recoveredBytes = recovered.BytesWritten;
+                }
+
+                if (finalWork.SplitChapters)
+                {
+                    var splitError = await SplitChaptersAsync(finalWork, cancellation.Token);
+                    if (splitError is not null)
+                    {
+                        await CompleteQueueRunAsync(
+                            itemId,
+                            DownloadQueueStatus.Failed,
+                            splitError,
+                            recoveredBytes);
+                        return;
+                    }
                 }
 
                 await CompleteQueueRunAsync(
                     itemId,
                     DownloadQueueStatus.Completed,
                     error: null,
-                    recovered.BytesWritten);
-                await RecordHistoryAsync(finalWork, recovered.BytesWritten, CancellationToken.None);
+                    recoveredBytes);
+                await RecordHistoryAsync(finalWork, recoveredBytes, CancellationToken.None);
                 StatusMessage = "Completed: " + Path.GetFileName(finalWork.Destination);
                 return;
             }
@@ -1950,7 +2001,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                 (work.Selection.RequiresMuxing ||
                  RequiresMp4Normalization(work.Selection) ||
                  work.Output.RequiresTranscode ||
-                 finalWork.RequiresMetadataFinalization));
+                 finalWork.RequiresMetadataFinalization),
+                finalWork.SplitChapters ? 1 : 0);
             if (!diskForecast.IsSuccess)
             {
                 await CompleteQueueRunAsync(
@@ -2164,6 +2216,19 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                 }
             }
 
+            if (finalWork.SplitChapters)
+            {
+                var splitError = await SplitChaptersAsync(finalWork, cancellation.Token);
+                if (splitError is not null)
+                {
+                    var status = splitError.Code == "Operation.Cancelled"
+                        ? CancellationStatus(itemId)
+                        : DownloadQueueStatus.Failed;
+                    await CompleteQueueRunAsync(itemId, status, splitError, completedBytes);
+                    return;
+                }
+            }
+
             await CompleteQueueRunAsync(
                 itemId,
                 DownloadQueueStatus.Completed,
@@ -2281,7 +2346,14 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                 "The selected caption track is no longer available. Analyze the video again."));
         }
 
-        if (sourceIdentity.EmbedChapters &&
+        if ((sourceIdentity.EmbedChapters || sourceIdentity.SplitChapters) && primary.Kind == StreamKind.AudioOnly)
+        {
+            return (null, new TubeForgeError(
+                "Queue.InvalidChapterSelection",
+                "Chapter media workflows require a video output."));
+        }
+
+        if ((sourceIdentity.EmbedChapters || sourceIdentity.SplitChapters) &&
             (resolved.Value.Metadata.Chapters.Count == 0 ||
              resolved.Value.Metadata.Duration is not { } duration || duration <= TimeSpan.Zero))
         {
@@ -2320,7 +2392,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             item.DestinationPath,
             sourceIdentity.Output,
             sourceIdentity.Caption,
-            sourceIdentity.EmbedChapters);
+            sourceIdentity.EmbedChapters,
+            sourceIdentity.SplitChapters);
         _preparedQueueWork[itemId] = work;
         return (work, null);
     }
@@ -2462,7 +2535,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                 work.Selection,
                 work.Output,
                 work.Caption,
-                work.EmbedChapters),
+                work.EmbedChapters,
+                work.SplitChapters),
             DisplayTitle = work.Metadata.Title,
             DestinationPath = work.Destination,
             BytesWritten = bytesWritten,
@@ -2711,11 +2785,18 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         string destination,
         OutputProfile output = default,
         CaptionEmbedSelection? caption = null,
-        bool embedChapters = false)
+        bool embedChapters = false,
+        bool splitChapters = false)
     {
         var now = DateTimeOffset.UtcNow;
         var format = selection.Format;
-        var sourceIdentity = SelectionIdentity(metadata, selection, output, caption, embedChapters);
+        var sourceIdentity = SelectionIdentity(
+            metadata,
+            selection,
+            output,
+            caption,
+            embedChapters,
+            splitChapters);
         var expectedLength = CombinedLength(selection);
         var partialLength = SelectionPartialLength(
             caption is null && !embedChapters
@@ -2812,6 +2893,46 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             AllowExistingValidatedOutput = true
         }, progress, cancellationToken);
         return adaptive.Error;
+    }
+
+    private async Task<TubeForgeError?> SplitChaptersAsync(
+        QueuedDownloadWork work,
+        CancellationToken cancellationToken)
+    {
+        if (!work.SplitChapters || work.Metadata.Duration is not { } duration)
+        {
+            return new TubeForgeError(
+                "Queue.InvalidChapterSplit",
+                "The queued chapter split selection is invalid.");
+        }
+
+        var format = work.Selection.Format;
+        var quality = work.Output.IsAudioTranscode
+            ? work.Output.BitrateKbps > 0 ? $"{work.Output.BitrateKbps}kbps" : "lossless"
+            : format.HasVideo
+                ? format.Height is > 0 ? $"{format.Height}p" : "video"
+                : format.Bitrate is > 0 ? $"{Math.Round(format.Bitrate.Value / 1000d):0}kbps" : "audio";
+        var extension = OutputExtension(work.Selection, work.Output);
+        StatusMessage = $"Creating {work.Metadata.Chapters.Count} lossless chapter files";
+        var result = await _chapterSplitter.SplitAsync(new ChapterSplitRequest
+        {
+            SourcePath = work.Destination,
+            DestinationDirectory = ChapterSplitDirectoryPath(work.Destination),
+            OutputContainer = FinalMediaContainer(work.Selection, work.Output),
+            Chapters = work.Metadata.Chapters,
+            Duration = duration,
+            FileNameContext = new FileNameTemplateContext
+            {
+                Title = work.Metadata.Title,
+                Channel = work.Metadata.Channel,
+                VideoId = work.Metadata.Id.Value,
+                Quality = quality,
+                Container = extension.TrimStart('.'),
+                IndexWidth = Math.Max(2, work.Metadata.Chapters.Count.ToString().Length)
+            },
+            AllowExistingValidatedOutput = true
+        }, cancellationToken);
+        return result.Error;
     }
 
     private async Task<(TubeForgeError? Error, long BytesWritten)> FinalizeMetadataAsync(
@@ -2970,6 +3091,11 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     private static string CaptionSubtitlePath(string destination) =>
         destination + ".caption-source.srt";
 
+    private static string ChapterSplitDirectoryPath(string destination) =>
+        Path.Combine(
+            Path.GetDirectoryName(destination)!,
+            Path.GetFileNameWithoutExtension(destination) + " - chapters");
+
     private static string NativeOutputExtension(FormatItemViewModel selection) =>
         selection.RequiresMuxing
             ? FormatDisplay.Extension(selection.OutputContainer)
@@ -2997,14 +3123,16 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         FormatItemViewModel selection,
         OutputProfile output = default,
         CaptionEmbedSelection? caption = null,
-        bool embedChapters = false) =>
+        bool embedChapters = false,
+        bool splitChapters = false) =>
         DownloadSourceIdentity.Create(
             metadata.Id,
             selection.Format.FormatId,
             selection.AudioFormat?.FormatId,
             output,
             caption,
-            embedChapters);
+            embedChapters,
+            splitChapters);
 
     private Result<string> RenderFileName(
         VideoMetadata metadata,
@@ -3333,6 +3461,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         CaptionTracks = [];
         SelectedCaptionTrack = null;
         EmbedChapters = false;
+        SplitChapters = false;
         _videoTitle = string.Empty;
         _videoChannel = string.Empty;
         _videoDuration = null;
@@ -3797,6 +3926,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         OnPropertyChanged(nameof(HasCaptions));
         OnPropertyChanged(nameof(HasChapters));
         OnPropertyChanged(nameof(CanEmbedChapters));
+        OnPropertyChanged(nameof(CanSplitChapters));
         OnPropertyChanged(nameof(FormatCountLabel));
         RefreshCommands();
     }
@@ -3978,7 +4108,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         string Destination,
         OutputProfile Output = default,
         CaptionEmbedSelection? Caption = null,
-        bool EmbedChapters = false)
+        bool EmbedChapters = false,
+        bool SplitChapters = false)
     {
         public bool RequiresMetadataFinalization => Caption is not null || EmbedChapters;
     }

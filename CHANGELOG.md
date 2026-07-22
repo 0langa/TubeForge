@@ -9,6 +9,7 @@
 - Add a preset-first download selector for Best original, Windows MP4, Small file, MP3 320, and Custom; detailed manual changes return the selector to Custom.
 - Add opt-in single-video soft-subtitle embedding for MP4, MKV, and WebM with queue-safe language identity, recoverable intermediates, atomic publication, and FFmpeg subtitle-stream validation.
 - Add opt-in chapter embedding for single-video MP4, MKV, and WebM outputs, including combined subtitle/chapter finalization, queue persistence, extracted chapter-count validation, and a reusable bundled-FFmpeg smoke gate.
+- Add recoverable lossless chapter splitting that keeps the full media file and atomically publishes sanitized `{chapterIndex}` / `{chapterTitle}` outputs in a sibling folder.
 
 ## 1.2.5 - 2026-07-21
 
