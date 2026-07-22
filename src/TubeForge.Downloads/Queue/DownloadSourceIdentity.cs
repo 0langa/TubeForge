@@ -12,7 +12,8 @@ public readonly record struct DownloadSourceIdentity(
     bool EmbedChapters = false,
     bool SplitChapters = false,
     MediaTrimRange? Trim = null,
-    SponsorBlockSelection? SponsorBlock = null)
+    SponsorBlockSelection? SponsorBlock = null,
+    LiveCaptureOptions? LiveCapture = null)
 {
     public static string Create(
         YouTubeVideoId videoId,
@@ -23,7 +24,8 @@ public readonly record struct DownloadSourceIdentity(
         bool embedChapters = false,
         bool splitChapters = false,
         MediaTrimRange? trim = null,
-        SponsorBlockSelection? sponsorBlock = null)
+        SponsorBlockSelection? sponsorBlock = null,
+        LiveCaptureOptions? liveCapture = null)
     {
         if (primaryFormatId <= 0)
         {
@@ -55,6 +57,11 @@ public readonly record struct DownloadSourceIdentity(
             throw new ArgumentException("The SponsorBlock selection is invalid.", nameof(sponsorBlock));
         }
 
+        if (liveCapture is { IsValid: false })
+        {
+            throw new ArgumentException("The live capture options are invalid.", nameof(liveCapture));
+        }
+
         var streams = audioFormatId is null
             ? $"{videoId.Value}:{primaryFormatId}"
             : $"{videoId.Value}:{primaryFormatId}+{audioFormatId.Value}";
@@ -71,7 +78,8 @@ public readonly record struct DownloadSourceIdentity(
         };
         var chaptered = chapterMode is null ? captioned : $"{captioned}^{chapterMode}";
         var trimmed = trim is null ? chaptered : $"{chaptered}%{trim.Value.Identity}";
-        return sponsorBlock is null ? trimmed : $"{trimmed}&{sponsorBlock.Value.Identity}";
+        var sponsored = sponsorBlock is null ? trimmed : $"{trimmed}&{sponsorBlock.Value.Identity}";
+        return liveCapture is null ? sponsored : $"{sponsored}!{liveCapture.Value.Identity}";
     }
 
     public static bool TryParse(string? value, out DownloadSourceIdentity identity)
@@ -90,6 +98,27 @@ public readonly record struct DownloadSourceIdentity(
         }
 
         var formatPart = value[(colon + 1)..];
+        LiveCaptureOptions? liveCapture = null;
+        var exclamation = formatPart.IndexOf('!');
+        if (exclamation != formatPart.LastIndexOf('!'))
+        {
+            return false;
+        }
+
+        if (exclamation >= 0)
+        {
+            if (exclamation == formatPart.Length - 1 ||
+                !LiveCaptureOptions.TryParseIdentity(
+                    formatPart[(exclamation + 1)..],
+                    out var parsedLiveCapture))
+            {
+                return false;
+            }
+
+            liveCapture = parsedLiveCapture;
+            formatPart = formatPart[..exclamation];
+        }
+
         SponsorBlockSelection? sponsorBlock = null;
         var ampersand = formatPart.IndexOf('&');
         if (ampersand != formatPart.LastIndexOf('&'))
@@ -223,7 +252,8 @@ public readonly record struct DownloadSourceIdentity(
             embedChapters,
             splitChapters,
             trim,
-            sponsorBlock);
+            sponsorBlock,
+            liveCapture);
         return true;
     }
 }

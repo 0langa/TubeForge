@@ -347,7 +347,8 @@ public sealed class DownloadQueueStore
         (sourceIdentity.Output.Kind != Core.Media.OutputProfileKind.Native ||
          sourceIdentity.Caption is not null ||
          sourceIdentity.EmbedChapters ||
-         sourceIdentity.SponsorBlock is not null);
+         sourceIdentity.SponsorBlock is not null ||
+         sourceIdentity.LiveCapture is not null);
 
     private static bool IsSafeText(string? value, int maximumLength) =>
         !string.IsNullOrWhiteSpace(value) &&

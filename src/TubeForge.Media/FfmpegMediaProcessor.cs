@@ -95,6 +95,32 @@ public sealed class FfmpegMediaProcessor
             cancellationToken,
             allowExistingValidatedOutput);
 
+    public Task<Result<MediaProcessReceipt>> RemuxHlsCaptureAsync(
+        string sourcePath,
+        string destinationPath,
+        CancellationToken cancellationToken = default,
+        bool allowExistingValidatedOutput = false) =>
+        ProcessAsync(
+            [sourcePath],
+            destinationPath,
+            MediaContainer.Mkv,
+            arguments =>
+            {
+                AddInput(arguments, sourcePath);
+                arguments.Add("-map");
+                arguments.Add("0:v?");
+                arguments.Add("-map");
+                arguments.Add("0:a?");
+                arguments.Add("-c");
+                arguments.Add("copy");
+                arguments.Add("-map_metadata");
+                arguments.Add("-1");
+                arguments.Add("-f");
+                arguments.Add("matroska");
+            },
+            cancellationToken,
+            allowExistingValidatedOutput);
+
     public Task<Result<MediaProcessReceipt>> TrimStreamCopyAsync(
         string mediaPath,
         string destinationPath,

@@ -309,6 +309,32 @@ public static class DownloadQueueStoreTests
     }
 
     [Test]
+    public static async Task PersistsLiveCaptureLimitsWithoutManifestUrls()
+    {
+        using var directory = new TestDirectory();
+        var store = new DownloadQueueStore(Path.Combine(directory.Path, "queue.json"));
+        var identity = "Fixture123_:1000001!3600-4294967296-21600";
+        var completed = Item(Guid.NewGuid(), DownloadQueueStatus.Completed, DateTimeOffset.UtcNow) with
+        {
+            FormatId = 1_000_001,
+            SourceIdentity = identity,
+            ExpectedLength = null,
+            BytesReceived = 8_192
+        };
+
+        var save = await store.SaveAsync(new DownloadQueueSnapshot { Items = [completed] });
+
+        Assert.True(save.IsSuccess, save.Error?.Message);
+        var load = await new DownloadQueueStore(store.StoragePath).LoadAsync();
+        Assert.True(load.IsSuccess, load.Error?.Message);
+        Assert.Equal(identity, load.Value.Items[0].SourceIdentity);
+        Assert.Equal(8_192L, load.Value.Items[0].ExpectedLength);
+        var json = await File.ReadAllTextAsync(store.StoragePath);
+        Assert.False(json.Contains("http", StringComparison.OrdinalIgnoreCase));
+        Assert.False(json.Contains("manifest", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Test]
     public static async Task RejectsOversizedMp3BeforeConversionCompletes()
     {
         using var directory = new TestDirectory();

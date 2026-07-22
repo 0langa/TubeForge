@@ -20,6 +20,7 @@ using TubeForge.Core.Settings;
 using TubeForge.Core.YouTube;
 using TubeForge.Downloads;
 using TubeForge.Downloads.History;
+using TubeForge.Downloads.Hls;
 using TubeForge.Downloads.Queue;
 using TubeForge.Media;
 using TubeForge.Transcoding;
@@ -214,6 +215,9 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     private bool _interactionCategory;
     private bool _previewCategory;
     private bool _fillerCategory;
+    private string _liveDurationMinutesText = "60";
+    private string _liveMaximumSizeGiBText = "4";
+    private string _liveMaximumWaitMinutesText = "360";
     private bool _isSavingCaption;
     private bool _isSavingSidecar;
     private YouTubeCollectionResult? _collection;
@@ -431,6 +435,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         {
             VideoContentKind.Short => "Short",
             VideoContentKind.LiveReplay => "Completed live replay",
+            VideoContentKind.LiveActive => "Active live · record from now",
+            VideoContentKind.LiveUpcoming => "Upcoming live · wait then record",
             _ => string.Empty
         },
         _metadata?.Chapters.Count > 0 ? $"{_metadata.Chapters.Count} chapters" : string.Empty
@@ -807,6 +813,14 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                 OnPropertyChanged(nameof(CanSplitChapters));
                 OnPropertyChanged(nameof(CanTrim));
                 OnPropertyChanged(nameof(CanUseSponsorBlock));
+                OnPropertyChanged(nameof(IsLiveCapture));
+                OnPropertyChanged(nameof(IsUpcomingLiveCapture));
+                OnPropertyChanged(nameof(LiveCaptureModeNotice));
+                if (IsLiveCapture && _selectedVideoProcessing.Value != OutputProfile.Native)
+                {
+                    _selectedVideoProcessing = VideoProcessingChoices[0];
+                    OnPropertyChanged(nameof(SelectedVideoProcessing));
+                }
                 if (!CanEmbedSelectedCaption)
                 {
                     EmbedSelectedCaption = false;
@@ -838,16 +852,20 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         get => _selectedDownloadPreset;
         set
         {
-            if (value is null || !Set(ref _selectedDownloadPreset, value))
+            var accepted = IsLiveCapture
+                ? DownloadPresetChoices.First(option => option.Value == DownloadPresetKind.BestOriginal)
+                : value;
+            if (accepted is null || !Set(ref _selectedDownloadPreset, accepted))
             {
                 return;
             }
 
-            ApplyDownloadPreset(value);
+            ApplyDownloadPreset(accepted);
         }
     }
 
     public bool CanEmbedSelectedCaption =>
+        !IsLiveCapture &&
         IsAudioVideo &&
         SelectedCaptionTrack is not null &&
         SelectedFormat is not null &&
@@ -911,7 +929,33 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
 
     public IReadOnlyList<FilterOption<SponsorBlockMode>> SponsorBlockModeOptions => SponsorBlockModeChoices;
 
-    public bool CanUseSponsorBlock => HasVideo && SelectedFormat is not null;
+    public bool CanUseSponsorBlock => HasVideo && SelectedFormat is not null && !IsLiveCapture;
+
+    public bool IsLiveCapture => SelectedFormat?.Format.IsLiveHls == true;
+
+    public bool IsUpcomingLiveCapture => SelectedFormat?.Format.IsLiveManifestPending == true;
+
+    public string LiveCaptureModeNotice => IsUpcomingLiveCapture
+        ? "TubeForge will wait locally for this public stream to start, then record until either limit is reached."
+        : "TubeForge will record this public stream from now until either limit is reached.";
+
+    public string LiveDurationMinutesText
+    {
+        get => _liveDurationMinutesText;
+        set => Set(ref _liveDurationMinutesText, value ?? string.Empty);
+    }
+
+    public string LiveMaximumSizeGiBText
+    {
+        get => _liveMaximumSizeGiBText;
+        set => Set(ref _liveMaximumSizeGiBText, value ?? string.Empty);
+    }
+
+    public string LiveMaximumWaitMinutesText
+    {
+        get => _liveMaximumWaitMinutesText;
+        set => Set(ref _liveMaximumWaitMinutesText, value ?? string.Empty);
+    }
 
     public bool EnableSponsorBlock
     {
@@ -1115,7 +1159,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         get => _selectedVideoProcessing;
         set
         {
-            if (value is not null && Set(ref _selectedVideoProcessing, value))
+            var accepted = IsLiveCapture ? VideoProcessingChoices[0] : value;
+            if (accepted is not null && Set(ref _selectedVideoProcessing, accepted))
             {
                 MarkPresetCustom();
                 OnPropertyChanged(nameof(CanEmbedSelectedCaption));
@@ -1469,6 +1514,13 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             _thumbnailUrl = _metadata.ThumbnailUrl;
             _allFormats = _metadata.Formats;
             RefreshDownloadModes();
+            if (_allFormats.Any(format => format.IsLiveHls) &&
+                _selectedDownloadPreset.Value != DownloadPresetKind.BestOriginal)
+            {
+                _selectedDownloadPreset = DownloadPresetChoices.First(option =>
+                    option.Value == DownloadPresetKind.BestOriginal);
+                OnPropertyChanged(nameof(SelectedDownloadPreset));
+            }
             ApplyDownloadPreset(_selectedDownloadPreset);
             if (_selectedDownloadPreset.Value == DownloadPresetKind.Custom)
             {
@@ -1492,6 +1544,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             {
                 VideoContentKind.Short => "SHORT · " + extractionStatus,
                 VideoContentKind.LiveReplay => "LIVE REPLAY · " + extractionStatus,
+                VideoContentKind.LiveActive => "LIVE · PUBLIC HLS READY",
+                VideoContentKind.LiveUpcoming => "UPCOMING LIVE · WAIT MODE",
                 _ => extractionStatus
             };
             StatusMessage = Formats.Count > 0
@@ -1572,13 +1626,30 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         var caption = SelectedCaptionEmbedSelection();
         var embedChapters = EmbedChapters && CanEmbedChapters;
         var splitChapters = SplitChapters && CanSplitChapters;
-        if (!TryGetSelectedTrim(out var trim, out var trimError))
+        if (!TryGetLiveCaptureOptions(
+                selection,
+                output,
+                caption,
+                embedChapters,
+                splitChapters,
+                out var liveCapture,
+                out var liveError))
+        {
+            ErrorMessage = $"{liveError!.Message} ({liveError.Code})";
+            StatusMessage = "Download not queued";
+            return;
+        }
+
+        MediaTrimRange? trim = null;
+        SponsorBlockSelection? sponsorBlock = null;
+        if (liveCapture is null && !TryGetSelectedTrim(out trim, out var trimError))
         {
             ErrorMessage = $"{trimError!.Message} ({trimError.Code})";
             StatusMessage = "Download not queued";
             return;
         }
-        if (!TryGetSponsorBlockSelection(output, out var sponsorBlock, out var sponsorError))
+        if (liveCapture is null &&
+            !TryGetSponsorBlockSelection(output, out sponsorBlock, out var sponsorError))
         {
             ErrorMessage = $"{sponsorError!.Message} ({sponsorError.Code})";
             StatusMessage = "Download not queued";
@@ -1613,7 +1684,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                     embedChapters,
                     splitChapters,
                     trim,
-                    sponsorBlock),
+                    sponsorBlock,
+                    liveCapture),
                 destination,
                 _queueSnapshot.Items,
                 _historySnapshot.Entries);
@@ -1634,7 +1706,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                 embedChapters,
                 splitChapters,
                 trim,
-                sponsorBlock);
+                sponsorBlock,
+                liveCapture);
             var queueError = await UpsertQueueItemAsync(queueItem);
             if (queueError is not null)
             {
@@ -1643,7 +1716,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                 return;
             }
 
-            if (sponsorBlock is null)
+            if (sponsorBlock is null && liveCapture is null)
             {
                 _preparedQueueWork[queueItem.Id] = new QueuedDownloadWork(
                     _metadata,
@@ -2203,6 +2276,12 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             }
 
             var finalWork = prepared.Work;
+            if (finalWork.LiveCapture is { } liveCapture)
+            {
+                await RunLiveCaptureAsync(itemId, finalWork, liveCapture, cancellation.Token);
+                return;
+            }
+
             var mediaDestination = finalWork.RequiresMetadataFinalization
                 ? PostProcessMediaSourcePath(
                     finalWork.Destination,
@@ -2644,6 +2723,19 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                 "The queued video conversion profile requires video and audio media."));
         }
 
+        if (sourceIdentity.LiveCapture is { } liveCapture &&
+            (!liveCapture.IsValid || !primary.IsLiveHls ||
+             sourceIdentity.Output != OutputProfile.Native || sourceIdentity.AudioFormatId is not null ||
+             sourceIdentity.Caption is not null || sourceIdentity.EmbedChapters ||
+             sourceIdentity.SplitChapters || sourceIdentity.Trim is not null ||
+             sourceIdentity.SponsorBlock is not null) ||
+            sourceIdentity.LiveCapture is null && primary.IsLiveHls)
+        {
+            return (null, new TubeForgeError(
+                "Queue.InvalidLiveCapture",
+                "The queued live capture settings are invalid or no longer available."));
+        }
+
         if (sourceIdentity.Caption is not null && primary.Kind == StreamKind.AudioOnly)
         {
             return (null, new TubeForgeError(
@@ -2776,7 +2868,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             sourceIdentity.SplitChapters,
             sourceIdentity.Trim,
             sourceIdentity.SponsorBlock,
-            sponsorSegments);
+            sponsorSegments,
+            sourceIdentity.LiveCapture);
         _preparedQueueWork[itemId] = work;
         return (work, null);
     }
@@ -3178,7 +3271,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         bool embedChapters = false,
         bool splitChapters = false,
         MediaTrimRange? trim = null,
-        SponsorBlockSelection? sponsorBlock = null)
+        SponsorBlockSelection? sponsorBlock = null,
+        LiveCaptureOptions? liveCapture = null)
     {
         var now = DateTimeOffset.UtcNow;
         var format = selection.Format;
@@ -3190,8 +3284,9 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             embedChapters,
             splitChapters,
             trim,
-            sponsorBlock);
-        var expectedLength = CombinedLength(selection);
+            sponsorBlock,
+            liveCapture);
+        var expectedLength = liveCapture is null ? CombinedLength(selection) : null;
         var embedsTimeline = embedChapters || sponsorBlock is { Mode: SponsorBlockMode.Chapters };
         var mediaDestination = caption is null && !embedsTimeline
             ? destination
@@ -3566,6 +3661,142 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         }
     }
 
+    private async Task RunLiveCaptureAsync(
+        Guid itemId,
+        QueuedDownloadWork work,
+        LiveCaptureOptions options,
+        CancellationToken cancellationToken)
+    {
+        var sourcePath = LiveCaptureSourcePath(work.Destination);
+        var reservedBytes = HlsReservedLength(sourcePath);
+        var diskForecast = DiskSpacePolicy.Check(
+            work.Destination,
+            options.MaximumBytes,
+            reservedBytes,
+            requiresMuxing: true);
+        if (!diskForecast.IsSuccess)
+        {
+            await CompleteQueueRunAsync(
+                itemId,
+                DownloadQueueStatus.Failed,
+                diskForecast.Error,
+                reservedBytes);
+            return;
+        }
+
+        TubeForgeError? error = null;
+        long completedBytes = reservedBytes;
+        if (!File.Exists(sourcePath))
+        {
+            var manifest = await ResolveLiveManifestAsync(work, options, cancellationToken);
+            if (!manifest.IsSuccess)
+            {
+                var status = manifest.Error?.Code == "Operation.Cancelled"
+                    ? CancellationStatus(itemId)
+                    : DownloadQueueStatus.Failed;
+                await CompleteQueueRunAsync(itemId, status, manifest.Error, reservedBytes);
+                return;
+            }
+
+            StatusMessage = "Recording public HLS stream · pause preserves downloaded segments";
+            var progress = new Progress<DownloadProgress>(value => UpdateQueueProgress(itemId, value));
+            var capture = await new HlsCaptureEngine(_httpClient, _hostRequestGate).CaptureAsync(
+                new HlsCaptureRequest
+                {
+                    ManifestUri = manifest.Value.Url,
+                    DestinationPath = sourcePath,
+                    Options = options,
+                    HttpUserAgent = manifest.Value.HttpUserAgent
+                },
+                progress,
+                cancellationToken);
+            error = capture.Error;
+            completedBytes = capture.IsSuccess ? capture.Value.BytesWritten : HlsReservedLength(sourcePath);
+        }
+
+        if (error is null)
+        {
+            StatusMessage = "Finalizing live capture to MKV · stream copy";
+            var remux = await _mediaProcessor.RemuxHlsCaptureAsync(
+                sourcePath,
+                work.Destination,
+                cancellationToken,
+                allowExistingValidatedOutput: true);
+            error = remux.Error;
+            completedBytes = remux.IsSuccess ? remux.Value.BytesWritten : HlsReservedLength(sourcePath);
+            if (remux.IsSuccess)
+            {
+                File.Delete(sourcePath);
+                HlsCaptureEngine.Cleanup(sourcePath);
+            }
+        }
+
+        if (error is not null)
+        {
+            var status = error.Code == "Operation.Cancelled"
+                ? CancellationStatus(itemId)
+                : DownloadQueueStatus.Failed;
+            await CompleteQueueRunAsync(itemId, status, error, completedBytes);
+            return;
+        }
+
+        await CompleteQueueRunAsync(
+            itemId,
+            DownloadQueueStatus.Completed,
+            error: null,
+            completedBytes);
+        await RecordHistoryAsync(work, completedBytes, CancellationToken.None);
+        StatusMessage = "Completed: " + Path.GetFileName(work.Destination);
+    }
+
+    private async Task<Result<StreamFormat>> ResolveLiveManifestAsync(
+        QueuedDownloadWork work,
+        LiveCaptureOptions options,
+        CancellationToken cancellationToken)
+    {
+        var current = work.Selection.Format;
+        if (!current.IsLiveManifestPending)
+        {
+            return Result<StreamFormat>.Success(current);
+        }
+
+        var deadline = DateTimeOffset.UtcNow + options.MaximumWaitForStart;
+        while (DateTimeOffset.UtcNow < deadline)
+        {
+            StatusMessage = $"Waiting for public live stream · up to {FormatDuration(options.MaximumWaitForStart)}";
+            try
+            {
+                await Task.Delay(TimeSpan.FromSeconds(15), cancellationToken);
+            }
+            catch (OperationCanceledException)
+            {
+                return Result<StreamFormat>.Failure(new TubeForgeError(
+                    "Operation.Cancelled",
+                    "Waiting for the live stream was paused or cancelled."));
+            }
+
+            var resolved = await _rateLimitedRequests.ExecuteAsync(
+                YouTubeOrigin,
+                token => _resolver.ResolveAsync(work.Metadata.Id, token),
+                cancellationToken: cancellationToken);
+            if (!resolved.IsSuccess)
+            {
+                return Result<StreamFormat>.Failure(resolved.Error!);
+            }
+
+            var live = resolved.Value.Metadata.Formats.FirstOrDefault(format =>
+                format.IsLiveHls && !format.IsLiveManifestPending);
+            if (live is not null)
+            {
+                return Result<StreamFormat>.Success(live);
+            }
+        }
+
+        return Result<StreamFormat>.Failure(new TubeForgeError(
+            "Hls.StartWaitExpired",
+            "The upcoming public stream did not start before the configured wait limit."));
+    }
+
     private static string IntermediateTrackPath(
         string destination,
         string role,
@@ -3583,6 +3814,33 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
 
     private static string TrimSourcePath(string destination) =>
         destination + ".trim-source" + Path.GetExtension(destination);
+
+    private static string LiveCaptureSourcePath(string destination) =>
+        destination + ".hls-source";
+
+    private static long HlsReservedLength(string sourcePath)
+    {
+        if (File.Exists(sourcePath))
+        {
+            return new FileInfo(sourcePath).Length;
+        }
+
+        var partsDirectory = sourcePath + ".hls.parts";
+        if (!Directory.Exists(partsDirectory))
+        {
+            return 0;
+        }
+
+        try
+        {
+            return Directory.EnumerateFiles(partsDirectory, "*.bin", SearchOption.TopDirectoryOnly)
+                .Sum(path => new FileInfo(path).Length);
+        }
+        catch (OverflowException)
+        {
+            return long.MaxValue;
+        }
+    }
 
     private static string CaptionSubtitlePath(string destination) =>
         destination + ".caption-source.srt";
@@ -3622,7 +3880,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         bool embedChapters = false,
         bool splitChapters = false,
         MediaTrimRange? trim = null,
-        SponsorBlockSelection? sponsorBlock = null) =>
+        SponsorBlockSelection? sponsorBlock = null,
+        LiveCaptureOptions? liveCapture = null) =>
         DownloadSourceIdentity.Create(
             metadata.Id,
             selection.Format.FormatId,
@@ -3632,7 +3891,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             embedChapters,
             splitChapters,
             trim,
-            sponsorBlock);
+            sponsorBlock,
+            liveCapture);
 
     private Result<string> RenderFileName(
         VideoMetadata metadata,
@@ -4431,10 +4691,14 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         OnPropertyChanged(nameof(ThumbnailUrl));
         OnPropertyChanged(nameof(HasCaptions));
         OnPropertyChanged(nameof(HasChapters));
+        OnPropertyChanged(nameof(CanEmbedSelectedCaption));
         OnPropertyChanged(nameof(CanEmbedChapters));
         OnPropertyChanged(nameof(CanSplitChapters));
         OnPropertyChanged(nameof(CanTrim));
         OnPropertyChanged(nameof(CanUseSponsorBlock));
+        OnPropertyChanged(nameof(IsLiveCapture));
+        OnPropertyChanged(nameof(IsUpcomingLiveCapture));
+        OnPropertyChanged(nameof(LiveCaptureModeNotice));
         OnPropertyChanged(nameof(FormatCountLabel));
         RefreshCommands();
     }
@@ -4481,6 +4745,59 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
 
     private void OnPropertyChanged([CallerMemberName] string? propertyName = null) =>
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
+
+    private bool TryGetLiveCaptureOptions(
+        FormatItemViewModel selection,
+        OutputProfile output,
+        CaptionEmbedSelection? caption,
+        bool embedChapters,
+        bool splitChapters,
+        out LiveCaptureOptions? options,
+        out TubeForgeError? error)
+    {
+        options = null;
+        error = null;
+        if (!selection.Format.IsLiveHls)
+        {
+            return true;
+        }
+
+        if (output != OutputProfile.Native || caption is not null || embedChapters || splitChapters ||
+            EnableTrim || EnableSponsorBlock)
+        {
+            error = new TubeForgeError(
+                "Hls.IncompatibleProcessing",
+                "Live capture currently requires original-quality MKV without trim, captions, chapters, SponsorBlock, or conversion.");
+            return false;
+        }
+
+        if (!int.TryParse(LiveDurationMinutesText, NumberStyles.None, CultureInfo.InvariantCulture,
+                out var durationMinutes) || durationMinutes is < 1 or > 1_440 ||
+            !int.TryParse(LiveMaximumSizeGiBText, NumberStyles.None, CultureInfo.InvariantCulture,
+                out var maximumGiB) || maximumGiB is < 1 or > 100 ||
+            !int.TryParse(LiveMaximumWaitMinutesText, NumberStyles.None, CultureInfo.InvariantCulture,
+                out var waitMinutes) || waitMinutes is < 0 or > 1_440 ||
+            selection.Format.IsLiveManifestPending && waitMinutes == 0)
+        {
+            error = new TubeForgeError(
+                "Hls.InvalidLimits",
+                "Choose 1–1440 capture minutes, 1–100 GiB, and up to 1440 wait minutes (at least 1 for an upcoming stream).");
+            return false;
+        }
+
+        var selected = new LiveCaptureOptions(
+            TimeSpan.FromMinutes(durationMinutes),
+            maximumGiB * 1024L * 1024 * 1024,
+            selection.Format.IsLiveManifestPending ? TimeSpan.FromMinutes(waitMinutes) : TimeSpan.Zero);
+        if (!selected.IsValid)
+        {
+            error = new TubeForgeError("Hls.InvalidLimits", "The live capture limits are invalid.");
+            return false;
+        }
+
+        options = selected;
+        return true;
+    }
 
     private bool TryGetSelectedTrim(
         out MediaTrimRange? trim,
@@ -4719,7 +5036,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         bool SplitChapters = false,
         MediaTrimRange? Trim = null,
         SponsorBlockSelection? SponsorBlock = null,
-        IReadOnlyList<SponsorBlockSegment>? SponsorSegments = null)
+        IReadOnlyList<SponsorBlockSegment>? SponsorSegments = null,
+        LiveCaptureOptions? LiveCapture = null)
     {
         public IReadOnlyList<SponsorBlockSegment> SafeSponsorSegments => SponsorSegments ?? [];
 

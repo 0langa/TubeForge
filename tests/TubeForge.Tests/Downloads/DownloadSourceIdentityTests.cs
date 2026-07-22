@@ -116,6 +116,20 @@ public static class DownloadSourceIdentityTests
         Assert.Equal(
             $"dQw4w9WgXcQ:401+140@{OutputProfile.H264AacMp4.Identity}%5000-60000&remove.sponsor,intro",
             sponsorValue);
+
+        var liveCapture = new LiveCaptureOptions(
+            TimeSpan.FromHours(2),
+            8L * 1024 * 1024 * 1024,
+            TimeSpan.FromHours(6));
+        var liveValue = DownloadSourceIdentity.Create(
+            videoId,
+            1_000_001,
+            liveCapture: liveCapture);
+        Assert.True(DownloadSourceIdentity.TryParse(liveValue, out var live));
+        Assert.Equal(liveCapture, live.LiveCapture);
+        Assert.Equal(
+            "dQw4w9WgXcQ:1000001!7200-8589934592-21600",
+            liveValue);
     }
 
     [Test]
@@ -135,9 +149,11 @@ public static class DownloadSourceIdentityTests
                      "dQw4w9WgXcQ:18^", "dQw4w9WgXcQ:18^chapter",
                      "dQw4w9WgXcQ:18^chapters^chapters", "dQw4w9WgXcQ:18^chapters~m.en",
                      "dQw4w9WgXcQ:18^split+chapters", "dQw4w9WgXcQ:18^chapters+split+split",
-                     "dQw4w9WgXcQ:18%0-0", "dQw4w9WgXcQ:18%1000-2000%3000-4000",
-                     "dQw4w9WgXcQ:18&", "dQw4w9WgXcQ:18&remove.sponsor,sponsor",
-                     "dQw4w9WgXcQ:18&remove.unknown", "dQw4w9WgXcQ:18&chapters.intro&remove.sponsor"
+                      "dQw4w9WgXcQ:18%0-0", "dQw4w9WgXcQ:18%1000-2000%3000-4000",
+                      "dQw4w9WgXcQ:18&", "dQw4w9WgXcQ:18&remove.sponsor,sponsor",
+                      "dQw4w9WgXcQ:18&remove.unknown", "dQw4w9WgXcQ:18&chapters.intro&remove.sponsor",
+                      "dQw4w9WgXcQ:18!60-16777216", "dQw4w9WgXcQ:18!59-16777216-0",
+                      "dQw4w9WgXcQ:18!60-1-0", "dQw4w9WgXcQ:18!60-16777216-0!extra"
                  })
         {
             Assert.False(DownloadSourceIdentity.TryParse(value, out _));

@@ -17,6 +17,9 @@
 - Rebase and clip embedded SRT captions and chapter timelines when trimming so supported timed metadata stays synchronized.
 - Add disabled-by-default SponsorBlock category selection with privacy-prefix requests, local candidate matching, chapter-marker mode, and transcode-only segment removal.
 - Keep SponsorBlock response payloads out of persisted queue state and diagnostics, and add deterministic plus real bundled-FFmpeg timeline-editing proof.
+- Record v2.0 as public-only: do not collect cookies or account credentials, and return a stable typed failure for login-required or access-controlled media.
+- Add public active-live record-now and upcoming wait modes with bounded unencrypted HLS parsing, duration/size/wait limits, trusted-host enforcement, retries, and queue pause/resume.
+- Persist recoverable live segment journals without remote URLs, reject encryption/DRM and expired gaps, and finalize captures atomically to validated MKV using bundled FFmpeg stream copy.
 
 ## 1.2.5 - 2026-07-21
 

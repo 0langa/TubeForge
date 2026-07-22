@@ -89,6 +89,31 @@ public static class FfmpegMediaProcessorTests
     }
 
     [Test]
+    public static async Task RemuxesCapturedHlsSourceIntoValidatedMkv()
+    {
+        using var directory = new MediaTestDirectory();
+        var executable = Path.Combine(directory.Path, "ffmpeg.exe");
+        var source = Path.Combine(directory.Path, "capture.hls-source");
+        var output = Path.Combine(directory.Path, "capture.mkv");
+        var muxed = Path.Combine(directory.Path, "muxed-source.mkv");
+        await File.WriteAllBytesAsync(executable, []);
+        await File.WriteAllBytesAsync(source, "synthetic transport stream"u8.ToArray());
+        await File.WriteAllBytesAsync(muxed, SyntheticWebM.Track(
+            1, "V_VP9", (0, "VIDEO"u8.ToArray()), (100, "AUDIO"u8.ToArray())));
+        var runner = new CopyingProcessRunner(muxed);
+
+        var result = await new FfmpegMediaProcessor(executable, runner)
+            .RemuxHlsCaptureAsync(source, output);
+
+        Assert.True(result.IsSuccess, result.Error?.Message);
+        Assert.True(File.Exists(output));
+        Assert.True(ContainsAdjacent(runner.Arguments, "-map", "0:v?"));
+        Assert.True(ContainsAdjacent(runner.Arguments, "-map", "0:a?"));
+        Assert.True(ContainsAdjacent(runner.Arguments, "-f", "matroska"));
+        Assert.Equal(0, Directory.GetFiles(directory.Path, "*.processing.*").Length);
+    }
+
+    [Test]
     public static async Task TrimsWithBoundedStreamCopyAndAtomicPublication()
     {
         using var directory = new MediaTestDirectory();

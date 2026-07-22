@@ -319,6 +319,40 @@ public static class MainViewModelSelectionTests
         Assert.Equal(SponsorBlockCategories.Sponsor, converted.Selection?.Categories);
     }
 
+    [Test]
+    public static void LiveCaptureUsesBoundedOriginalMkvSettings()
+    {
+        using var viewModel = new MainViewModel();
+        var live = Progressive(1_000_001, 1080, 30) with
+        {
+            Url = new Uri("https://manifest.googlevideo.com/live/master.m3u8"),
+            Container = MediaContainer.Mkv,
+            IsLiveHls = true,
+            IsLiveManifestPending = true
+        };
+        SetFormats(viewModel, [live]);
+
+        Assert.True(viewModel.IsLiveCapture);
+        Assert.True(viewModel.IsUpcomingLiveCapture);
+        viewModel.SelectedVideoProcessing = viewModel.VideoProcessingOptions.First(option =>
+            option.Value.Kind == OutputProfileKind.H264AacMp4);
+        Assert.Equal(OutputProfile.Native, viewModel.SelectedVideoProcessing.Value);
+        viewModel.SelectedDownloadPreset = viewModel.DownloadPresets.First(option =>
+            option.Value == DownloadPresetKind.WindowsCompatibleMp4);
+        Assert.Equal(DownloadPresetKind.BestOriginal, viewModel.SelectedDownloadPreset.Value);
+
+        var selected = InvokeLiveCapture(viewModel, viewModel.SelectedFormat!, OutputProfile.Native);
+        Assert.True(selected.Success, selected.Error?.Message);
+        Assert.Equal(TimeSpan.FromMinutes(60), selected.Options?.MaximumDuration);
+        Assert.Equal(4L * 1024 * 1024 * 1024, selected.Options?.MaximumBytes);
+        Assert.Equal(TimeSpan.FromMinutes(360), selected.Options?.MaximumWaitForStart);
+
+        viewModel.LiveMaximumWaitMinutesText = "0";
+        var invalid = InvokeLiveCapture(viewModel, viewModel.SelectedFormat!, OutputProfile.Native);
+        Assert.False(invalid.Success);
+        Assert.Equal("Hls.InvalidLimits", invalid.Error?.Code);
+    }
+
     private static void ExerciseAudioOnly(MainViewModel viewModel, ref int terminalCombinations)
     {
         foreach (var bitrate in viewModel.BitrateOptions.ToArray())
@@ -458,6 +492,24 @@ public static class MainViewModelSelectionTests
             success,
             (MediaTrimRange?)arguments[0],
             (TubeForge.Core.Errors.TubeForgeError?)arguments[1]);
+    }
+
+    private static (bool Success, LiveCaptureOptions? Options, TubeForge.Core.Errors.TubeForgeError? Error)
+        InvokeLiveCapture(
+            MainViewModel viewModel,
+            FormatItemViewModel selection,
+            OutputProfile output)
+    {
+        var method = typeof(MainViewModel).GetMethod(
+            "TryGetLiveCaptureOptions",
+            BindingFlags.Instance | BindingFlags.NonPublic)
+            ?? throw new MissingMethodException(typeof(MainViewModel).FullName, "TryGetLiveCaptureOptions");
+        object?[] arguments = [selection, output, null, false, false, null, null];
+        var success = (bool)method.Invoke(viewModel, arguments)!;
+        return (
+            success,
+            (LiveCaptureOptions?)arguments[5],
+            (TubeForge.Core.Errors.TubeForgeError?)arguments[6]);
     }
 
     private static (

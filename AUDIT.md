@@ -30,13 +30,13 @@ Result: passed, 0 warnings, 0 errors.
 dotnet run --project tests\TubeForge.Tests --configuration Release --no-build -- --all
 ```
 
-Result after trim/SponsorBlock implementation: 217/217 passed in 24496 ms.
+Result after public HLS/live implementation: 225/225 passed in 26183 ms.
 
 ```powershell
 dotnet run --project tools\TubeForge.Performance --configuration Release --no-build -- --core-only
 ```
 
-Result after trim/SponsorBlock implementation: passed. Core parser p95 0.2693 ms against 25 ms budget.
+Result after public HLS/live implementation: passed. Core parser p95 0.4065 ms against 25 ms budget.
 
 Not verified in this audit: live YouTube canary downloads, installer publication, installer execution, desktop visual/performance probe, update flow against a real GitHub release, code signing, VirusTotal/SmartScreen reputation, store/winget distribution, long-run queue soak, or accessibility with Narrator/NVDA.
 
@@ -71,10 +71,10 @@ Popular tools define user expectations beyond "download a public YouTube video":
 | Presets/device profiles | Best original, Windows MP4, Small file, MP3 320, Custom, plus exact processing choices present in the current v2 branch | Common in mainstream apps | Medium, saved defaults and broader device presets remain |
 | Playlists/channels | Present with bounded selection | Required | Medium, needs monitoring/sync |
 | Auto-download new playlist/channel items | Not present | Present in 4K/MediaHuman/Tartube-like workflows | High |
-| Private/account videos | Explicitly unsupported | Many mainstream tools support authenticated accessible content | Strategic gap |
-| Cookies/browser login import | Not present | Common for yt-dlp/Stacher/YTSage power users | Strategic gap with privacy/security tradeoff |
-| Active live capture | Explicitly unsupported | Present in VideoProc/yt-dlp-style workflows | High |
-| M3U8/HLS | Not present | Common in broader downloaders | High |
+| Private/account videos | Explicitly unsupported by recorded v2.0 public-only policy, with a stable typed failure | Many mainstream tools support authenticated accessible content | Deliberate strategic gap |
+| Cookies/browser login import | Intentionally absent from v2.0; no credential material is collected or stored | Common for yt-dlp/Stacher/YTSage power users | Deferred due privacy/security tradeoff |
+| Active live capture | Public record-now plus bounded upcoming wait mode on current v2 branch | Present in VideoProc/yt-dlp-style workflows | Medium, authorized live canary and soak remain |
+| M3U8/HLS | Trusted YouTube/googlevideo, unencrypted HLS with recoverable journal and MKV finalization on current v2 branch | Common in broader downloaders | Medium, generic/encrypted streams intentionally unsupported |
 | Multi-site support | YouTube-only | Major competitors support hundreds/thousands of sites | Strategic gap |
 | SponsorBlock | Disabled-by-default category selection with chapter markers or transcode removal on current v2 branch | Common in yt-dlp GUIs | Medium, needs installed-app/live third-party proof |
 | Trim/cut/split | Bounded start/end trim plus chapter split on current v2 branch; copy cuts are keyframe-aligned and selected transcodes are precise | Common in SnapDownloader/VideoProc, chapter split in MediaHuman | Low, needs installed-app proof |
@@ -119,34 +119,35 @@ Recommendation:
 
 ### P1: Authenticated/Private Content Strategy Missing
 
-TubeForge explicitly rejects private, membership, paid, DRM, and access-control content. Competitors often support private media that the user can access after login or cookie import.
+TubeForge explicitly rejects private, membership, paid, DRM, and access-control content. Competitors often support private media that the user can access after login or cookie import. The v2.0 decision is Option A: remain public-only and collect no authentication material.
 
 Wrong/optimizable:
 
 - Current product cannot download user's own private YouTube videos/playlists.
-- No account login, browser-cookie import, OAuth, or consent-isolated credential store exists.
-- Support policy treats all authenticated use as out of scope; that is safer, but not parity with premium tools.
+- No account login, browser-cookie import, OAuth, or credential store exists by design for v2.0.
+- Login-required responses map to a stable `Video.AuthenticationUnsupported` failure without echoing provider details.
+- The public-only policy is safer, but not parity with premium tools.
 
 Security constraints:
 
 - Do not add broad credential persistence casually.
 - Do not support DRM/payment/membership bypass.
-- If added, support only user-authenticated, non-DRM, directly accessible content, with explicit consent, local encrypted credential storage, diagnostics redaction, and one-click deletion.
+- Reconsider authenticated support only in a later design milestone with explicit approval, a credential-lifecycle threat model, local encrypted storage, diagnostics redaction, and one-click deletion.
 
 ### P1: Live, M3U8, And Upcoming Stream Capture Missing
 
-TubeForge supports completed live replays that expose normal downloadable streams, but rejects active/upcoming live capture. Competitors and yt-dlp workflows often handle live streams, waiting for streams, and M3U8/HLS.
+TubeForge supports completed live replays and the current v2 branch adds public active/upcoming HLS capture. Active streams record from now; upcoming streams can wait locally for a bounded time. Capture stops at the configured duration or size, journals segments for restart, and finalizes to validated MKV stream copy.
 
 Wrong/optimizable:
 
-- No live-from-start/wait-for-video workflow.
-- No HLS/M3U8 parser/downloader/finalizer.
-- No release gate for long-running live/resume behavior.
+- Public-live behavior still needs an authorized upstream canary and long-run soak before release.
+- Only trusted YouTube/googlevideo public HLS is supported; generic M3U8, authenticated streams, encryption, and DRM remain intentionally unsupported.
+- HLS variants with separate alternate audio renditions need explicit canary coverage before broader compatibility is claimed.
 
 Recommendation:
 
-- Add live/M3U8 as an explicit v2 feature only if legal and safety posture remains clear.
-- Start with public HLS capture, no DRM, no login, time/size limits, resumable segment journal, and MKV/MP4 finalization.
+- Keep the implementation aligned with [RFC 8216](https://www.rfc-editor.org/info/rfc8216/) parsing bounds while rejecting every encryption method except `NONE`.
+- Run an authorized public active and upcoming canary, interrupt/restart it, and verify MKV playback/decode before v2 release.
 
 ### P1: Video Re-Encoding Implemented; Release-Grade Live Proof Missing
 

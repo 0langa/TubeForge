@@ -94,6 +94,11 @@ public sealed class YouTubeMetadataResolver
                 return watchResult;
             }
 
+            if (watchResult.Value.Metadata.Formats.Any(format => format.IsLiveHls))
+            {
+                return watchResult;
+            }
+
             var clientResult = await TryResolveWithDirectClientsAsync(
                 html,
                 watchResult.Value,

@@ -34,7 +34,7 @@ Working now:
 - unified system/manual/off proxy settings for metadata, collections, captions, thumbnails, media, and updates, with bounded metadata timeout, media retries, and per-host concurrency; proxy credentials are rejected and never stored;
 - customizable token-based filenames plus a durable local Library used for exact-output and destination duplicate detection;
 - searchable/sortable Library history with one-click cleanup for records whose files were moved or deleted;
-- Short and completed-live-replay classification, sidecar metadata, and normal highest-quality adaptive downloads; active/upcoming capture is explicitly unsupported;
+- Short and completed-live-replay classification, plus bounded public active/upcoming HLS capture with record-now/wait modes, duration/size limits, recoverable segment journals, and validated MKV stream-copy finalization in the current development branch;
 - resumable `.part` transfers, bounded container validation, retries, progress, cancellation, and atomic finalization;
 - opt-in segmented transfer for large files with validated parallel ranges, resumable segment state, and automatic direct-transfer fallback;
 - preflight disk-space forecasting with adaptive-mux peak-space accounting and retryable low-space failures;
@@ -48,7 +48,7 @@ Working now:
 - reproducible portable framework-dependent and self-contained Windows x64 packaging with SHA-256 manifests.
 - branded per-user installer, Add/Remove Programs integration, clean uninstall, and opt-in verified updates from the official GitHub release.
 
-Not included: active/upcoming live capture or authenticated/access-controlled media.
+Not included: authenticated/access-controlled media, encrypted/DRM HLS, or generic non-YouTube M3U8 capture.
 
 ## Baseline
 
@@ -110,6 +110,12 @@ Verify bundled-FFmpeg trim and SponsorBlock segment removal using synthetic loca
 
 ```powershell
 .\scripts\Test-TimelineEditing.ps1 -Configuration Release
+```
+
+Verify synthetic HLS segmentation, concatenation, MKV finalization, and decode using bundled FFmpeg:
+
+```powershell
+.\scripts\Test-HlsCapture.ps1 -Configuration Release
 ```
 
 Run the desktop application:

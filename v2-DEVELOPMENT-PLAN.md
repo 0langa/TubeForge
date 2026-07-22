@@ -9,7 +9,7 @@ Status date: 2026-07-22.
 - Phase 0 complete. Sanitized baseline evidence: [`docs/V2_BASELINE_EVIDENCE.md`](docs/V2_BASELINE_EVIDENCE.md).
 - Phase 1 core implementation complete in working tree: expanded audio outputs plus resolution-aware H.264/AAC MP4, H.265/AAC MP4, and VP9/Opus WebM profiles.
 - General output profiles persist through queue restart, validate before publication/recovery, clean failed temporary files, and use allowlisted FFmpeg arguments from the pinned LGPL build.
-- Verification: Release build 0 warnings/errors; 217/217 deterministic tests; core parser p95 0.2693 ms against 25 ms; bundled FFmpeg encode/decode smoke passed for all four new audio outputs, all three video profiles, MP4/MKV/WebM soft-subtitle/chapter embed/split workflows, trim, and SponsorBlock removal.
+- Verification: Release build 0 warnings/errors; 225/225 deterministic tests; core parser p95 0.4065 ms against 25 ms; bundled FFmpeg encode/decode smoke passed for all four new audio outputs, all three video profiles, MP4/MKV/WebM soft-subtitle/chapter embed/split workflows, trim, SponsorBlock removal, and synthetic HLS-to-MKV capture.
 - Phase 1 release proof remains open: installed-app live media matrix and measured quality/time/file-size evidence. Broader custom/device presets remain deferred to UX work.
 - Preset-first UX is implemented for Best original, Windows MP4, Small file, MP3 320, and Custom; deterministic tests cover applied state and manual override behavior.
 - Phase 2 subtitle slice implemented: selected manual/auto track can be embedded as a soft subtitle in a single-video MP4, MKV, or WebM download. Queue identity persists language/type without storing caption URLs; FFmpeg validates a subtitle stream before publication or recovery.
@@ -17,6 +17,8 @@ Status date: 2026-07-22.
 - Phase 2 timeline editing implemented: bounded start/end trim persists through queue restart, uses keyframe-aligned stream copy for original outputs, applies precise trim during a selected transcode, and rebases embedded captions and chapters.
 - Phase 2 SponsorBlock integration implemented as a disabled-by-default third-party opt-in. A four-character SHA-256 video-ID prefix is sent to the official API, candidates are matched locally, selected categories can become chapter markers or be removed during an explicit audio/video transcode, and neither IDs nor response payloads enter diagnostics or queue state.
 - Phase 5 implemented: Settings exposes system/manual/off proxy policy, bounded metadata timeout/media retry/per-host concurrency controls, and applies one credential-free proxy object to metadata, collections, captions, thumbnails, media, and updates. Schema migration is safe, diagnostics emit mode only, and loopback tests prove metadata and media proxy paths.
+- Phase 3 decision complete: v2.0 follows Option A and remains public-only. Cookie import and OAuth are deferred; login-required, private, membership, paid, and other access-controlled media fail with a stable typed error and no credential collection.
+- Phase 4 public-live implementation complete in the working tree: active record-from-now and upcoming wait modes use bounded unencrypted HLS, duration/size/wait limits, trusted-host redirect checks, retrying segment downloads, recoverable hash-only journals, queue pause/resume, and atomic MKV stream-copy finalization. A real authorized public-live canary remains a release gate.
 
 ## v2 Product Definition
 
@@ -166,16 +168,17 @@ Exit gate:
 
 Goal: support private/unlisted/user-accessible content only if security posture remains strong.
 
-Decision required before implementation:
+Decision recorded for v2.0:
 
-- Option A: keep all authenticated content unsupported for v2.0.
+- [x] Option A: keep all authenticated content unsupported for v2.0.
 - Option B: add local cookie import for user-owned/access-granted non-DRM content.
 - Option C: add OAuth/browser login. This is highest risk and should not be first v2 path.
 
-Recommended v2 path:
+Current v2 policy:
 
-- Add cookie import only if needed, with explicit consent, local encrypted storage, no cloud sync, no diagnostics leakage, and one-click deletion.
-- Continue rejecting DRM, paid, membership, purchase, and inaccessible private media.
+- [x] Do not collect, import, store, or transmit account credentials or cookies.
+- [x] Reject login-required, private, membership, paid, purchase, DRM, and other access-controlled media with a stable typed error.
+- [x] Keep authentication disabled by default and absent from settings, queue state, Library, diagnostics, and logs.
 
 Tasks if Option B chosen:
 
@@ -187,8 +190,8 @@ Tasks if Option B chosen:
 
 Exit gate:
 
-- Private own-video smoke passes without leaking cookies or signed URLs.
-- Auth disabled path remains default and clean.
+- [x] Option A requires no credential-bearing live smoke; a deterministic login-required fixture proves the public-only typed failure.
+- [x] Auth-disabled path remains the only path and stores no credential material.
 
 ## Phase 4: Live, HLS/M3U8, And Long-Running Downloads
 
@@ -196,23 +199,24 @@ Goal: support common public live/HLS workflows without pretending DRM capture is
 
 Tasks:
 
-- Add HLS playlist parser with bounds on playlist size, segment count, redirect count, and segment bytes.
-- Add live capture modes: record from now, wait for upcoming stream, stop after duration/size.
-- Persist segment journal for resume and recovery.
-- Finalize to MKV or MP4 through FFmpeg.
-- Add queue item state for long-running live captures.
-- Add clear unsupported errors for DRM/encrypted HLS, login-required, missing segments, and expired manifests.
+- [x] Add HLS playlist parser with bounds on playlist size, segment count, redirect count, and segment bytes.
+- [x] Add live capture modes: record from now, wait for upcoming stream, stop after duration/size.
+- [x] Persist segment journal for resume and recovery without manifest or segment URLs.
+- [x] Finalize to validated MKV through bundled FFmpeg stream copy.
+- [x] Add recoverable queue state for long-running live captures.
+- [x] Add clear unsupported errors for DRM/encrypted HLS, login-required, missing segments, and expired manifests.
 
 Tests:
 
-- Synthetic HLS fixtures, discontinuities, retries, duplicate segments, malformed playlists, oversized playlists.
-- Cancellation and restart.
-- Disk forecast for unknown final size.
-- Live capture smoke using public authorized source before release.
+- [x] Synthetic HLS fixtures, discontinuities, retries, duplicate segments, malformed playlists, oversized playlists.
+- [x] Cancellation and restart.
+- [x] Disk forecast uses the configured maximum size for unknown final output.
+- [ ] Live capture smoke using a public authorized source before release.
 
 Exit gate:
 
-- Live feature survives network interruption and cancellation without corrupt output.
+- [x] Deterministic interruption/cancellation tests preserve a validated resumable journal and publish no corrupt output.
+- [ ] Authorized public-live canary proves upstream behavior before release.
 
 ## Phase 5: Proxy And Network Controls
 
