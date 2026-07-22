@@ -87,6 +87,37 @@ public static class MainViewModelSelectionTests
         Assert.Equal("192kbps mp3", result.Value);
     }
 
+    [Test]
+    public static void ConvertedAudioFilenamesUseSelectedProfileExtensionAndQuality()
+    {
+        using var viewModel = new MainViewModel
+        {
+            FileNameTemplateText = "{quality} {container}"
+        };
+        Assert.True(YouTubeVideoId.TryCreate("Fixture123_", out var videoId));
+        var metadata = new VideoMetadata { Id = videoId, Title = "Fixture", Formats = [] };
+        var source = new FormatItemViewModel(Audio(140, MediaContainer.WebM, AudioCodec.Opus, 143_000, 48_000));
+        var render = typeof(MainViewModel).GetMethod(
+            "RenderFileName",
+            BindingFlags.Instance | BindingFlags.NonPublic)
+            ?? throw new MissingMethodException(typeof(MainViewModel).FullName, "RenderFileName");
+
+        foreach (var testCase in new[]
+                 {
+                     (AudioOutputProfile.Aac(256), "256kbps m4a"),
+                     (AudioOutputProfile.Opus(160), "160kbps ogg"),
+                     (AudioOutputProfile.Wav, "lossless wav"),
+                     (AudioOutputProfile.Flac, "lossless flac")
+                 })
+        {
+            var result = (Result<string>)render.Invoke(
+                viewModel,
+                [metadata, source, null, 2, testCase.Item1])!;
+            Assert.True(result.IsSuccess);
+            Assert.Equal(testCase.Item2, result.Value);
+        }
+    }
+
     private static void ExerciseAudioOnly(MainViewModel viewModel, ref int terminalCombinations)
     {
         foreach (var bitrate in viewModel.BitrateOptions.ToArray())

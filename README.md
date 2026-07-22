@@ -11,6 +11,8 @@ TubeForge is an experimental, ad-free Windows desktop downloader built from scra
 
 TubeForge v1.2.5 is the current public stable release.
 
+Current `main` also contains unreleased v2 work. Public v1.2.5 behavior remains documented in release notes and v1 support policy.
+
 Working now:
 
 - modern WPF analyze/download screen;
@@ -19,7 +21,7 @@ Working now:
 - type-first stream selection with resolution, container, codec, FPS/HDR, bitrate, and exact-stream filters;
 - highest-quality video + audio selection with separate resumable track downloads and FFmpeg stream-copy MP4, WebM, or MKV finalization;
 - automatic validated multi-worker transfers for large media, with bounded resume state and safe sequential fallback;
-- native M4A/WebM audio saves plus bundled-FFmpeg MP3 conversion at 128, 192, 256, or 320 kbps;
+- native M4A/WebM audio saves plus bundled-FFmpeg MP3, AAC/M4A, Opus/OGG, WAV, and FLAC conversion in current `main`;
 - caption-track metadata plus manual/auto language selection and atomic SRT/WebVTT sidecar saves;
 - on-demand validated thumbnail saves and stable JSON metadata sidecars with chapters but without signed stream URLs;
 - bounded playlist/channel enumeration with per-video selection, source ordering, indexed filenames, and batch queue preparation;

@@ -7,43 +7,54 @@ namespace TubeForge.Tests.Transcoding;
 public static class FfmpegAudioTranscoderTests
 {
     [Test]
-    public static async Task ConvertsAacAndOpusInputsAtEveryMp3Profile()
+    public static async Task BuildsSafeArgumentsAndValidatesEveryAudioOutputProfile()
     {
         foreach (var extension in new[] { ".m4a", ".webm" })
         {
-            foreach (var bitrate in new[] { 128, 192, 256, 320 })
+            foreach (var testCase in OutputCases())
             {
                 var directory = CreateTemporaryDirectory();
                 try
                 {
                     var executable = Path.Combine(directory, "ffmpeg.exe");
                     var source = Path.Combine(directory, "source" + extension);
-                    var destination = Path.Combine(directory, $"output-{bitrate}.mp3");
+                    var destination = Path.Combine(directory, "output" + testCase.Output.Extension);
                     await File.WriteAllBytesAsync(executable, []);
                     await File.WriteAllBytesAsync(source, [0x01, 0x02, 0x03]);
-                    var runner = new ValidMp3ProcessRunner();
+                    var runner = new ValidAudioProcessRunner();
 
                     var result = await new FfmpegAudioTranscoder(executable, runner).TranscodeAsync(
                         new AudioTranscodeRequest
                         {
                             SourcePath = source,
                             DestinationPath = destination,
-                            Output = AudioOutputProfile.Mp3(bitrate)
+                            Output = testCase.Output
                         });
 
                     Assert.True(result.IsSuccess, result.Error?.Message);
-                    Assert.Equal(bitrate, result.Value.BitrateKbps);
+                    Assert.Equal(testCase.Output.BitrateKbps, result.Value.BitrateKbps);
                     Assert.True(result.Value.BytesWritten > 0);
-                    Assert.True(Mp3FileValidator.Validate(destination).IsSuccess);
+                    Assert.True(AudioTranscodeFileValidator.Validate(destination, testCase.Output.Kind).IsSuccess);
                     Assert.True(ContainsAdjacent(runner.Arguments, "-i", source));
                     Assert.True(ContainsAdjacent(runner.Arguments, "-map", "0:a:0"));
-                    Assert.True(ContainsAdjacent(runner.Arguments, "-c:a", "libmp3lame"));
-                    Assert.True(ContainsAdjacent(runner.Arguments, "-b:a", $"{bitrate}k"));
-                    Assert.True(ContainsAdjacent(runner.Arguments, "-f", "mp3"));
+                    Assert.True(ContainsAdjacent(runner.Arguments, "-c:a", testCase.Codec));
+                    Assert.True(ContainsAdjacent(runner.Arguments, "-f", testCase.Format));
+                    if (testCase.Output.BitrateKbps > 0)
+                    {
+                        Assert.True(ContainsAdjacent(
+                            runner.Arguments,
+                            "-b:a",
+                            $"{testCase.Output.BitrateKbps}k"));
+                    }
+                    else
+                    {
+                        Assert.False(runner.Arguments.Contains("-b:a"));
+                    }
+
                     Assert.True(runner.Arguments.Contains("-vn"));
                     Assert.True(runner.Arguments.Contains("-nostdin"));
                     Assert.True(runner.Arguments.Contains("-xerror"));
-                    Assert.Equal(0, Directory.GetFiles(directory, "*.transcoding.mp3").Length);
+                    Assert.Equal(0, Directory.GetFiles(directory, "*.transcoding.*").Length);
                 }
                 finally
                 {
@@ -69,7 +80,7 @@ public static class FfmpegAudioTranscoderTests
 
             var result = await new FfmpegAudioTranscoder(
                 executable,
-                new ValidMp3ProcessRunner()).TranscodeAsync(new AudioTranscodeRequest
+                new ValidAudioProcessRunner()).TranscodeAsync(new AudioTranscodeRequest
                 {
                     SourcePath = source,
                     DestinationPath = destination,
@@ -130,7 +141,7 @@ public static class FfmpegAudioTranscoderTests
             var destination = Path.Combine(directory, "output.mp3");
             await File.WriteAllBytesAsync(executable, []);
             await File.WriteAllBytesAsync(source, [0x01]);
-            var runner = new ValidMp3ProcessRunner();
+            var runner = new ValidAudioProcessRunner();
             var transcoder = new FfmpegAudioTranscoder(executable, runner);
             var request = new AudioTranscodeRequest
             {
@@ -169,7 +180,7 @@ public static class FfmpegAudioTranscoderTests
 
             var result = await new FfmpegAudioTranscoder(
                 Path.Combine(directory, "missing-ffmpeg.exe"),
-                new ValidMp3ProcessRunner()).TranscodeAsync(new AudioTranscodeRequest
+                new ValidAudioProcessRunner()).TranscodeAsync(new AudioTranscodeRequest
                 {
                     SourcePath = source,
                     DestinationPath = destination,
@@ -226,13 +237,22 @@ public static class FfmpegAudioTranscoderTests
         return false;
     }
 
-    private sealed class ValidMp3ProcessRunner : IFfmpegAudioProcessRunner
-    {
-        private static readonly byte[] ValidMp3 = [
-            0xff, 0xfb, 0x90, 0x64, 0x00, 0x00, 0x00, 0x00,
-            0xff, 0xfb, 0x90, 0x64, 0x00, 0x00, 0x00, 0x00
-        ];
+    private static IReadOnlyList<OutputCase> OutputCases() =>
+    [
+        new(AudioOutputProfile.Mp3(128), "libmp3lame", "mp3"),
+        new(AudioOutputProfile.Mp3(192), "libmp3lame", "mp3"),
+        new(AudioOutputProfile.Mp3(256), "libmp3lame", "mp3"),
+        new(AudioOutputProfile.Mp3(320), "libmp3lame", "mp3"),
+        new(AudioOutputProfile.Aac(256), "aac", "mp4"),
+        new(AudioOutputProfile.Opus(160), "libopus", "ogg"),
+        new(AudioOutputProfile.Wav, "pcm_s16le", "wav"),
+        new(AudioOutputProfile.Flac, "flac", "flac")
+    ];
 
+    private sealed record OutputCase(AudioOutputProfile Output, string Codec, string Format);
+
+    private sealed class ValidAudioProcessRunner : IFfmpegAudioProcessRunner
+    {
         public IReadOnlyList<string> Arguments { get; private set; } = [];
 
         public int CallCount { get; private set; }
@@ -245,9 +265,22 @@ public static class FfmpegAudioTranscoderTests
         {
             Arguments = arguments.ToArray();
             CallCount++;
-            await File.WriteAllBytesAsync(arguments[^1], ValidMp3, cancellationToken);
+            await File.WriteAllBytesAsync(arguments[^1], ValidBytes(arguments[^1]), cancellationToken);
             return 0;
         }
+
+        private static byte[] ValidBytes(string path) => Path.GetExtension(path).ToLowerInvariant() switch
+        {
+            ".mp3" => [
+                0xff, 0xfb, 0x90, 0x64, 0x00, 0x00, 0x00, 0x00,
+                0xff, 0xfb, 0x90, 0x64, 0x00, 0x00, 0x00, 0x00
+            ],
+            ".m4a" => [0x00, 0x00, 0x00, 0x18, (byte)'f', (byte)'t', (byte)'y', (byte)'p', (byte)'M', (byte)'4', (byte)'A', (byte)' '],
+            ".ogg" => [(byte)'O', (byte)'g', (byte)'g', (byte)'S'],
+            ".wav" => [(byte)'R', (byte)'I', (byte)'F', (byte)'F', 0, 0, 0, 0, (byte)'W', (byte)'A', (byte)'V', (byte)'E'],
+            ".flac" => [(byte)'f', (byte)'L', (byte)'a', (byte)'C'],
+            _ => throw new InvalidOperationException("Unexpected test output extension.")
+        };
     }
 
     private sealed class InvalidOutputProcessRunner : IFfmpegAudioProcessRunner

@@ -1,5 +1,6 @@
 using TubeForge.Downloads.Queue;
 using TubeForge.Tests.Framework;
+using TubeForge.Core.Media;
 using System.Text.Json;
 
 namespace TubeForge.Tests.Downloads;
@@ -152,24 +153,42 @@ public static class DownloadQueueStoreTests
     }
 
     [Test]
-    public static async Task PersistsMp3OutputProfileAcrossRestart()
+    public static async Task PersistsEveryConvertedAudioOutputProfileAcrossRestart()
     {
         using var directory = new TestDirectory();
         var path = Path.Combine(directory.Path, "queue.json");
         var store = new DownloadQueueStore(path);
-        var item = Item(Guid.NewGuid(), DownloadQueueStatus.Queued, DateTimeOffset.UtcNow) with
+        var profiles = new[]
         {
-            FormatId = 140,
-            SourceIdentity = "Fixture123_:140@mp3-320",
-            DestinationPath = Path.Combine(Path.GetTempPath(), "TubeForge.Tests", "fixture.mp3")
+            AudioOutputProfile.Mp3(320),
+            AudioOutputProfile.Aac(256),
+            AudioOutputProfile.Opus(160),
+            AudioOutputProfile.Wav,
+            AudioOutputProfile.Flac
         };
+        var items = profiles.Select(profile => Item(
+                Guid.NewGuid(),
+                DownloadQueueStatus.Queued,
+                DateTimeOffset.UtcNow) with
+            {
+                FormatId = 140,
+                SourceIdentity = $"Fixture123_:140@{profile.Identity}",
+                DestinationPath = Path.Combine(
+                    Path.GetTempPath(),
+                    "TubeForge.Tests",
+                    "fixture-" + profile.Identity + profile.Extension)
+            }).ToArray();
 
-        var save = await store.SaveAsync(new DownloadQueueSnapshot { Items = [item] });
+        var save = await store.SaveAsync(new DownloadQueueSnapshot { Items = items });
         Assert.True(save.IsSuccess, save.Error?.Message);
 
         var load = await new DownloadQueueStore(path).LoadAsync();
         Assert.True(load.IsSuccess, load.Error?.Message);
-        Assert.Equal("Fixture123_:140@mp3-320", load.Value.Items[0].SourceIdentity);
+        Assert.Equal(profiles.Length, load.Value.Items.Count);
+        for (var index = 0; index < profiles.Length; index++)
+        {
+            Assert.Equal($"Fixture123_:140@{profiles[index].Identity}", load.Value.Items[index].SourceIdentity);
+        }
     }
 
     [Test]

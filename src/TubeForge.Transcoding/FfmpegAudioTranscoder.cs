@@ -59,7 +59,7 @@ public sealed class FfmpegAudioTranscoder
 
             if (File.Exists(destination))
             {
-                var recovered = Mp3FileValidator.Validate(destination);
+                var recovered = AudioTranscodeFileValidator.Validate(destination, request.Output.Kind);
                 if (!request.AllowExistingValidatedOutput || !recovered.IsSuccess)
                 {
                     return Result<AudioTranscodeReceipt>.Failure(
@@ -73,7 +73,7 @@ public sealed class FfmpegAudioTranscoder
 
             var directory = Path.GetDirectoryName(destination)!;
             Directory.CreateDirectory(directory);
-            temporary = destination + "." + Guid.NewGuid().ToString("N") + ".transcoding.mp3";
+            temporary = destination + "." + Guid.NewGuid().ToString("N") + ".transcoding" + request.Output.Extension;
             var arguments = new List<string>
             {
                 "-hide_banner",
@@ -85,17 +85,10 @@ public sealed class FfmpegAudioTranscoder
                 source,
                 "-map",
                 "0:a:0",
-                "-vn",
-                "-c:a",
-                "libmp3lame",
-                "-b:a",
-                $"{request.Output.BitrateKbps}k",
-                "-map_metadata",
-                "-1",
-                "-f",
-                "mp3",
-                temporary
+                "-vn"
             };
+            AppendEncoderArguments(arguments, request.Output);
+            arguments.AddRange(["-map_metadata", "-1", temporary]);
 
             var exitCode = await _processRunner.RunAsync(
                     _executablePath,
@@ -107,11 +100,11 @@ public sealed class FfmpegAudioTranscoder
             {
                 return Failure(
                     "Media.FFmpegAudioFailed",
-                    "FFmpeg could not convert this audio stream to MP3.",
+                    $"FFmpeg could not convert this audio stream to {request.Output.DisplayName}.",
                     $"FFmpeg exited with code {exitCode}.");
             }
 
-            var outputValidation = Mp3FileValidator.Validate(temporary);
+            var outputValidation = AudioTranscodeFileValidator.Validate(temporary, request.Output.Kind);
             if (!outputValidation.IsSuccess)
             {
                 return Result<AudioTranscodeReceipt>.Failure(outputValidation.Error!);
@@ -158,9 +151,9 @@ public sealed class FfmpegAudioTranscoder
 
     private static TubeForgeError? ValidateRequest(AudioTranscodeRequest request)
     {
-        if (!request.Output.IsValid || request.Output.Kind != AudioOutputKind.Mp3)
+        if (!request.Output.IsValid || !request.Output.RequiresTranscode)
         {
-            return new TubeForgeError("Media.InvalidTranscodeProfile", "Select a supported MP3 output profile.");
+            return new TubeForgeError("Media.InvalidTranscodeProfile", "Select a supported converted audio output profile.");
         }
 
         if (string.IsNullOrWhiteSpace(request.SourcePath) ||
@@ -175,7 +168,7 @@ public sealed class FfmpegAudioTranscoder
             var destination = Path.GetFullPath(request.DestinationPath);
             if (!File.Exists(source) ||
                 source.Equals(destination, StringComparison.OrdinalIgnoreCase) ||
-                !string.Equals(Path.GetExtension(destination), ".mp3", StringComparison.OrdinalIgnoreCase) ||
+                !string.Equals(Path.GetExtension(destination), request.Output.Extension, StringComparison.OrdinalIgnoreCase) ||
                 string.IsNullOrWhiteSpace(Path.GetDirectoryName(destination)))
             {
                 return new TubeForgeError("Media.InvalidTranscodePath", "Select valid source and destination paths.");
@@ -191,6 +184,32 @@ public sealed class FfmpegAudioTranscoder
         }
 
         return null;
+    }
+
+    private static void AppendEncoderArguments(List<string> arguments, AudioOutputProfile output)
+    {
+        switch (output.Kind)
+        {
+            case AudioOutputKind.Mp3:
+                arguments.AddRange(["-c:a", "libmp3lame", "-b:a", $"{output.BitrateKbps}k", "-f", "mp3"]);
+                break;
+            case AudioOutputKind.Aac:
+                arguments.AddRange([
+                    "-c:a", "aac", "-b:a", $"{output.BitrateKbps}k", "-movflags", "+faststart", "-f", "mp4"
+                ]);
+                break;
+            case AudioOutputKind.Opus:
+                arguments.AddRange(["-c:a", "libopus", "-b:a", $"{output.BitrateKbps}k", "-f", "ogg"]);
+                break;
+            case AudioOutputKind.Wav:
+                arguments.AddRange(["-c:a", "pcm_s16le", "-f", "wav"]);
+                break;
+            case AudioOutputKind.Flac:
+                arguments.AddRange(["-c:a", "flac", "-compression_level", "8", "-f", "flac"]);
+                break;
+            default:
+                throw new InvalidOperationException("Unsupported audio output profile.");
+        }
     }
 
     private static Result<AudioTranscodeReceipt> Success(string path, int bitrateKbps) =>
