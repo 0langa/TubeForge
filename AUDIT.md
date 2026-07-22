@@ -2,7 +2,7 @@
 
 Audit date: 2026-07-22.
 
-Scope: current repository state on `main`, deterministic local build/test/performance gates, release docs, WPF UI surface, downloader/extractor/media/update/installer code shape, and current public feature surface of popular YouTube downloaders.
+Scope: v1.2.5 `main` baseline plus the current v2 implementation branch, deterministic local build/test/performance gates, release docs, WPF UI surface, downloader/extractor/media/update/installer code shape, and current public feature surface of popular YouTube downloaders.
 
 ## Current State
 
@@ -15,6 +15,7 @@ TubeForge is no longer a thin prototype. Current `main` builds cleanly and alrea
 - MP4, WebM, MKV finalization through pinned bundled FFmpeg stream copy.
 - MP3, AAC/M4A, Opus/OGG, WAV, and FLAC audio conversion through bundled FFmpeg, with fail-closed output validation and queue recovery.
 - Optional resolution-aware H.264/AAC MP4, H.265/AAC MP4, and VP9/Opus WebM conversion presets, with native stream copy remaining default.
+- Preset-first setup for Best original, Windows MP4, Small file, MP3 320, and fully custom selection.
 - Captions, thumbnails, JSON sidecars, chapters in metadata, filename templates, duplicate detection, resumable `.part` files, segmented transfer, disk forecasting, queue recovery, installer, release scripts, optional Authenticode signing, GitHub release update checks, and redacted diagnostics.
 
 Verified during this audit:
@@ -29,13 +30,13 @@ Result: passed, 0 warnings, 0 errors.
 dotnet run --project tests\TubeForge.Tests --configuration Release --no-build -- --all
 ```
 
-Result after Phase 1 profile/transcode implementation: 186/186 passed in 31234 ms.
+Result after preset-first UX implementation: 187/187 passed in 19068 ms.
 
 ```powershell
 dotnet run --project tools\TubeForge.Performance --configuration Release --no-build -- --core-only
 ```
 
-Result after Phase 1 profile/transcode implementation: passed. Core parser p95 0.1225 ms against 25 ms budget.
+Result after preset-first UX implementation: passed. Core parser p95 0.1128 ms against 25 ms budget.
 
 Not verified in this audit: live YouTube canary downloads, installer publication, installer execution, desktop visual/performance probe, update flow against a real GitHub release, code signing, VirusTotal/SmartScreen reputation, store/winget distribution, long-run queue soak, or accessibility with Narrator/NVDA.
 
@@ -46,7 +47,7 @@ Popular tools define user expectations beyond "download a public YouTube video":
 | Product | Current public positioning | Relevance for TubeForge |
 |---|---|---|
 | yt-dlp | Open-source CLI, thousands of supported sites, subtitles, playlists, format selection, metadata, post-processing, SponsorBlock/options, cookies, proxies, plugins. Source: [yt-dlp GitHub](https://github.com/yt-dlp/yt-dlp). | Functionality ceiling. TubeForge is safer and simpler for Windows users, but far narrower. |
-| 4K Video Downloader Plus | Cross-platform app for YouTube and other sites; claims playlists, channels, Shorts, subtitles, private accessible playlists, up to 8K, MP4/MKV/M4A/MP3/OGG, Smart Mode, update-like playlist behavior. Sources: [product page](https://www.4kdownload.com/products/videodownloader-42), [playlist page](https://playlist.4kdownload.com/), [private playlist guide](https://www.4kdownload.com/howto/howto-download-private-youtube-playlists/3). | Closest mainstream GUI competitor. TubeForge matches privacy/ad-free posture better, but lacks account/private workflows, OGG, Smart Mode, cross-platform packaging, and mature support docs. |
+| 4K Video Downloader Plus | Cross-platform app for YouTube and other sites; claims playlists, channels, Shorts, subtitles, private accessible playlists, up to 8K, MP4/MKV/M4A/MP3/OGG, Smart Mode, update-like playlist behavior. Sources: [product page](https://www.4kdownload.com/products/videodownloader-42), [playlist page](https://playlist.4kdownload.com/), [private playlist guide](https://www.4kdownload.com/howto/howto-download-private-youtube-playlists/3). | Closest mainstream GUI competitor. TubeForge matches privacy/ad-free posture better, but lacks account/private workflows, saved Smart Mode defaults, cross-platform packaging, and mature support docs. |
 | Stacher | GUI for yt-dlp. Source: [Stacher](https://stacher.io/). | Competes by wrapping yt-dlp breadth. TubeForge must either stay YouTube-specialist or introduce a provider/plugin strategy. |
 | YTSage | Open-source GUI; one-click video/audio/subtitles, playlist selection, SponsorBlock, subtitle merging, generic yt-dlp mode, cross-platform. Source: [YTSage GitHub](https://github.com/oop7/YTSage). | Modern open-source GUI baseline. SponsorBlock, subtitle merging, and generic mode are key gaps. |
 | VideoProc Converter AI | Paid media suite; downloader covers many sites, videos, audio, playlists, channels, M3U8/live streams, conversion, compression, recording, proxy, device formats. Source: [VideoProc](https://www.videoproc.com/). | TubeForge should not chase full media-suite scope for v2, but proxy, live/M3U8 policy, and presets affect parity perception. |
@@ -66,8 +67,8 @@ Popular tools define user expectations beyond "download a public YouTube video":
 | M4A/WebM audio | Present | Expected | Low |
 | OGG/Opus output | Present through bundled FFmpeg | Common in 4K/yt-dlp workflows | Low, needs release live smoke |
 | AAC/WAV/FLAC device/audio conversion | Present through bundled FFmpeg | Common in paid tools | Low, needs release live smoke |
-| Video re-encoding/transcoding | H.264/AAC MP4, H.265/AAC MP4, VP9/Opus WebM presets present in current `main` | Common in paid tools and yt-dlp+FFmpeg | Medium, needs installed-app live proof |
-| Presets/device profiles | Original, compatible MP4, compact MP4, and open WebM choices present | Common in mainstream apps | Medium, broader device/custom presets remain |
+| Video re-encoding/transcoding | H.264/AAC MP4, H.265/AAC MP4, VP9/Opus WebM presets present in the current v2 branch | Common in paid tools and yt-dlp+FFmpeg | Medium, needs installed-app live proof |
+| Presets/device profiles | Best original, Windows MP4, Small file, MP3 320, Custom, plus exact processing choices present in the current v2 branch | Common in mainstream apps | Medium, saved defaults and broader device presets remain |
 | Playlists/channels | Present with bounded selection | Required | Medium, needs monitoring/sync |
 | Auto-download new playlist/channel items | Not present | Present in 4K/MediaHuman/Tartube-like workflows | High |
 | Private/account videos | Explicitly unsupported | Many mainstream tools support authenticated accessible content | Strategic gap |
@@ -149,7 +150,7 @@ Recommendation:
 
 ### P1: Video Re-Encoding Implemented; Release-Grade Live Proof Missing
 
-Current `main` exposes original stream copy plus three bounded video conversion profiles. Market tools still expose broader device, compression, trimming, and custom controls.
+The current v2 branch exposes original stream copy plus three bounded video conversion profiles. Market tools still expose broader device, compression, trimming, and custom controls.
 
 Wrong/optimizable:
 
@@ -232,7 +233,7 @@ Current WPF UI is functional and keyboard-aware, but uses text/symbol button con
 
 Wrong/optimizable:
 
-- No first-class "Smart Mode" or saved format presets.
+- Quick presets now cover the primary download flows, but the selected preset is not yet saved as a default across app restarts.
 - Advanced filter controls may overwhelm normal users.
 - Icons are improvised text symbols, not a consistent icon set.
 - No in-app guided failure recovery for common cases: rate-limited, private/access, missing codec, low disk, path too long.
@@ -240,7 +241,7 @@ Wrong/optimizable:
 Recommendation:
 
 - Add simple/advanced mode.
-- Add preset cards: Best MP4, Audio MP3 320, Original quality, Small file, Custom.
+- Persist an optional default preset and add simple/advanced disclosure around the detailed filters.
 - Replace nav glyph text with proper WPF vector resources or packaged icon font.
 - Add failure action buttons: retry later, open settings, change destination, copy diagnostic report.
 

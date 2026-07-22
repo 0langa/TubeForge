@@ -153,6 +153,49 @@ public static class MainViewModelSelectionTests
         Assert.Equal("1080p mp4", filename.Value);
     }
 
+    [Test]
+    public static void QuickPresetsApplyTruthfulStateAndManualChangesBecomeCustom()
+    {
+        using var viewModel = new MainViewModel();
+        SetFormats(viewModel, BuildCompleteCatalog());
+
+        Assert.Equal(5, viewModel.DownloadPresets.Count);
+        foreach (var preset in viewModel.DownloadPresets.Where(option =>
+                     option.Value != DownloadPresetKind.Custom))
+        {
+            viewModel.SelectedDownloadPreset = preset;
+
+            Assert.Equal(preset, viewModel.SelectedDownloadPreset);
+            Assert.True(viewModel.SelectedFormat is not null);
+            switch (preset.Value)
+            {
+                case DownloadPresetKind.BestOriginal:
+                    Assert.Equal(DownloadMode.AudioVideo, viewModel.SelectedDownloadMode.Value);
+                    Assert.Equal(OutputProfileKind.Native, viewModel.SelectedVideoProcessing.Value.Kind);
+                    break;
+                case DownloadPresetKind.WindowsCompatibleMp4:
+                    Assert.Equal(DownloadMode.AudioVideo, viewModel.SelectedDownloadMode.Value);
+                    Assert.Equal(OutputProfileKind.H264AacMp4, viewModel.SelectedVideoProcessing.Value.Kind);
+                    break;
+                case DownloadPresetKind.SmallFile:
+                    Assert.Equal(DownloadMode.AudioVideo, viewModel.SelectedDownloadMode.Value);
+                    Assert.Equal(OutputProfileKind.H265AacMp4, viewModel.SelectedVideoProcessing.Value.Kind);
+                    Assert.Equal(720, viewModel.SelectedResolution?.Value);
+                    break;
+                case DownloadPresetKind.Mp3_320:
+                    Assert.Equal(DownloadMode.AudioOnly, viewModel.SelectedDownloadMode.Value);
+                    Assert.Equal(OutputProfile.Mp3(320), viewModel.SelectedAudioProcessing.Value);
+                    break;
+            }
+        }
+
+        viewModel.SelectedDownloadPreset = viewModel.DownloadPresets.First(option =>
+            option.Value == DownloadPresetKind.WindowsCompatibleMp4);
+        viewModel.SelectedVideoProcessing = viewModel.VideoProcessingOptions.First(option =>
+            option.Value.Kind == OutputProfileKind.Native);
+        Assert.Equal(DownloadPresetKind.Custom, viewModel.SelectedDownloadPreset.Value);
+    }
+
     private static void ExerciseAudioOnly(MainViewModel viewModel, ref int terminalCombinations)
     {
         foreach (var bitrate in viewModel.BitrateOptions.ToArray())

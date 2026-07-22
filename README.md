@@ -21,8 +21,9 @@ Working now:
 - type-first stream selection with resolution, container, codec, FPS/HDR, bitrate, and exact-stream filters;
 - highest-quality video + audio selection with separate resumable track downloads and FFmpeg stream-copy MP4, WebM, or MKV finalization;
 - automatic validated multi-worker transfers for large media, with bounded resume state and safe sequential fallback;
-- native M4A/WebM audio saves plus bundled-FFmpeg MP3, AAC/M4A, Opus/OGG, WAV, and FLAC conversion in current `main`;
-- optional resolution-aware H.264/AAC MP4, H.265/AAC MP4, and VP9/Opus WebM conversion presets in current `main`, with original-quality stream copy remaining default;
+- native M4A/WebM audio saves plus bundled-FFmpeg MP3, AAC/M4A, Opus/OGG, WAV, and FLAC conversion in the current development branch;
+- optional resolution-aware H.264/AAC MP4, H.265/AAC MP4, and VP9/Opus WebM conversion presets in the current development branch, with original-quality stream copy remaining default;
+- preset-first download setup for Best original, Windows MP4, Small file, MP3 320, and fully custom selection in the current development branch;
 - caption-track metadata plus manual/auto language selection and atomic SRT/WebVTT sidecar saves;
 - on-demand validated thumbnail saves and stable JSON metadata sidecars with chapters but without signed stream URLs;
 - bounded playlist/channel enumeration with per-video selection, source ordering, indexed filenames, and batch queue preparation;

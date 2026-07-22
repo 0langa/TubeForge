@@ -264,14 +264,29 @@
                             <Grid>
                                 <StackPanel>
                                     <TextBlock Text="Build your download" FontSize="17" FontWeight="SemiBold" />
-                                    <TextBlock Text="Choose a use case first; only relevant controls stay visible."
+                                    <TextBlock Text="Start with a practical preset, then refine any detail."
                                                Margin="0,4,0,0" FontSize="11" Foreground="{StaticResource MutedTextBrush}" />
                                 </StackPanel>
                                 <TextBlock Text="{Binding FormatCountLabel}" HorizontalAlignment="Right" VerticalAlignment="Center"
                                            Foreground="{StaticResource MutedTextBrush}" FontSize="11" />
                             </Grid>
 
-                            <TextBlock Text="DOWNLOAD TYPE" Style="{StaticResource FieldLabel}" Margin="0,18,0,6" />
+                            <TextBlock Text="QUICK PRESET" Style="{StaticResource FieldLabel}" Margin="0,18,0,6" />
+                            <ComboBox ItemsSource="{Binding DownloadPresets}"
+                                      SelectedItem="{Binding SelectedDownloadPreset}"
+                                      AutomationProperties.Name="Quick download preset" MinHeight="48">
+                                <ComboBox.ItemTemplate>
+                                    <DataTemplate>
+                                        <StackPanel>
+                                            <TextBlock Text="{Binding Label}" FontWeight="SemiBold" FontSize="13" />
+                                            <TextBlock Text="{Binding Description}" Margin="0,3,0,0" FontSize="10"
+                                                       Foreground="{StaticResource MutedTextBrush}" />
+                                        </StackPanel>
+                                    </DataTemplate>
+                                </ComboBox.ItemTemplate>
+                            </ComboBox>
+
+                            <TextBlock Text="DOWNLOAD TYPE" Style="{StaticResource FieldLabel}" Margin="0,16,0,6" />
                             <ComboBox ItemsSource="{Binding DownloadModes}" SelectedItem="{Binding SelectedDownloadMode}"
                                       AutomationProperties.Name="Download type">
                                 <ComboBox.ItemTemplate>

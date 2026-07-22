@@ -9,8 +9,9 @@ Status date: 2026-07-22.
 - Phase 0 complete. Sanitized baseline evidence: [`docs/V2_BASELINE_EVIDENCE.md`](docs/V2_BASELINE_EVIDENCE.md).
 - Phase 1 core implementation complete in working tree: expanded audio outputs plus resolution-aware H.264/AAC MP4, H.265/AAC MP4, and VP9/Opus WebM profiles.
 - General output profiles persist through queue restart, validate before publication/recovery, clean failed temporary files, and use allowlisted FFmpeg arguments from the pinned LGPL build.
-- Verification: Release build 0 warnings/errors; 186/186 deterministic tests; core parser p95 0.1225 ms against 25 ms; bundled FFmpeg encode/decode smoke passed for all four new audio outputs and all three video profiles.
+- Verification: Release build 0 warnings/errors; 187/187 deterministic tests; core parser p95 0.1128 ms against 25 ms; bundled FFmpeg encode/decode smoke passed for all four new audio outputs and all three video profiles.
 - Phase 1 release proof remains open: installed-app live media matrix and measured quality/time/file-size evidence. Broader custom/device presets remain deferred to UX work.
+- Preset-first UX is implemented for Best original, Windows MP4, Small file, MP3 320, and Custom; deterministic tests cover applied state and manual override behavior.
 
 ## v2 Product Definition
 
@@ -268,12 +269,12 @@ Goal: make v2 feel like a finished app, not engineering demo.
 Tasks:
 
 - Add simple/advanced mode.
-- Add preset-first download UI:
-  - Best MP4.
-  - Best original.
-  - MP3 320.
-  - Small file.
-  - Custom.
+- [x] Add preset-first download UI:
+  - [x] Windows-compatible MP4.
+  - [x] Best original.
+  - [x] MP3 320.
+  - [x] Small file.
+  - [x] Custom.
 - Replace improvised nav glyphs with consistent icon resources.
 - Add clearer progress states: analyzing, queued, downloading video, downloading audio, muxing, transcoding, writing captions, complete.
 - Add recovery actions for common failures:

@@ -41,6 +41,15 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         new(DownloadMode.VideoOnly, "Video only", "Maximum video quality; audio not included")
     ];
 
+    private static readonly IReadOnlyList<DownloadPresetOption> DownloadPresetChoices =
+    [
+        new(DownloadPresetKind.BestOriginal, "Best original", "Highest available quality; stream copy when possible"),
+        new(DownloadPresetKind.WindowsCompatibleMp4, "Windows MP4", "Highest source converted to H.264/AAC MP4"),
+        new(DownloadPresetKind.SmallFile, "Small file", "Efficient H.265/AAC MP4; prefers 720p when available"),
+        new(DownloadPresetKind.Mp3_320, "MP3 320", "Best audio converted to high-bitrate MP3"),
+        new(DownloadPresetKind.Custom, "Custom", "Use the detailed controls below")
+    ];
+
     private static readonly IReadOnlyList<OutputProcessingOption> AudioProcessingChoices =
     [
         new(OutputProfile.Native, "Native stream · no conversion", "Fastest; preserves source quality"),
@@ -121,6 +130,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     private bool _updatingFormatFilters;
     private IReadOnlyList<DownloadModeOption> _downloadModes = BaseModeChoices;
     private DownloadModeOption _selectedDownloadMode = BaseModeChoices[0];
+    private DownloadPresetOption _selectedDownloadPreset = DownloadPresetChoices[0];
+    private bool _applyingDownloadPreset;
     private IReadOnlyList<FilterOption<int>> _resolutionOptions = [];
     private FilterOption<int>? _selectedResolution;
     private IReadOnlyList<FilterOption<MediaContainer>> _containerOptions = [];
@@ -286,6 +297,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     public ObservableCollection<HistoryItemViewModel> HistoryItems { get; } = [];
 
     public IReadOnlyList<DownloadModeOption> DownloadModes => _downloadModes;
+
+    public IReadOnlyList<DownloadPresetOption> DownloadPresets => DownloadPresetChoices;
 
     public IReadOnlyList<OutputProcessingOption> AudioProcessingOptions => AudioProcessingChoices;
 
@@ -689,6 +702,20 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         }
     }
 
+    public DownloadPresetOption SelectedDownloadPreset
+    {
+        get => _selectedDownloadPreset;
+        set
+        {
+            if (value is null || !Set(ref _selectedDownloadPreset, value))
+            {
+                return;
+            }
+
+            ApplyDownloadPreset(value);
+        }
+    }
+
     public DownloadModeOption SelectedDownloadMode
     {
         get => _selectedDownloadMode;
@@ -698,6 +725,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             {
                 return;
             }
+
+            MarkPresetCustom();
 
             OnPropertyChanged(nameof(HasVideoFilters));
             OnPropertyChanged(nameof(IsAudioOnly));
@@ -798,6 +827,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         {
             if (value is not null && Set(ref _selectedAudioProcessing, value))
             {
+                MarkPresetCustom();
                 OnPropertyChanged(nameof(ModeNotice));
             }
         }
@@ -810,6 +840,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         {
             if (value is not null && Set(ref _selectedVideoProcessing, value))
             {
+                MarkPresetCustom();
                 OnPropertyChanged(nameof(ModeNotice));
             }
         }
@@ -1099,16 +1130,20 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             _thumbnailUrl = _metadata.ThumbnailUrl;
             _allFormats = _metadata.Formats;
             RefreshDownloadModes();
-            var defaultMode = DownloadModes.FirstOrDefault(choice =>
-                HasFormatsForMode(choice.Value)) ??
-                DownloadModes[0];
-            if (SelectedDownloadMode != defaultMode)
+            ApplyDownloadPreset(_selectedDownloadPreset);
+            if (_selectedDownloadPreset.Value == DownloadPresetKind.Custom)
             {
-                SelectedDownloadMode = defaultMode;
-            }
-            else
-            {
-                RebuildFormatFilters(resetSelections: true);
+                var defaultMode = DownloadModes.FirstOrDefault(choice =>
+                    HasFormatsForMode(choice.Value)) ??
+                    DownloadModes[0];
+                if (SelectedDownloadMode != defaultMode)
+                {
+                    SelectedDownloadMode = defaultMode;
+                }
+                else
+                {
+                    RebuildFormatFilters(resetSelections: true);
+                }
             }
 
             var extractionStatus = result.Value.Diagnostics?.Stage == "AndroidClientResolved"
@@ -3327,7 +3362,72 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             return;
         }
 
+        MarkPresetCustom();
         RebuildFormatFilters(resetSelections: false);
+    }
+
+    private void ApplyDownloadPreset(DownloadPresetOption preset)
+    {
+        if (preset.Value == DownloadPresetKind.Custom)
+        {
+            return;
+        }
+
+        var targetMode = preset.Value == DownloadPresetKind.Mp3_320
+            ? DownloadMode.AudioOnly
+            : DownloadMode.AudioVideo;
+        var mode = DownloadModes.FirstOrDefault(option => option.Value == targetMode);
+        if (mode is null)
+        {
+            MarkPresetCustom(force: true);
+            return;
+        }
+
+        _applyingDownloadPreset = true;
+        try
+        {
+            SelectedDownloadMode = mode;
+            RebuildFormatFilters(resetSelections: true);
+            switch (preset.Value)
+            {
+                case DownloadPresetKind.BestOriginal:
+                    SelectedVideoProcessing = VideoProcessingChoices[0];
+                    break;
+                case DownloadPresetKind.WindowsCompatibleMp4:
+                    SelectedVideoProcessing = VideoProcessingChoices.First(option =>
+                        option.Value.Kind == OutputProfileKind.H264AacMp4);
+                    break;
+                case DownloadPresetKind.SmallFile:
+                    SelectedVideoProcessing = VideoProcessingChoices.First(option =>
+                        option.Value.Kind == OutputProfileKind.H265AacMp4);
+                    SelectedResolution = ResolutionOptions
+                        .Where(option => option.Value is > 0 and <= 720)
+                        .OrderByDescending(option => option.Value)
+                        .FirstOrDefault() ?? ResolutionOptions.FirstOrDefault();
+                    break;
+                case DownloadPresetKind.Mp3_320:
+                    SelectedAudioProcessing = AudioProcessingChoices.First(option =>
+                        option.Value == OutputProfile.Mp3(320));
+                    break;
+            }
+        }
+        finally
+        {
+            _applyingDownloadPreset = false;
+        }
+    }
+
+    private void MarkPresetCustom(bool force = false)
+    {
+        if ((!force && (_applyingDownloadPreset || _updatingFormatFilters)) ||
+            _selectedDownloadPreset.Value == DownloadPresetKind.Custom)
+        {
+            return;
+        }
+
+        _selectedDownloadPreset = DownloadPresetChoices.First(option =>
+            option.Value == DownloadPresetKind.Custom);
+        OnPropertyChanged(nameof(SelectedDownloadPreset));
     }
 
     private void NotifyVideoProperties()

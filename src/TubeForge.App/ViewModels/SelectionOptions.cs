@@ -3,6 +3,23 @@ using TubeForge.YouTube.Captions;
 
 namespace TubeForge.App.ViewModels;
 
+public enum DownloadPresetKind
+{
+    BestOriginal,
+    WindowsCompatibleMp4,
+    SmallFile,
+    Mp3_320,
+    Custom
+}
+
+public sealed record DownloadPresetOption(
+    DownloadPresetKind Value,
+    string Label,
+    string Description)
+{
+    public override string ToString() => Label;
+}
+
 public sealed record DownloadModeOption(
     DownloadMode Value,
     string Label,
