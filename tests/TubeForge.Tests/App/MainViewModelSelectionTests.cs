@@ -81,7 +81,7 @@ public static class MainViewModelSelectionTests
             ?? throw new MissingMethodException(typeof(MainViewModel).FullName, "RenderFileName");
 
         var result = (Result<string>)render.Invoke(viewModel,
-            [metadata, new FormatItemViewModel(source), null, 2, AudioOutputProfile.Mp3(192)])!;
+            [metadata, new FormatItemViewModel(source), null, 2, OutputProfile.Mp3(192)])!;
 
         Assert.True(result.IsSuccess);
         Assert.Equal("192kbps mp3", result.Value);
@@ -104,10 +104,10 @@ public static class MainViewModelSelectionTests
 
         foreach (var testCase in new[]
                  {
-                     (AudioOutputProfile.Aac(256), "256kbps m4a"),
-                     (AudioOutputProfile.Opus(160), "160kbps ogg"),
-                     (AudioOutputProfile.Wav, "lossless wav"),
-                     (AudioOutputProfile.Flac, "lossless flac")
+                     (OutputProfile.Aac(256), "256kbps m4a"),
+                     (OutputProfile.Opus(160), "160kbps ogg"),
+                     (OutputProfile.Wav, "lossless wav"),
+                     (OutputProfile.Flac, "lossless flac")
                  })
         {
             var result = (Result<string>)render.Invoke(
@@ -116,6 +116,41 @@ public static class MainViewModelSelectionTests
             Assert.True(result.IsSuccess);
             Assert.Equal(testCase.Item2, result.Value);
         }
+    }
+
+    [Test]
+    public static void VideoPresetSelectionUsesPersistableProfileAndTruthfulFilename()
+    {
+        using var viewModel = new MainViewModel
+        {
+            FileNameTemplateText = "{quality} {container}"
+        };
+        Assert.True(YouTubeVideoId.TryCreate("Fixture123_", out var videoId));
+        var metadata = new VideoMetadata { Id = videoId, Title = "Fixture", Formats = [] };
+        var selection = new FormatItemViewModel(Progressive(18, 1080, 30));
+        var profileFor = typeof(MainViewModel).GetMethod(
+            "OutputProfileFor",
+            BindingFlags.Instance | BindingFlags.NonPublic)
+            ?? throw new MissingMethodException(typeof(MainViewModel).FullName, "OutputProfileFor");
+        var render = typeof(MainViewModel).GetMethod(
+            "RenderFileName",
+            BindingFlags.Instance | BindingFlags.NonPublic)
+            ?? throw new MissingMethodException(typeof(MainViewModel).FullName, "RenderFileName");
+
+        foreach (var option in viewModel.VideoProcessingOptions)
+        {
+            viewModel.SelectedVideoProcessing = option;
+            var selected = (OutputProfile)profileFor.Invoke(viewModel, [selection])!;
+            Assert.Equal(option.Value.ForVideoHeight(1080), selected);
+            Assert.True(OutputProfile.TryParseIdentity(selected.Identity, out var parsed));
+            Assert.Equal(selected, parsed);
+        }
+
+        var filename = (Result<string>)render.Invoke(
+            viewModel,
+            [metadata, selection, null, 2, OutputProfile.H264AacMp4])!;
+        Assert.True(filename.IsSuccess);
+        Assert.Equal("1080p mp4", filename.Value);
     }
 
     private static void ExerciseAudioOnly(MainViewModel viewModel, ref int terminalCombinations)
@@ -184,8 +219,12 @@ public static class MainViewModelSelectionTests
             foreach (var codec in viewModel.AudioCodecOptions.ToArray())
             {
                 viewModel.SelectedAudioCodec = codec;
-                AssertTerminalOutputs(viewModel, DownloadMode.AudioVideo);
-                terminalCombinations++;
+                foreach (var processing in viewModel.VideoProcessingOptions)
+                {
+                    viewModel.SelectedVideoProcessing = processing;
+                    AssertTerminalOutputs(viewModel, DownloadMode.AudioVideo);
+                    terminalCombinations++;
+                }
             }
         }
     }

@@ -7,10 +7,10 @@ Target: TubeForge 2.0 should be release-grade, user-friendly, and functionally c
 Status date: 2026-07-22.
 
 - Phase 0 complete. Sanitized baseline evidence: [`docs/V2_BASELINE_EVIDENCE.md`](docs/V2_BASELINE_EVIDENCE.md).
-- Phase 1 audio-output slice complete in working tree: AAC/M4A 256 kbps, Opus/OGG 160 kbps, WAV PCM, and FLAC join existing MP3/native outputs.
-- Audio profiles persist through queue restart, validate output headers before publication/recovery, clean failed temporary files, and use allowlisted FFmpeg arguments.
-- Verification: Release build 0 warnings/errors; 178/178 deterministic tests; core parser p95 0.4092 ms against 25 ms; bundled FFmpeg encode/decode smoke passed for all four new outputs.
-- Phase 1 remains in progress. General output model, video transcode profiles, compatibility presets, transcode-aware low-disk tests, and installed-app live media proof remain.
+- Phase 1 core implementation complete in working tree: expanded audio outputs plus resolution-aware H.264/AAC MP4, H.265/AAC MP4, and VP9/Opus WebM profiles.
+- General output profiles persist through queue restart, validate before publication/recovery, clean failed temporary files, and use allowlisted FFmpeg arguments from the pinned LGPL build.
+- Verification: Release build 0 warnings/errors; 186/186 deterministic tests; core parser p95 0.1225 ms against 25 ms; bundled FFmpeg encode/decode smoke passed for all four new audio outputs and all three video profiles.
+- Phase 1 release proof remains open: installed-app live media matrix and measured quality/time/file-size evidence. Broader custom/device presets remain deferred to UX work.
 
 ## v2 Product Definition
 
@@ -80,7 +80,7 @@ Add explicit output categories:
 
 Implementation notes:
 
-- Extend `AudioOutputProfile` into a more general `OutputProfile`.
+- Use the general persisted `OutputProfile` model across native, audio-transcode, and video-transcode paths.
 - Keep stream-copy default.
 - Reuse `FfmpegAudioTranscoder` patterns for cancellation, temp paths, validation, and recovery.
 - Add `FfmpegVideoTranscoder` with safe allowlisted FFmpeg arguments only.
@@ -101,9 +101,11 @@ Completed audio slice:
 - [x] WAV PCM 16-bit and FLAC lossless outputs.
 - [x] Atomic publication, cancellation/failure cleanup, validated-output recovery, queue identity persistence, filename extension/quality, and UI combination tests.
 - [x] Real bundled-FFmpeg encode/decode smoke using synthetic audio only.
-- [ ] Generalize audio-only profile model for video transcode presets.
-- [ ] Add H.264/AAC MP4, H.265/AAC MP4, and VP9/Opus WebM video transcode paths.
-- [ ] Add transcode-specific disk forecast tests and installed-app live proof.
+- [x] Generalize audio-only profile model for video transcode presets.
+- [x] Add H.264/AAC MP4, H.265/AAC MP4, and VP9/Opus WebM video transcode paths.
+- [x] Add transcode-specific disk forecast tests.
+- [x] Run synthetic source encode/decode smoke through every pinned video encoder.
+- [ ] Run installed-app live media proof and record measured quality/time/file-size evidence.
 
 Exit gate:
 

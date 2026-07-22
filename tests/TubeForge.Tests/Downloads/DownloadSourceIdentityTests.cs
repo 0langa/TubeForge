@@ -16,11 +16,14 @@ public static class DownloadSourceIdentityTests
         var adaptiveValue = DownloadSourceIdentity.Create(videoId, 401, 140);
         var convertedProfiles = new[]
         {
-            AudioOutputProfile.Mp3(320),
-            AudioOutputProfile.Aac(256),
-            AudioOutputProfile.Opus(160),
-            AudioOutputProfile.Wav,
-            AudioOutputProfile.Flac
+            OutputProfile.Mp3(320),
+            OutputProfile.Aac(256),
+            OutputProfile.Opus(160),
+            OutputProfile.Wav,
+            OutputProfile.Flac,
+            OutputProfile.H264AacMp4,
+            OutputProfile.H265AacMp4,
+            OutputProfile.Vp9OpusWebM
         };
 
         Assert.True(DownloadSourceIdentity.TryParse(directValue, out var direct));
@@ -48,7 +51,8 @@ public static class DownloadSourceIdentityTests
                      "dQw4w9WgXcQ:140@", "dQw4w9WgXcQ:140@native", "dQw4w9WgXcQ:140@mp3-96",
                      "dQw4w9WgXcQ:140@mp3-320@mp3-192", "dQw4w9WgXcQ:140@aac-96",
                      "dQw4w9WgXcQ:140@opus-320", "dQw4w9WgXcQ:140@wav-0",
-                     "dQw4w9WgXcQ:140@flac-0", "dQw4w9WgXcQ:140@unknown-192"
+                     "dQw4w9WgXcQ:140@flac-0", "dQw4w9WgXcQ:140@unknown-192",
+                     "dQw4w9WgXcQ:401+140@h264-aac-mp4-100"
                  })
         {
             Assert.False(DownloadSourceIdentity.TryParse(value, out _));

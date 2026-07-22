@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Generalize persisted output profiles across native, audio-conversion, and video-conversion paths.
+- Add resolution-aware H.264/AAC MP4, H.265/AAC MP4, and VP9/Opus WebM presets using encoders present in the pinned LGPL FFmpeg build.
+- Preserve original-quality stream copy as default; stage native source media before optional video conversion and recover validated outputs after an interrupted queue checkpoint.
+- Add fail-closed video output validation, cancellation/temporary-file cleanup, bounded disk forecasts, queue identity round-trips, UI selection coverage, and real synthetic encode/decode smoke proof.
+
 ## 1.2.5 - 2026-07-21
 
 - Replace latency-bound 1 MiB sequential Googlevideo reads with validated 8 MiB query ranges and up to four bounded workers, while retaining automatic sequential fallback for incompatible servers.

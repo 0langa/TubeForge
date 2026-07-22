@@ -3,45 +3,44 @@ using System.Diagnostics;
 using TubeForge.Core.Errors;
 using TubeForge.Core.Media;
 using TubeForge.Core.Results;
+using TubeForge.Media;
 
 namespace TubeForge.Transcoding;
 
-public sealed class FfmpegAudioTranscoder
+public sealed class FfmpegVideoTranscoder
 {
     private const string RelativeBundledPath = "ffmpeg/ffmpeg.exe";
     private readonly string _executablePath;
-    private readonly IFfmpegAudioProcessRunner _processRunner;
+    private readonly IFfmpegVideoProcessRunner _processRunner;
 
-    public FfmpegAudioTranscoder(string executablePath)
-        : this(executablePath, new FfmpegAudioProcessRunner())
+    public FfmpegVideoTranscoder(string executablePath)
+        : this(executablePath, new FfmpegVideoProcessRunner())
     {
     }
 
-    internal FfmpegAudioTranscoder(
+    internal FfmpegVideoTranscoder(
         string executablePath,
-        IFfmpegAudioProcessRunner processRunner)
+        IFfmpegVideoProcessRunner processRunner)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(executablePath);
         _executablePath = Path.GetFullPath(executablePath);
         _processRunner = processRunner ?? throw new ArgumentNullException(nameof(processRunner));
     }
 
-    public string ExecutablePath => _executablePath;
-
     public bool IsAvailable => File.Exists(_executablePath);
 
     public static string BundledExecutablePath(string baseDirectory) =>
         Path.GetFullPath(Path.Combine(baseDirectory, RelativeBundledPath));
 
-    public async Task<Result<AudioTranscodeReceipt>> TranscodeAsync(
-        AudioTranscodeRequest request,
+    public async Task<Result<VideoTranscodeReceipt>> TranscodeAsync(
+        VideoTranscodeRequest request,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(request);
         var validation = ValidateRequest(request);
         if (validation is not null)
         {
-            return Result<AudioTranscodeReceipt>.Failure(validation);
+            return Result<VideoTranscodeReceipt>.Failure(validation);
         }
 
         var source = Path.GetFullPath(request.SourcePath);
@@ -59,21 +58,21 @@ public sealed class FfmpegAudioTranscoder
 
             if (File.Exists(destination))
             {
-                var recovered = AudioTranscodeFileValidator.Validate(destination, request.Output.Kind);
+                var recovered = ValidateOutput(destination, request.Output);
                 if (!request.AllowExistingValidatedOutput || !recovered.IsSuccess)
                 {
-                    return Result<AudioTranscodeReceipt>.Failure(
+                    return Result<VideoTranscodeReceipt>.Failure(
                         recovered.Error ?? new TubeForgeError(
                             "Download.DestinationExists",
                             "The selected output file already exists."));
                 }
 
-                return Success(destination, request.Output.BitrateKbps);
+                return Success(destination, request.Output);
             }
 
             if (!File.Exists(source))
             {
-                return Failure("Media.TranscodeSourceMissing", "The source audio for conversion is missing.");
+                return Failure("Media.TranscodeSourceMissing", "The source media for video conversion is missing.");
             }
 
             var directory = Path.GetDirectoryName(destination)!;
@@ -89,8 +88,9 @@ public sealed class FfmpegAudioTranscoder
                 "-i",
                 source,
                 "-map",
-                "0:a:0",
-                "-vn"
+                "0:v:0",
+                "-map",
+                "0:a:0"
             };
             AppendEncoderArguments(arguments, request.Output);
             arguments.AddRange(["-map_metadata", "-1", temporary]);
@@ -104,24 +104,24 @@ public sealed class FfmpegAudioTranscoder
             if (exitCode != 0)
             {
                 return Failure(
-                    "Media.FFmpegAudioFailed",
-                    $"FFmpeg could not convert this audio stream to {request.Output.DisplayName}.",
+                    "Media.FFmpegVideoFailed",
+                    $"FFmpeg could not convert this media to {request.Output.DisplayName}.",
                     $"FFmpeg exited with code {exitCode}.");
             }
 
-            var outputValidation = AudioTranscodeFileValidator.Validate(temporary, request.Output.Kind);
+            var outputValidation = ValidateOutput(temporary, request.Output);
             if (!outputValidation.IsSuccess)
             {
-                return Result<AudioTranscodeReceipt>.Failure(outputValidation.Error!);
+                return Result<VideoTranscodeReceipt>.Failure(outputValidation.Error!);
             }
 
             File.Move(temporary, destination, overwrite: false);
             temporary = null;
-            return Success(destination, request.Output.BitrateKbps);
+            return Success(destination, request.Output);
         }
         catch (OperationCanceledException)
         {
-            return Failure("Operation.Cancelled", "The audio conversion was cancelled.");
+            return Failure("Operation.Cancelled", "The video conversion was cancelled.");
         }
         catch (Win32Exception exception)
         {
@@ -134,7 +134,7 @@ public sealed class FfmpegAudioTranscoder
         {
             return Failure(
                 "Media.TranscodeWriteFailed",
-                "TubeForge could not write the converted audio file.",
+                "TubeForge could not write the converted video file.",
                 exception.GetType().Name);
         }
         catch (Exception exception) when (
@@ -154,11 +154,13 @@ public sealed class FfmpegAudioTranscoder
         }
     }
 
-    private static TubeForgeError? ValidateRequest(AudioTranscodeRequest request)
+    private static TubeForgeError? ValidateRequest(VideoTranscodeRequest request)
     {
-        if (!request.Output.IsValid || !request.Output.IsAudioTranscode)
+        if (!request.Output.IsValid || !request.Output.IsVideoTranscode)
         {
-            return new TubeForgeError("Media.InvalidTranscodeProfile", "Select a supported converted audio output profile.");
+            return new TubeForgeError(
+                "Media.InvalidTranscodeProfile",
+                "Select a supported video output profile.");
         }
 
         if (string.IsNullOrWhiteSpace(request.SourcePath) ||
@@ -194,41 +196,68 @@ public sealed class FfmpegAudioTranscoder
     {
         switch (output.Kind)
         {
-            case OutputProfileKind.Mp3:
-                arguments.AddRange(["-c:a", "libmp3lame", "-b:a", $"{output.BitrateKbps}k", "-f", "mp3"]);
-                break;
-            case OutputProfileKind.Aac:
+            case OutputProfileKind.H264AacMp4:
                 arguments.AddRange([
-                    "-c:a", "aac", "-b:a", $"{output.BitrateKbps}k", "-movflags", "+faststart", "-f", "mp4"
+                    "-c:v", "libopenh264",
+                    "-b:v", $"{output.VideoBitrateKbps}k",
+                    "-maxrate", $"{output.VideoBitrateKbps}k",
+                    "-bufsize", $"{output.VideoBitrateKbps * 2}k",
+                    "-pix_fmt", "yuv420p",
+                    "-c:a", "aac",
+                    "-b:a", $"{output.BitrateKbps}k",
+                    "-ac", "2",
+                    "-movflags", "+faststart",
+                    "-f", "mp4"
                 ]);
                 break;
-            case OutputProfileKind.Opus:
-                arguments.AddRange(["-c:a", "libopus", "-b:a", $"{output.BitrateKbps}k", "-f", "ogg"]);
+            case OutputProfileKind.H265AacMp4:
+                arguments.AddRange([
+                    "-vf", "pad=ceil(iw/8)*8:ceil(ih/8)*8",
+                    "-c:v", "libkvazaar",
+                    "-b:v", $"{output.VideoBitrateKbps}k",
+                    "-pix_fmt", "yuv420p",
+                    "-c:a", "aac",
+                    "-b:a", $"{output.BitrateKbps}k",
+                    "-ac", "2",
+                    "-movflags", "+faststart",
+                    "-tag:v", "hvc1",
+                    "-f", "mp4"
+                ]);
                 break;
-            case OutputProfileKind.Wav:
-                arguments.AddRange(["-c:a", "pcm_s16le", "-f", "wav"]);
-                break;
-            case OutputProfileKind.Flac:
-                arguments.AddRange(["-c:a", "flac", "-compression_level", "8", "-f", "flac"]);
+            case OutputProfileKind.Vp9OpusWebM:
+                arguments.AddRange([
+                    "-c:v", "libvpx-vp9",
+                    "-b:v", $"{output.VideoBitrateKbps}k",
+                    "-deadline", "good",
+                    "-cpu-used", "2",
+                    "-row-mt", "1",
+                    "-pix_fmt", "yuv420p",
+                    "-c:a", "libopus",
+                    "-b:a", $"{output.BitrateKbps}k",
+                    "-f", "webm"
+                ]);
                 break;
             default:
-                throw new InvalidOperationException("Unsupported audio output profile.");
+                throw new InvalidOperationException("Unsupported video output profile.");
         }
     }
 
-    private static Result<AudioTranscodeReceipt> Success(string path, int bitrateKbps) =>
-        Result<AudioTranscodeReceipt>.Success(new AudioTranscodeReceipt(
+    private static Result<bool> ValidateOutput(string path, OutputProfile output) =>
+        MediaContainerValidator.Validate(
+            path,
+            output.Kind == OutputProfileKind.Vp9OpusWebM ? MediaContainer.WebM : MediaContainer.Mp4);
+
+    private static Result<VideoTranscodeReceipt> Success(string path, OutputProfile output) =>
+        Result<VideoTranscodeReceipt>.Success(new VideoTranscodeReceipt(
             path,
             new FileInfo(path).Length,
-            bitrateKbps,
-            Channels: 0,
-            SampleRate: 0));
+            output));
 
-    private static Result<AudioTranscodeReceipt> Failure(
+    private static Result<VideoTranscodeReceipt> Failure(
         string code,
         string message,
         string? detail = null) =>
-        Result<AudioTranscodeReceipt>.Failure(new TubeForgeError(code, message, detail));
+        Result<VideoTranscodeReceipt>.Failure(new TubeForgeError(code, message, detail));
 
     private static void TryDelete(string path)
     {
@@ -242,7 +271,7 @@ public sealed class FfmpegAudioTranscoder
     }
 }
 
-internal interface IFfmpegAudioProcessRunner
+internal interface IFfmpegVideoProcessRunner
 {
     Task<int> RunAsync(
         string executablePath,
@@ -251,7 +280,7 @@ internal interface IFfmpegAudioProcessRunner
         CancellationToken cancellationToken);
 }
 
-internal sealed class FfmpegAudioProcessRunner : IFfmpegAudioProcessRunner
+internal sealed class FfmpegVideoProcessRunner : IFfmpegVideoProcessRunner
 {
     public async Task<int> RunAsync(
         string executablePath,

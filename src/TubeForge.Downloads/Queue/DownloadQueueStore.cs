@@ -202,7 +202,7 @@ public sealed class DownloadQueueStore
 
                     return item.Status == DownloadQueueStatus.Completed &&
                            DownloadSourceIdentity.TryParse(item.SourceIdentity, out var sourceIdentity) &&
-                           sourceIdentity.Output.Kind != Core.Media.AudioOutputKind.Native
+                           sourceIdentity.Output.Kind != Core.Media.OutputProfileKind.Native
                         ? item with { ExpectedLength = item.BytesReceived }
                         : item;
                 })
@@ -344,7 +344,7 @@ public sealed class DownloadQueueStore
         DownloadQueueItem item,
         DownloadSourceIdentity sourceIdentity) =>
         item.Status == DownloadQueueStatus.Completed &&
-        sourceIdentity.Output.Kind != Core.Media.AudioOutputKind.Native;
+        sourceIdentity.Output.Kind != Core.Media.OutputProfileKind.Native;
 
     private static bool IsSafeText(string? value, int maximumLength) =>
         !string.IsNullOrWhiteSpace(value) &&

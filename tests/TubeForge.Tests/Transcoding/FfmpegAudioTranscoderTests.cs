@@ -84,7 +84,7 @@ public static class FfmpegAudioTranscoderTests
                 {
                     SourcePath = source,
                     DestinationPath = destination,
-                    Output = AudioOutputProfile.Mp3(320)
+                    Output = OutputProfile.Mp3(320)
                 }, cancellation.Token);
 
             Assert.False(result.IsSuccess);
@@ -116,7 +116,7 @@ public static class FfmpegAudioTranscoderTests
                 {
                     SourcePath = source,
                     DestinationPath = destination,
-                    Output = AudioOutputProfile.Mp3(192)
+                    Output = OutputProfile.Mp3(192)
                 });
 
             Assert.False(result.IsSuccess);
@@ -147,13 +147,14 @@ public static class FfmpegAudioTranscoderTests
             {
                 SourcePath = source,
                 DestinationPath = destination,
-                Output = AudioOutputProfile.Mp3(192),
+                Output = OutputProfile.Mp3(192),
                 AllowExistingValidatedOutput = true
             };
             var initial = await transcoder.TranscodeAsync(request);
             Assert.True(initial.IsSuccess, initial.Error?.Message);
             var originalBytes = await File.ReadAllBytesAsync(destination);
             var calls = runner.CallCount;
+            File.Delete(source);
 
             var recovered = await transcoder.TranscodeAsync(request);
 
@@ -184,7 +185,7 @@ public static class FfmpegAudioTranscoderTests
                 {
                     SourcePath = source,
                     DestinationPath = destination,
-                    Output = AudioOutputProfile.Mp3(192)
+                    Output = OutputProfile.Mp3(192)
                 });
 
             Assert.False(result.IsSuccess);
@@ -239,17 +240,17 @@ public static class FfmpegAudioTranscoderTests
 
     private static IReadOnlyList<OutputCase> OutputCases() =>
     [
-        new(AudioOutputProfile.Mp3(128), "libmp3lame", "mp3"),
-        new(AudioOutputProfile.Mp3(192), "libmp3lame", "mp3"),
-        new(AudioOutputProfile.Mp3(256), "libmp3lame", "mp3"),
-        new(AudioOutputProfile.Mp3(320), "libmp3lame", "mp3"),
-        new(AudioOutputProfile.Aac(256), "aac", "mp4"),
-        new(AudioOutputProfile.Opus(160), "libopus", "ogg"),
-        new(AudioOutputProfile.Wav, "pcm_s16le", "wav"),
-        new(AudioOutputProfile.Flac, "flac", "flac")
+        new(OutputProfile.Mp3(128), "libmp3lame", "mp3"),
+        new(OutputProfile.Mp3(192), "libmp3lame", "mp3"),
+        new(OutputProfile.Mp3(256), "libmp3lame", "mp3"),
+        new(OutputProfile.Mp3(320), "libmp3lame", "mp3"),
+        new(OutputProfile.Aac(256), "aac", "mp4"),
+        new(OutputProfile.Opus(160), "libopus", "ogg"),
+        new(OutputProfile.Wav, "pcm_s16le", "wav"),
+        new(OutputProfile.Flac, "flac", "flac")
     ];
 
-    private sealed record OutputCase(AudioOutputProfile Output, string Codec, string Format);
+    private sealed record OutputCase(OutputProfile Output, string Codec, string Format);
 
     private sealed class ValidAudioProcessRunner : IFfmpegAudioProcessRunner
     {

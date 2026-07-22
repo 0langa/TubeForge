@@ -6,10 +6,10 @@ namespace TubeForge.Transcoding;
 
 public static class AudioTranscodeFileValidator
 {
-    public static Result<bool> Validate(string path, AudioOutputKind kind)
+    public static Result<bool> Validate(string path, OutputProfileKind kind)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
-        if (kind == AudioOutputKind.Mp3)
+        if (kind == OutputProfileKind.Mp3)
         {
             return Mp3FileValidator.Validate(path);
         }
@@ -27,12 +27,12 @@ public static class AudioTranscodeFileValidator
             var count = stream.Read(header);
             var valid = kind switch
             {
-                AudioOutputKind.Aac => count >= 8 && header[4..8].SequenceEqual("ftyp"u8),
-                AudioOutputKind.Opus => count >= 4 && header[..4].SequenceEqual("OggS"u8),
-                AudioOutputKind.Wav => count >= 12 &&
+                OutputProfileKind.Aac => count >= 8 && header[4..8].SequenceEqual("ftyp"u8),
+                OutputProfileKind.Opus => count >= 4 && header[..4].SequenceEqual("OggS"u8),
+                OutputProfileKind.Wav => count >= 12 &&
                                        header[..4].SequenceEqual("RIFF"u8) &&
                                        header[8..12].SequenceEqual("WAVE"u8),
-                AudioOutputKind.Flac => count >= 4 && header[..4].SequenceEqual("fLaC"u8),
+                OutputProfileKind.Flac => count >= 4 && header[..4].SequenceEqual("fLaC"u8),
                 _ => false
             };
             return valid ? Result<bool>.Success(true) : Invalid();

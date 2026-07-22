@@ -2,7 +2,7 @@
 
 # TubeForge
 
-TubeForge is an experimental, ad-free Windows desktop downloader built from scratch for media you are authorized to save from YouTube. It does not use `yt-dlp`, hosted conversion services, or third-party NuGet packages. Releases bundle a pinned LGPL FFmpeg executable for reliable MP4, WebM, and MKV stream-copy finalization plus MP3 audio conversion.
+TubeForge is an experimental, ad-free Windows desktop downloader built from scratch for media you are authorized to save from YouTube. It does not use `yt-dlp`, hosted conversion services, or third-party NuGet packages. Releases bundle a pinned LGPL FFmpeg executable for local stream-copy finalization and optional media conversion.
 
 > [!IMPORTANT]
 > You are responsible for complying with YouTube's terms, copyright, privacy, and local law. Download only content you own or have permission to save. TubeForge is not intended to bypass DRM, payment, membership, or other access controls.
@@ -22,6 +22,7 @@ Working now:
 - highest-quality video + audio selection with separate resumable track downloads and FFmpeg stream-copy MP4, WebM, or MKV finalization;
 - automatic validated multi-worker transfers for large media, with bounded resume state and safe sequential fallback;
 - native M4A/WebM audio saves plus bundled-FFmpeg MP3, AAC/M4A, Opus/OGG, WAV, and FLAC conversion in current `main`;
+- optional resolution-aware H.264/AAC MP4, H.265/AAC MP4, and VP9/Opus WebM conversion presets in current `main`, with original-quality stream copy remaining default;
 - caption-track metadata plus manual/auto language selection and atomic SRT/WebVTT sidecar saves;
 - on-demand validated thumbnail saves and stable JSON metadata sidecars with chapters but without signed stream URLs;
 - bounded playlist/channel enumeration with per-video selection, source ordering, indexed filenames, and batch queue preparation;
@@ -42,7 +43,7 @@ Working now:
 - reproducible portable framework-dependent and self-contained Windows x64 packaging with SHA-256 manifests.
 - branded per-user installer, Add/Remove Programs integration, clean uninstall, and opt-in verified updates from the official GitHub release.
 
-Not included: active/upcoming live capture, authenticated/access-controlled media, or video re-encoding.
+Not included: active/upcoming live capture or authenticated/access-controlled media.
 
 ## Baseline
 

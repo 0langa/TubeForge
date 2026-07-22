@@ -353,6 +353,24 @@
                                 </StackPanel>
                             </Grid>
 
+                            <StackPanel Margin="0,16,0,0"
+                                        Visibility="{Binding IsAudioVideo, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                <TextBlock Text="OUTPUT PRESET" Style="{StaticResource FieldLabel}" />
+                                <ComboBox ItemsSource="{Binding VideoProcessingOptions}"
+                                          SelectedItem="{Binding SelectedVideoProcessing}"
+                                          AutomationProperties.Name="Video output preset" MinHeight="48">
+                                    <ComboBox.ItemTemplate>
+                                        <DataTemplate>
+                                            <StackPanel>
+                                                <TextBlock Text="{Binding Label}" />
+                                                <TextBlock Text="{Binding Description}" FontSize="10"
+                                                           Foreground="{StaticResource MutedTextBrush}" />
+                                            </StackPanel>
+                                        </DataTemplate>
+                                    </ComboBox.ItemTemplate>
+                                </ComboBox>
+                            </StackPanel>
+
                             <Grid Margin="0,16,0,0"
                                   Visibility="{Binding IsAudioOnly, Converter={StaticResource BooleanToVisibilityConverter}}">
                                 <Grid.ColumnDefinitions>
@@ -919,7 +937,7 @@
                                 <TextBlock Text="OUTPUT PREFERENCE" Style="{StaticResource FieldLabel}" />
                                 <TextBlock Text="MP4 preferred when video quality is equal; higher-quality WebM remains available."
                                            Margin="0,6,0,0" TextWrapping="Wrap" Foreground="#A8B7CE" />
-                                <TextBlock Text="FFmpeg stream-copies video/audio tracks into indexed MP4 or validated WebM/MKV; MP3, AAC/M4A, Opus/OGG, WAV, and FLAC outputs re-encode audio only. No yt-dlp."
+                                <TextBlock Text="Original-quality MP4/WebM/MKV uses FFmpeg stream copy. Optional H.264, H.265, VP9, MP3, AAC, Opus, WAV, and FLAC profiles re-encode locally. No yt-dlp."
                                            Margin="0,4,0,0" FontSize="10" Foreground="{StaticResource MutedTextBrush}" />
                             </StackPanel>
                         </Border>

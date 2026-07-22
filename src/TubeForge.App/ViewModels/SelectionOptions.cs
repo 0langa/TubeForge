@@ -11,8 +11,8 @@ public sealed record DownloadModeOption(
     public override string ToString() => Label;
 }
 
-public sealed record AudioProcessingOption(
-    AudioOutputProfile Value,
+public sealed record OutputProcessingOption(
+    OutputProfile Value,
     string Label,
     string Description)
 {

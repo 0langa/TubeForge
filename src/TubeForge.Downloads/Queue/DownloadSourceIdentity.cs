@@ -7,13 +7,13 @@ public readonly record struct DownloadSourceIdentity(
     YouTubeVideoId VideoId,
     int PrimaryFormatId,
     int? AudioFormatId,
-    AudioOutputProfile Output = default)
+    OutputProfile Output = default)
 {
     public static string Create(
         YouTubeVideoId videoId,
         int primaryFormatId,
         int? audioFormatId = null,
-        AudioOutputProfile output = default)
+        OutputProfile output = default)
     {
         if (primaryFormatId <= 0)
         {
@@ -27,13 +27,13 @@ public readonly record struct DownloadSourceIdentity(
 
         if (!output.IsValid)
         {
-            throw new ArgumentException("The audio output profile is invalid.", nameof(output));
+            throw new ArgumentException("The output profile is invalid.", nameof(output));
         }
 
         var streams = audioFormatId is null
             ? $"{videoId.Value}:{primaryFormatId}"
             : $"{videoId.Value}:{primaryFormatId}+{audioFormatId.Value}";
-        return output.Kind == AudioOutputKind.Native
+        return output.Kind == OutputProfileKind.Native
             ? streams
             : $"{streams}@{output.Identity}";
     }
@@ -60,12 +60,12 @@ public readonly record struct DownloadSourceIdentity(
             return false;
         }
 
-        var output = AudioOutputProfile.Native;
+        var output = OutputProfile.Native;
         if (at >= 0)
         {
             if (at == formatPart.Length - 1 ||
-                !AudioOutputProfile.TryParseIdentity(formatPart[(at + 1)..], out output) ||
-                output.Kind == AudioOutputKind.Native)
+                !OutputProfile.TryParseIdentity(formatPart[(at + 1)..], out output) ||
+                output.Kind == OutputProfileKind.Native)
             {
                 return false;
             }

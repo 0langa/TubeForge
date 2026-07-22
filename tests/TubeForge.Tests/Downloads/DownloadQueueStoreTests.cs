@@ -153,31 +153,34 @@ public static class DownloadQueueStoreTests
     }
 
     [Test]
-    public static async Task PersistsEveryConvertedAudioOutputProfileAcrossRestart()
+    public static async Task PersistsEveryConvertedOutputProfileAcrossRestart()
     {
         using var directory = new TestDirectory();
         var path = Path.Combine(directory.Path, "queue.json");
         var store = new DownloadQueueStore(path);
         var profiles = new[]
         {
-            AudioOutputProfile.Mp3(320),
-            AudioOutputProfile.Aac(256),
-            AudioOutputProfile.Opus(160),
-            AudioOutputProfile.Wav,
-            AudioOutputProfile.Flac
+            OutputProfile.Mp3(320),
+            OutputProfile.Aac(256),
+            OutputProfile.Opus(160),
+            OutputProfile.Wav,
+            OutputProfile.Flac,
+            OutputProfile.H264AacMp4,
+            OutputProfile.H265AacMp4,
+            OutputProfile.Vp9OpusWebM
         };
         var items = profiles.Select(profile => Item(
                 Guid.NewGuid(),
                 DownloadQueueStatus.Queued,
                 DateTimeOffset.UtcNow) with
-            {
-                FormatId = 140,
-                SourceIdentity = $"Fixture123_:140@{profile.Identity}",
-                DestinationPath = Path.Combine(
+        {
+            FormatId = 140,
+            SourceIdentity = $"Fixture123_:140@{profile.Identity}",
+            DestinationPath = Path.Combine(
                     Path.GetTempPath(),
                     "TubeForge.Tests",
                     "fixture-" + profile.Identity + profile.Extension)
-            }).ToArray();
+        }).ToArray();
 
         var save = await store.SaveAsync(new DownloadQueueSnapshot { Items = items });
         Assert.True(save.IsSuccess, save.Error?.Message);

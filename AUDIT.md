@@ -14,6 +14,7 @@ TubeForge is no longer a thin prototype. Current `main` builds cleanly and alrea
 - Progressive, native audio-only, video-only, and adaptive video+audio download paths.
 - MP4, WebM, MKV finalization through pinned bundled FFmpeg stream copy.
 - MP3, AAC/M4A, Opus/OGG, WAV, and FLAC audio conversion through bundled FFmpeg, with fail-closed output validation and queue recovery.
+- Optional resolution-aware H.264/AAC MP4, H.265/AAC MP4, and VP9/Opus WebM conversion presets, with native stream copy remaining default.
 - Captions, thumbnails, JSON sidecars, chapters in metadata, filename templates, duplicate detection, resumable `.part` files, segmented transfer, disk forecasting, queue recovery, installer, release scripts, optional Authenticode signing, GitHub release update checks, and redacted diagnostics.
 
 Verified during this audit:
@@ -28,13 +29,13 @@ Result: passed, 0 warnings, 0 errors.
 dotnet run --project tests\TubeForge.Tests --configuration Release --no-build -- --all
 ```
 
-Result after first Phase 1 audio-output slice: 178/178 passed in 32722 ms.
+Result after Phase 1 profile/transcode implementation: 186/186 passed in 31234 ms.
 
 ```powershell
 dotnet run --project tools\TubeForge.Performance --configuration Release --no-build -- --core-only
 ```
 
-Result after first Phase 1 audio-output slice: passed. Core parser p95 0.4092 ms against 25 ms budget.
+Result after Phase 1 profile/transcode implementation: passed. Core parser p95 0.1225 ms against 25 ms budget.
 
 Not verified in this audit: live YouTube canary downloads, installer publication, installer execution, desktop visual/performance probe, update flow against a real GitHub release, code signing, VirusTotal/SmartScreen reputation, store/winget distribution, long-run queue soak, or accessibility with Narrator/NVDA.
 
@@ -65,8 +66,8 @@ Popular tools define user expectations beyond "download a public YouTube video":
 | M4A/WebM audio | Present | Expected | Low |
 | OGG/Opus output | Present through bundled FFmpeg | Common in 4K/yt-dlp workflows | Low, needs release live smoke |
 | AAC/WAV/FLAC device/audio conversion | Present through bundled FFmpeg | Common in paid tools | Low, needs release live smoke |
-| Video re-encoding/transcoding | Explicitly unsupported | Common in paid tools and yt-dlp+FFmpeg | High if v2 wants broad format parity |
-| Presets/device profiles | Not present | Common in mainstream apps | Medium |
+| Video re-encoding/transcoding | H.264/AAC MP4, H.265/AAC MP4, VP9/Opus WebM presets present in current `main` | Common in paid tools and yt-dlp+FFmpeg | Medium, needs installed-app live proof |
+| Presets/device profiles | Original, compatible MP4, compact MP4, and open WebM choices present | Common in mainstream apps | Medium, broader device/custom presets remain |
 | Playlists/channels | Present with bounded selection | Required | Medium, needs monitoring/sync |
 | Auto-download new playlist/channel items | Not present | Present in 4K/MediaHuman/Tartube-like workflows | High |
 | Private/account videos | Explicitly unsupported | Many mainstream tools support authenticated accessible content | Strategic gap |
@@ -146,21 +147,21 @@ Recommendation:
 - Add live/M3U8 as an explicit v2 feature only if legal and safety posture remains clear.
 - Start with public HLS capture, no DRM, no login, time/size limits, resumable segment journal, and MKV/MP4 finalization.
 
-### P1: Video Re-Encoding And Device Presets Missing
+### P1: Video Re-Encoding Implemented; Release-Grade Live Proof Missing
 
-README says video re-encoding is not included. Market tools commonly expose MP4/MP3 plus device profiles, compression, trimming, and format conversion.
+Current `main` exposes original stream copy plus three bounded video conversion profiles. Market tools still expose broader device, compression, trimming, and custom controls.
 
 Wrong/optimizable:
 
-- TubeForge can stream-copy video reliably, but cannot convert AV1/VP9 to H.264 MP4 for maximum playback compatibility.
-- Users expecting "many audio and video formats" still lack video conversion targets such as H.264/H.265 compatibility MP4, MOV/AVI-style workflows, device profiles, and quality-size presets.
-- No UI explains difference between lossless muxing, audio-only re-encode, and video transcode in user terms beyond current notices.
+- H.264/AAC MP4, H.265/AAC MP4, and VP9/Opus WebM conversion now use allowlisted encoders from the pinned LGPL FFmpeg build.
+- Target video bitrate follows a bounded resolution ladder and is persisted in queue identity; H.265 pads dimensions by at most seven pixels per axis when required by `libkvazaar`.
+- MOV/AVI workflows, user-defined encoder controls, and named device profiles remain absent.
 
 Recommendation:
 
-- Keep implemented audio profiles: AAC/M4A, Opus/OGG, WAV, and FLAC. Add constrained optional FFmpeg video transcode profiles for v2: H.264/AAC MP4, H.265/AAC MP4, and VP9/Opus WebM.
-- Keep stream-copy default; mark transcode as slower/larger CPU cost.
-- Add tests for command-line arguments, cancellation, temporary files, validation, and failed-output cleanup.
+- Keep stream-copy default and conversion explicitly opt-in.
+- Run installed-app live source-to-output proof for every video profile before release.
+- Add custom/device profiles only after measured quality, time, and file-size evidence.
 
 ### P1: Release-Grade Live Evidence Not Current
 

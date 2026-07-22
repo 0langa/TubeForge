@@ -2,7 +2,7 @@ using TubeForge.Core.Media;
 
 namespace TubeForge.Transcoding;
 
-public sealed record AudioTranscodeRequest
+public sealed record VideoTranscodeRequest
 {
     public required string SourcePath { get; init; }
 
@@ -13,9 +13,7 @@ public sealed record AudioTranscodeRequest
     public bool AllowExistingValidatedOutput { get; init; }
 }
 
-public sealed record AudioTranscodeReceipt(
+public sealed record VideoTranscodeReceipt(
     string DestinationPath,
     long BytesWritten,
-    int BitrateKbps,
-    int Channels,
-    int SampleRate);
+    OutputProfile Output);
