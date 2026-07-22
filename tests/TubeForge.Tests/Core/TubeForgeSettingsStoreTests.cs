@@ -20,6 +20,11 @@ public static class TubeForgeSettingsStoreTests
             FileNameTemplate = "{channel} - {title} [{quality}]",
             EnableAcceleratedTransfers = false,
             EnableAutomaticUpdateChecks = false,
+            ProxyMode = NetworkProxyMode.Manual,
+            ManualProxyUri = "http://127.0.0.1:8080/",
+            MetadataTimeoutSeconds = 45,
+            DownloadRetryAttempts = 5,
+            PerHostConcurrency = 1,
             ResponsibleUseAccepted = true
         });
         var loaded = await store.LoadAsync(defaults);
@@ -32,6 +37,11 @@ public static class TubeForgeSettingsStoreTests
         Assert.Equal("{channel} - {title} [{quality}]", loaded.Value.FileNameTemplate);
         Assert.False(loaded.Value.EnableAcceleratedTransfers);
         Assert.False(loaded.Value.EnableAutomaticUpdateChecks);
+        Assert.Equal(NetworkProxyMode.Manual, loaded.Value.ProxyMode);
+        Assert.Equal("http://127.0.0.1:8080/", loaded.Value.ManualProxyUri);
+        Assert.Equal(45, loaded.Value.MetadataTimeoutSeconds);
+        Assert.Equal(5, loaded.Value.DownloadRetryAttempts);
+        Assert.Equal(1, loaded.Value.PerHostConcurrency);
         Assert.True(loaded.Value.ResponsibleUseAccepted);
     }
 
@@ -50,6 +60,16 @@ public static class TubeForgeSettingsStoreTests
         {
             FileNameTemplate = "{unknown}"
         });
+        var credentialedProxy = await store.SaveAsync(Settings(directory.Path) with
+        {
+            ProxyMode = NetworkProxyMode.Manual,
+            ManualProxyUri = "http://user:password@127.0.0.1:8080/"
+        });
+        var unusedProxy = await store.SaveAsync(Settings(directory.Path) with
+        {
+            ProxyMode = NetworkProxyMode.None,
+            ManualProxyUri = "not-used"
+        });
         await File.WriteAllTextAsync(path, "{ malformed");
 
         var corrupt = await store.LoadAsync(Settings(directory.Path));
@@ -60,6 +80,9 @@ public static class TubeForgeSettingsStoreTests
         Assert.Equal("Settings.InvalidState", unsafePath.Error?.Code);
         Assert.False(invalidTemplate.IsSuccess);
         Assert.Equal("Settings.InvalidState", invalidTemplate.Error?.Code);
+        Assert.False(credentialedProxy.IsSuccess);
+        Assert.False(unusedProxy.IsSuccess);
+        Assert.Equal("Settings.InvalidState", credentialedProxy.Error?.Code);
         Assert.False(corrupt.IsSuccess);
         Assert.Equal("Settings.Corrupt", corrupt.Error?.Code);
         Assert.Equal("{ malformed", await File.ReadAllTextAsync(path));
@@ -112,6 +135,34 @@ public static class TubeForgeSettingsStoreTests
         Assert.True(loaded.IsSuccess, loaded.Error?.Message);
         Assert.Equal(TubeForgeSettings.CurrentSchemaVersion, loaded.Value.SchemaVersion);
         Assert.True(loaded.Value.EnableAcceleratedTransfers);
+    }
+
+    [Test]
+    public static async Task MigratesPublishedSchemaThreeToSafeNetworkDefaults()
+    {
+        using var directory = new TestDirectory();
+        var path = Path.Combine(directory.Path, "settings.json");
+        await File.WriteAllTextAsync(path, JsonSerializer.Serialize(new
+        {
+            schemaVersion = 3,
+            downloadFolder = Path.GetFullPath(directory.Path),
+            maximumConcurrentDownloads = 2,
+            fileNameTemplate = "{title}",
+            enableAcceleratedTransfers = true,
+            enableAutomaticUpdateChecks = true,
+            librarySortOrder = 0,
+            responsibleUseAccepted = true
+        }));
+
+        var loaded = await new TubeForgeSettingsStore(path).LoadAsync(Settings(directory.Path));
+
+        Assert.True(loaded.IsSuccess, loaded.Error?.Message);
+        Assert.Equal(TubeForgeSettings.CurrentSchemaVersion, loaded.Value.SchemaVersion);
+        Assert.Equal(NetworkProxyMode.System, loaded.Value.ProxyMode);
+        Assert.Equal(string.Empty, loaded.Value.ManualProxyUri);
+        Assert.Equal(20, loaded.Value.MetadataTimeoutSeconds);
+        Assert.Equal(3, loaded.Value.DownloadRetryAttempts);
+        Assert.Equal(2, loaded.Value.PerHostConcurrency);
     }
 
     private static TubeForgeSettings Settings(string folder) => new()

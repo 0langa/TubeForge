@@ -2,7 +2,7 @@ namespace TubeForge.Core.Settings;
 
 public sealed record TubeForgeSettings
 {
-    public const int CurrentSchemaVersion = 3;
+    public const int CurrentSchemaVersion = 4;
 
     public int SchemaVersion { get; init; } = CurrentSchemaVersion;
 
@@ -16,9 +16,26 @@ public sealed record TubeForgeSettings
 
     public bool EnableAutomaticUpdateChecks { get; init; } = true;
 
+    public NetworkProxyMode ProxyMode { get; init; } = NetworkProxyMode.System;
+
+    public string ManualProxyUri { get; init; } = string.Empty;
+
+    public int MetadataTimeoutSeconds { get; init; } = 20;
+
+    public int DownloadRetryAttempts { get; init; } = 3;
+
+    public int PerHostConcurrency { get; init; } = 2;
+
     public LibrarySortOrder LibrarySortOrder { get; init; } = LibrarySortOrder.NewestFirst;
 
     public bool ResponsibleUseAccepted { get; init; }
+}
+
+public enum NetworkProxyMode
+{
+    System,
+    Manual,
+    None
 }
 
 public enum LibrarySortOrder

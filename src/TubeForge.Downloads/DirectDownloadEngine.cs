@@ -20,12 +20,14 @@ public sealed class DirectDownloadEngine
     private readonly Func<TimeSpan, CancellationToken, Task> _delay;
     private readonly Func<string, bool, Stream> _outputStreamFactory;
     private readonly SegmentedDownloadEngine _segmentedDownloadEngine;
+    private readonly int _maximumAttempts;
 
     public DirectDownloadEngine(
         HttpClient httpClient,
         DownloadUriPolicy? uriPolicy = null,
-        Func<TimeSpan, CancellationToken, Task>? delay = null)
-        : this(httpClient, uriPolicy, delay, outputStreamFactory: null)
+        Func<TimeSpan, CancellationToken, Task>? delay = null,
+        int maximumAttempts = DownloadRetryPolicy.MaximumAttempts)
+        : this(httpClient, uriPolicy, delay, outputStreamFactory: null, maximumAttempts)
     {
     }
 
@@ -33,12 +35,19 @@ public sealed class DirectDownloadEngine
         HttpClient httpClient,
         DownloadUriPolicy? uriPolicy,
         Func<TimeSpan, CancellationToken, Task>? delay,
-        Func<string, bool, Stream>? outputStreamFactory)
+        Func<string, bool, Stream>? outputStreamFactory,
+        int maximumAttempts = DownloadRetryPolicy.MaximumAttempts)
     {
         _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
         _uriPolicy = uriPolicy ?? DownloadUriPolicy.YouTubeMediaOnly;
         _delay = delay ?? Task.Delay;
         _outputStreamFactory = outputStreamFactory ?? CreateOutputStream;
+        if (maximumAttempts is < 1 or > 5)
+        {
+            throw new ArgumentOutOfRangeException(nameof(maximumAttempts));
+        }
+
+        _maximumAttempts = maximumAttempts;
         _segmentedDownloadEngine = new SegmentedDownloadEngine(_httpClient, _uriPolicy);
     }
 
@@ -54,7 +63,7 @@ public sealed class DirectDownloadEngine
         }
 
         var useSegmentedTransfer = SegmentedDownloadEngine.ShouldUse(request);
-        for (var attempt = 1; attempt <= DownloadRetryPolicy.MaximumAttempts; attempt++)
+        for (var attempt = 1; attempt <= _maximumAttempts; attempt++)
         {
             var result = useSegmentedTransfer
                 ? await _segmentedDownloadEngine.DownloadAttemptAsync(request, progress, cancellationToken)
@@ -69,7 +78,7 @@ public sealed class DirectDownloadEngine
 
             if (result.IsSuccess ||
                 result.Error?.IsTransient != true ||
-                attempt == DownloadRetryPolicy.MaximumAttempts ||
+                attempt == _maximumAttempts ||
                 cancellationToken.IsCancellationRequested)
             {
                 return result;

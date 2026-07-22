@@ -29,6 +29,7 @@ Working now:
 - on-demand validated thumbnail saves and stable JSON metadata sidecars with chapters but without signed stream URLs;
 - bounded playlist/channel enumeration with per-video selection, source ordering, indexed filenames, and batch queue preparation;
 - shared per-provider request limits and bounded `Retry-After` backoff that stops persistent rate-limited bulk preparation;
+- unified system/manual/off proxy settings for metadata, collections, captions, thumbnails, media, and updates, with bounded metadata timeout, media retries, and per-host concurrency; proxy credentials are rejected and never stored;
 - customizable token-based filenames plus a durable local Library used for exact-output and destination duplicate detection;
 - searchable/sortable Library history with one-click cleanup for records whose files were moved or deleted;
 - Short and completed-live-replay classification, sidecar metadata, and normal highest-quality adaptive downloads; active/upcoming capture is explicitly unsupported;

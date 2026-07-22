@@ -16,7 +16,7 @@ TubeForge is no longer a thin prototype. Current `main` builds cleanly and alrea
 - MP3, AAC/M4A, Opus/OGG, WAV, and FLAC audio conversion through bundled FFmpeg, with fail-closed output validation and queue recovery.
 - Optional resolution-aware H.264/AAC MP4, H.265/AAC MP4, and VP9/Opus WebM conversion presets, with native stream copy remaining default.
 - Preset-first setup for Best original, Windows MP4, Small file, MP3 320, and fully custom selection.
-- Caption SRT/WebVTT sidecars plus opt-in single-video MP4/MKV/WebM soft-subtitle embedding, thumbnails, JSON sidecars, chapters in metadata, filename templates, duplicate detection, resumable `.part` files, segmented transfer, disk forecasting, queue recovery, installer, release scripts, optional Authenticode signing, GitHub release update checks, and redacted diagnostics.
+- Caption SRT/WebVTT sidecars plus opt-in single-video MP4/MKV/WebM soft-subtitle embedding, thumbnails, JSON sidecars, chapters in metadata, filename templates, duplicate detection, resumable `.part` files, segmented transfer, disk forecasting, queue recovery, unified system/manual/off proxy controls, installer, release scripts, optional Authenticode signing, GitHub release update checks, and redacted diagnostics.
 
 Verified during this audit:
 
@@ -30,13 +30,13 @@ Result: passed, 0 warnings, 0 errors.
 dotnet run --project tests\TubeForge.Tests --configuration Release --no-build -- --all
 ```
 
-Result after soft-subtitle embedding implementation: 192/192 passed in 31779 ms.
+Result after proxy/network controls: 203/203 passed in 42288 ms.
 
 ```powershell
 dotnet run --project tools\TubeForge.Performance --configuration Release --no-build -- --core-only
 ```
 
-Result after soft-subtitle embedding implementation: passed. Core parser p95 0.2201 ms against 25 ms budget.
+Result after proxy/network controls: passed. Core parser p95 0.6765 ms against 25 ms budget.
 
 Not verified in this audit: live YouTube canary downloads, installer publication, installer execution, desktop visual/performance probe, update flow against a real GitHub release, code signing, VirusTotal/SmartScreen reputation, store/winget distribution, long-run queue soak, or accessibility with Narrator/NVDA.
 
@@ -79,11 +79,11 @@ Popular tools define user expectations beyond "download a public YouTube video":
 | SponsorBlock | Not present | Common in yt-dlp GUIs | Medium |
 | Trim/cut/split | Not present | Common in SnapDownloader/VideoProc, chapter split in MediaHuman | Medium |
 | Captions/subtitles | Sidecar SRT/WebVTT plus one selected soft-subtitle track in single-video MP4/MKV/WebM on current v2 branch | Expected | Medium, multi-language batch, burn-in, and installed-app proof remain |
-| Chapter handling | Metadata sidecar only | Embed chapters or split by chapters common | Medium |
+| Chapter handling | Opt-in embed and lossless split on current v2 branch | Embed chapters or split by chapters common | Low, batch controls and installed-app proof remain |
 | Thumbnails/metadata sidecars | Present | Expected | Low |
 | Queue/resume | Strong | Required | Low |
 | Speed acceleration | Present, bounded to 4 workers | Expected | Low, but needs live throughput benchmarks |
-| Proxy | Engine test exists for explicit HTTP proxy; no user-facing setting found | Expected in SnapDownloader/VideoProc/yt-dlp | Medium |
+| Proxy | System/manual/off UI on current v2 branch; shared policy, safe bounds, redacted diagnostics, and metadata/media loopback proof | Expected in SnapDownloader/VideoProc/yt-dlp | Low, installed-app live proof remains |
 | Rate-limit handling | Present bounded backoff | Required | Low |
 | Installer | Present | Expected | Low, but production trust proof missing |
 | Auto-updater | Present as opt-in verified GitHub release flow | Expected | Medium, needs live signed update proof |
@@ -180,20 +180,20 @@ Recommendation:
 - Treat deterministic gates as necessary but insufficient.
 - Block v2 release until live canary, installer, update, playback, and long-run queue evidence are captured.
 
-### P2: Proxy Capability Is Not Productized
+### P2: Proxy Capability Productized; Installed-App Proof Remains
 
-`DirectDownloadEngineTests.DownloadsThroughExplicitHttpProxy` proves engine-level proxy plumbing for direct downloads, but Settings UI does not expose proxy configuration.
+The current v2 branch exposes system/manual/off proxy selection plus bounded metadata timeout, media retries, and per-host concurrency. One credential-free proxy policy is shared by metadata, collections, captions, thumbnails, media, and updates. Loopback tests prove both metadata and media paths.
 
 Wrong/optimizable:
 
-- Users behind networks or regional restrictions cannot configure proxy from UI.
-- Metadata extraction and collection enumeration need proxy parity, not direct transfer only.
+- Installed-app live proxy behavior still needs release evidence.
+- Proxy authentication remains intentionally unsupported until a secure credential store exists.
 
 Recommendation:
 
-- Add proxy settings: off/system/manual HTTP(S), auth optional only if securely stored.
-- Route metadata, captions, thumbnails, updates, and media consistently.
-- Redact proxy host/user in diagnostics unless user opts in.
+- Keep proxy authentication fail-closed unless secure storage is deliberately implemented.
+- Capture sanitized installed-app evidence for metadata and media through an operator-controlled proxy before v2 release.
+- Continue emitting only proxy mode in diagnostics; never endpoint or credential data.
 
 ### P2: SponsorBlock And Trim Workflows Missing
 

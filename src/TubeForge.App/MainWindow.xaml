@@ -923,6 +923,8 @@
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="14" />
                     <RowDefinition Height="Auto" />
+                    <RowDefinition Height="14" />
+                    <RowDefinition Height="Auto" />
                 </Grid.RowDefinitions>
 
                 <StackPanel Grid.Row="0">
@@ -1006,6 +1008,56 @@
 
                 <Border Grid.Row="6" Style="{StaticResource Card}">
                     <StackPanel>
+                        <TextBlock Text="Network" FontSize="17" FontWeight="SemiBold" />
+                        <TextBlock Text="One policy is applied to metadata, collections, captions, thumbnails, media, and update requests."
+                                   Margin="0,7,0,0" TextWrapping="Wrap" Foreground="{StaticResource MutedTextBrush}" />
+
+                        <TextBlock Text="PROXY MODE" Style="{StaticResource FieldLabel}" Margin="0,18,0,6" />
+                        <ComboBox ItemsSource="{Binding ProxyModeOptions}" SelectedItem="{Binding SelectedProxyMode}"
+                                  Width="260" HorizontalAlignment="Left"
+                                  AutomationProperties.Name="Network proxy mode" />
+                        <TextBlock Text="MANUAL PROXY ENDPOINT" Style="{StaticResource FieldLabel}" Margin="0,14,0,6" />
+                        <TextBox Text="{Binding ManualProxyUri, UpdateSourceTrigger=PropertyChanged}"
+                                 IsEnabled="{Binding UsesManualProxy}"
+                                 AutomationProperties.Name="Manual HTTP or HTTPS proxy endpoint" />
+                        <TextBlock Text="Example: http://127.0.0.1:8080/. Credentials are rejected and never stored."
+                                   Margin="0,5,0,0" FontSize="10" Foreground="{StaticResource MutedTextBrush}" />
+
+                        <Grid Margin="0,18,0,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="14" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="14" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <StackPanel>
+                                <TextBlock Text="METADATA TIMEOUT (SECONDS)" Style="{StaticResource FieldLabel}" />
+                                <ComboBox ItemsSource="{Binding MetadataTimeoutOptions}"
+                                          SelectedItem="{Binding MetadataTimeoutSeconds}" Margin="0,6,0,0"
+                                          AutomationProperties.Name="Metadata request timeout seconds" />
+                            </StackPanel>
+                            <StackPanel Grid.Column="2">
+                                <TextBlock Text="MEDIA RETRY ATTEMPTS" Style="{StaticResource FieldLabel}" />
+                                <ComboBox ItemsSource="{Binding DownloadRetryOptions}"
+                                          SelectedItem="{Binding DownloadRetryAttempts}" Margin="0,6,0,0"
+                                          AutomationProperties.Name="Media retry attempts" />
+                            </StackPanel>
+                            <StackPanel Grid.Column="4">
+                                <TextBlock Text="REQUESTS PER HOST" Style="{StaticResource FieldLabel}" />
+                                <ComboBox ItemsSource="{Binding PerHostConcurrencyOptions}"
+                                          SelectedItem="{Binding PerHostConcurrency}" Margin="0,6,0,0"
+                                          AutomationProperties.Name="Maximum concurrent requests per provider host" />
+                            </StackPanel>
+                        </Grid>
+                        <TextBlock Text="Provider subdomains share this host limit and honor bounded server Retry-After guidance. Changes apply to new requests after Save settings."
+                                   Margin="0,10,0,0" FontSize="10" TextWrapping="Wrap"
+                                   Foreground="{StaticResource MutedTextBrush}" />
+                    </StackPanel>
+                </Border>
+
+                <Border Grid.Row="8" Style="{StaticResource Card}">
+                    <StackPanel>
                         <TextBlock Text="Updates" FontSize="17" FontWeight="SemiBold" />
                         <TextBlock Text="Stable releases are downloaded from the official GitHub repository and verified with two matching SHA-256 records before they can run."
                                    Margin="0,7,0,0" TextWrapping="Wrap" Foreground="{StaticResource MutedTextBrush}" />
@@ -1038,7 +1090,7 @@
                     </StackPanel>
                 </Border>
 
-                <Border Grid.Row="8" Style="{StaticResource Card}">
+                <Border Grid.Row="10" Style="{StaticResource Card}">
                     <StackPanel>
                         <TextBlock Text="Privacy and responsibility" FontSize="17" FontWeight="SemiBold" />
                         <TextBlock Text="Settings, queue state, and completed-output history stay in local application data. Media URLs, cookies, signatures, visitor data, and telemetry are not persisted."

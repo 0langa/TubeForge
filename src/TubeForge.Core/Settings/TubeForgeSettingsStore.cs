@@ -1,6 +1,7 @@
 using System.Text.Json;
 using TubeForge.Core.Errors;
 using TubeForge.Core.Files;
+using TubeForge.Core.Networking;
 using TubeForge.Core.Results;
 
 namespace TubeForge.Core.Settings;
@@ -171,6 +172,14 @@ public sealed class TubeForgeSettingsStore
         }
 
         if (settings.MaximumConcurrentDownloads is < 1 or > 4 ||
+            settings.PerHostConcurrency is < 1 or > 4 ||
+            settings.MetadataTimeoutSeconds is < 5 or > 120 ||
+            settings.DownloadRetryAttempts is < 1 or > 5 ||
+            !Enum.IsDefined(settings.ProxyMode) ||
+            settings.ProxyMode == NetworkProxyMode.Manual &&
+                !NetworkProxyPolicy.TryParseManualUri(settings.ManualProxyUri, out _) ||
+            settings.ProxyMode != NetworkProxyMode.Manual &&
+                !string.IsNullOrEmpty(settings.ManualProxyUri) ||
             !Enum.IsDefined(settings.LibrarySortOrder) ||
             !FileNameTemplate.IsValid(settings.FileNameTemplate) ||
             string.IsNullOrWhiteSpace(settings.DownloadFolder) ||
@@ -208,6 +217,15 @@ public sealed class TubeForgeSettingsStore
         {
             SchemaVersion = TubeForgeSettings.CurrentSchemaVersion,
             EnableAcceleratedTransfers = true
+        },
+        3 => settings with
+        {
+            SchemaVersion = TubeForgeSettings.CurrentSchemaVersion,
+            ProxyMode = NetworkProxyMode.System,
+            ManualProxyUri = string.Empty,
+            MetadataTimeoutSeconds = 20,
+            DownloadRetryAttempts = 3,
+            PerHostConcurrency = 2
         },
         _ => settings
     };

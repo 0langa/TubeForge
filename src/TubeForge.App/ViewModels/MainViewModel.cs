@@ -13,6 +13,7 @@ using TubeForge.Core.Diagnostics;
 using TubeForge.Core.Errors;
 using TubeForge.Core.Files;
 using TubeForge.Core.Media;
+using TubeForge.Core.Networking;
 using TubeForge.Core.Results;
 using TubeForge.Core.Settings;
 using TubeForge.Core.YouTube;
@@ -31,8 +32,14 @@ namespace TubeForge.App.ViewModels;
 
 public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
 {
-    private const int MaximumConcurrentRequestsPerHost = 2;
     private static readonly Uri YouTubeOrigin = new("https://www.youtube.com/");
+
+    private static readonly IReadOnlyList<FilterOption<NetworkProxyMode>> ProxyModeChoices =
+    [
+        new("Use Windows system proxy", NetworkProxyMode.System),
+        new("Manual HTTP/HTTPS proxy", NetworkProxyMode.Manual),
+        new("No proxy", NetworkProxyMode.None)
+    ];
 
     private static readonly IReadOnlyList<DownloadModeOption> BaseModeChoices =
     [
@@ -88,9 +95,9 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     private readonly HttpClient _httpClient;
     private readonly HttpClient _sidecarHttpClient;
     private readonly HttpClient _updateHttpClient;
-    private readonly YouTubeMetadataResolver _resolver;
-    private readonly DirectDownloadEngine _downloader;
-    private readonly AdaptiveDownloadEngine _adaptiveDownloader;
+    private YouTubeMetadataResolver _resolver;
+    private DirectDownloadEngine _downloader;
+    private AdaptiveDownloadEngine _adaptiveDownloader;
     private readonly FfmpegMediaProcessor _mediaProcessor;
     private readonly FfmpegChapterSplitter _chapterSplitter;
     private readonly FfmpegAudioTranscoder _audioTranscoder;
@@ -104,8 +111,9 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     private readonly GitHubUpdateClient _updateClient;
     private readonly string _updateDirectory;
     private readonly DownloadQueueDispatcher _queueDispatcher = new(2);
-    private readonly HostRequestGate _hostRequestGate;
-    private readonly RateLimitedRequestExecutor _rateLimitedRequests;
+    private HostRequestGate _hostRequestGate;
+    private RateLimitedRequestExecutor _rateLimitedRequests;
+    private readonly ConfigurableWebProxy _networkProxy;
     private readonly SemaphoreSlim _queueMutationLock = new(1, 1);
     private readonly SemaphoreSlim _historyMutationLock = new(1, 1);
     private readonly Dictionary<Guid, QueuedDownloadWork> _preparedQueueWork = [];
@@ -161,6 +169,11 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     private int _selectedMaxConcurrentDownloads = 2;
     private bool _enableAcceleratedTransfers = true;
     private bool _enableAutomaticUpdateChecks = true;
+    private FilterOption<NetworkProxyMode> _selectedProxyMode = ProxyModeChoices[0];
+    private string _manualProxyUri = string.Empty;
+    private int _metadataTimeoutSeconds = 20;
+    private int _downloadRetryAttempts = 3;
+    private int _perHostConcurrency = 2;
     private string _fileNameTemplate = FileNameTemplate.Default;
     private TubeForgeSettings _settings;
     private bool _showResponsibleUseNotice = true;
@@ -189,15 +202,18 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
 
     internal MainViewModel(string? applicationDataDirectory)
     {
-        _hostRequestGate = new HostRequestGate(MaximumConcurrentRequestsPerHost);
+        _hostRequestGate = new HostRequestGate(2);
         _rateLimitedRequests = new RateLimitedRequestExecutor(_hostRequestGate);
+        _networkProxy = new ConfigurableWebProxy(new NetworkProxyConfiguration(NetworkProxyMode.System));
         var handler = new SocketsHttpHandler
         {
             AutomaticDecompression = DecompressionMethods.All,
             AllowAutoRedirect = true,
             MaxAutomaticRedirections = 5,
             ConnectTimeout = TimeSpan.FromSeconds(10),
-            PooledConnectionLifetime = TimeSpan.FromMinutes(5)
+            PooledConnectionLifetime = TimeSpan.FromMinutes(5),
+            Proxy = _networkProxy,
+            UseProxy = true
         };
         _httpClient = new HttpClient(handler) { Timeout = Timeout.InfiniteTimeSpan };
         _resolver = new YouTubeMetadataResolver(_httpClient);
@@ -217,7 +233,9 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             AutomaticDecompression = DecompressionMethods.All,
             AllowAutoRedirect = false,
             ConnectTimeout = TimeSpan.FromSeconds(10),
-            PooledConnectionLifetime = TimeSpan.FromMinutes(5)
+            PooledConnectionLifetime = TimeSpan.FromMinutes(5),
+            Proxy = _networkProxy,
+            UseProxy = true
         };
         _sidecarHttpClient = new HttpClient(sidecarHandler) { Timeout = TimeSpan.FromSeconds(60) };
         _thumbnailDownloader = new ThumbnailDownloadEngine(_sidecarHttpClient);
@@ -226,7 +244,9 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             AutomaticDecompression = DecompressionMethods.All,
             AllowAutoRedirect = false,
             ConnectTimeout = TimeSpan.FromSeconds(10),
-            PooledConnectionLifetime = TimeSpan.FromMinutes(5)
+            PooledConnectionLifetime = TimeSpan.FromMinutes(5),
+            Proxy = _networkProxy,
+            UseProxy = true
         };
         _updateHttpClient = new HttpClient(updateHandler) { Timeout = TimeSpan.FromSeconds(60) };
         _updateClient = new GitHubUpdateClient(_updateHttpClient);
@@ -274,7 +294,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         ShowLibraryCommand = new RelayCommand(() => ShowPage(AppPage.Library));
         ShowSettingsCommand = new RelayCommand(() => ShowPage(AppPage.Settings));
         ShowDiagnosticsCommand = new RelayCommand(() => ShowPage(AppPage.Diagnostics));
-        SaveSettingsCommand = new AsyncRelayCommand(SaveSettingsAsync);
+        SaveSettingsCommand = new AsyncRelayCommand(SaveSettingsAsync, () => !IsBusy);
         AcceptResponsibleUseCommand = new AsyncRelayCommand(AcceptResponsibleUseAsync);
         CheckForUpdatesCommand = new AsyncRelayCommand(
             () => CheckForUpdatesAsync(isAutomatic: false),
@@ -354,6 +374,14 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     public AsyncRelayCommand RemoveMissingHistoryCommand { get; }
 
     public IReadOnlyList<int> MaxConcurrentDownloadOptions { get; } = [1, 2, 3, 4];
+
+    public IReadOnlyList<FilterOption<NetworkProxyMode>> ProxyModeOptions => ProxyModeChoices;
+
+    public IReadOnlyList<int> MetadataTimeoutOptions { get; } = [5, 10, 20, 30, 60, 120];
+
+    public IReadOnlyList<int> DownloadRetryOptions { get; } = [1, 2, 3, 4, 5];
+
+    public IReadOnlyList<int> PerHostConcurrencyOptions { get; } = [1, 2, 3, 4];
 
     public string UrlText
     {
@@ -694,6 +722,44 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         set => Set(ref _enableAutomaticUpdateChecks, value);
     }
 
+    public FilterOption<NetworkProxyMode> SelectedProxyMode
+    {
+        get => _selectedProxyMode;
+        set
+        {
+            if (value is not null && Set(ref _selectedProxyMode, value))
+            {
+                OnPropertyChanged(nameof(UsesManualProxy));
+            }
+        }
+    }
+
+    public bool UsesManualProxy => SelectedProxyMode.Value == NetworkProxyMode.Manual;
+
+    public string ManualProxyUri
+    {
+        get => _manualProxyUri;
+        set => Set(ref _manualProxyUri, value ?? string.Empty);
+    }
+
+    public int MetadataTimeoutSeconds
+    {
+        get => _metadataTimeoutSeconds;
+        set => Set(ref _metadataTimeoutSeconds, value);
+    }
+
+    public int DownloadRetryAttempts
+    {
+        get => _downloadRetryAttempts;
+        set => Set(ref _downloadRetryAttempts, value);
+    }
+
+    public int PerHostConcurrency
+    {
+        get => _perHostConcurrency;
+        set => Set(ref _perHostConcurrency, value);
+    }
+
     public string FileNameTemplateText
     {
         get => _fileNameTemplate;
@@ -1012,6 +1078,18 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             OnPropertyChanged(nameof(EnableAutomaticUpdateChecks));
             _fileNameTemplate = _settings.FileNameTemplate;
             OnPropertyChanged(nameof(FileNameTemplateText));
+            _selectedProxyMode = ProxyModeChoices.First(option => option.Value == _settings.ProxyMode);
+            OnPropertyChanged(nameof(SelectedProxyMode));
+            OnPropertyChanged(nameof(UsesManualProxy));
+            _manualProxyUri = _settings.ManualProxyUri;
+            OnPropertyChanged(nameof(ManualProxyUri));
+            _metadataTimeoutSeconds = _settings.MetadataTimeoutSeconds;
+            OnPropertyChanged(nameof(MetadataTimeoutSeconds));
+            _downloadRetryAttempts = _settings.DownloadRetryAttempts;
+            OnPropertyChanged(nameof(DownloadRetryAttempts));
+            _perHostConcurrency = _settings.PerHostConcurrency;
+            OnPropertyChanged(nameof(PerHostConcurrency));
+            ApplyNetworkSettings(_settings);
             _selectedLibrarySort = LibrarySortChoices.First(option => option.Value == _settings.LibrarySortOrder);
             OnPropertyChanged(nameof(SelectedLibrarySort));
             ShowResponsibleUseNotice = !_settings.ResponsibleUseAccepted;
@@ -1085,6 +1163,15 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                 throw new ArgumentException("Download folder must be an absolute path.");
             }
 
+            var proxyMode = SelectedProxyMode.Value ?? NetworkProxyMode.System;
+            if (proxyMode == NetworkProxyMode.Manual &&
+                !NetworkProxyPolicy.TryParseManualUri(ManualProxyUri, out _))
+            {
+                ErrorMessage = "Enter an HTTP or HTTPS proxy endpoint without credentials, path, query, or fragment. (Settings.InvalidProxy)";
+                SettingsStatus = "Proxy settings were not saved.";
+                return;
+            }
+
             next = _settings with
             {
                 DownloadFolder = Path.GetFullPath(DownloadFolder),
@@ -1092,6 +1179,11 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                 FileNameTemplate = FileNameTemplateText,
                 EnableAcceleratedTransfers = EnableAcceleratedTransfers,
                 EnableAutomaticUpdateChecks = EnableAutomaticUpdateChecks,
+                ProxyMode = proxyMode,
+                ManualProxyUri = proxyMode == NetworkProxyMode.Manual ? ManualProxyUri.Trim() : string.Empty,
+                MetadataTimeoutSeconds = MetadataTimeoutSeconds,
+                DownloadRetryAttempts = DownloadRetryAttempts,
+                PerHostConcurrency = PerHostConcurrency,
                 LibrarySortOrder = SelectedLibrarySort.Value ?? LibrarySortOrder.NewestFirst
             };
         }
@@ -1111,8 +1203,23 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         }
 
         _settings = next;
+        ApplyNetworkSettings(next);
         ErrorMessage = string.Empty;
-        SettingsStatus = "Settings saved locally.";
+        SettingsStatus = "Settings saved locally and applied to new requests.";
+    }
+
+    private void ApplyNetworkSettings(TubeForgeSettings settings)
+    {
+        _networkProxy.Update(NetworkProxyConfiguration.FromSettings(settings));
+        _resolver = new YouTubeMetadataResolver(
+            _httpClient,
+            TimeSpan.FromSeconds(settings.MetadataTimeoutSeconds));
+        _downloader = new DirectDownloadEngine(
+            _httpClient,
+            maximumAttempts: settings.DownloadRetryAttempts);
+        _adaptiveDownloader = new AdaptiveDownloadEngine(_downloader, _mediaProcessor);
+        _hostRequestGate = new HostRequestGate(settings.PerHostConcurrency);
+        _rateLimitedRequests = new RateLimitedRequestExecutor(_hostRequestGate);
     }
 
     private async Task AcceptResponsibleUseAsync()
@@ -1749,7 +1856,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         PausedQueueItems = _queueSnapshot.Items.Count(item => item.Status == DownloadQueueStatus.Paused),
         CompletedQueueItems = _queueSnapshot.Items.Count(item => item.Status == DownloadQueueStatus.Completed),
         FailedQueueItems = _queueSnapshot.Items.Count(item => item.Status == DownloadQueueStatus.Failed),
-        CancelledQueueItems = _queueSnapshot.Items.Count(item => item.Status == DownloadQueueStatus.Cancelled)
+        CancelledQueueItems = _queueSnapshot.Items.Count(item => item.Status == DownloadQueueStatus.Cancelled),
+        ProxyMode = _settings.ProxyMode.ToString()
     });
 
     public void SetDiagnosticsStatus(string status) => DiagnosticsStatus = status;
@@ -2426,7 +2534,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         var card = QueueItems.FirstOrDefault(item => item.Id == itemId);
         card?.UpdateProgress(progress);
         DownloadFraction = progress.Fraction ?? 0;
-        ProgressDetail = $"{_queueDispatcher.ActiveCount} active · global limit {SelectedMaxConcurrentDownloads} · host limit {MaximumConcurrentRequestsPerHost}";
+        ProgressDetail = $"{_queueDispatcher.ActiveCount} active · global limit {SelectedMaxConcurrentDownloads} · host limit {PerHostConcurrency}";
     }
 
     private long? QueuePartialLength(Guid itemId)
@@ -3944,6 +4052,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         DownloadCaptionCommand.RaiseCanExecuteChanged();
         SaveThumbnailCommand.RaiseCanExecuteChanged();
         SaveMetadataCommand.RaiseCanExecuteChanged();
+        SaveSettingsCommand.RaiseCanExecuteChanged();
         SelectAllCollectionCommand.RaiseCanExecuteChanged();
         SelectNoneCollectionCommand.RaiseCanExecuteChanged();
         QueueCollectionCommand.RaiseCanExecuteChanged();
