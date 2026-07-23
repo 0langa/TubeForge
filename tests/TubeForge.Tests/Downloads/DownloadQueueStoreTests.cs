@@ -219,15 +219,20 @@ public static class DownloadQueueStoreTests
     }
 
     [Test]
-    public static async Task PersistsCaptionEmbedAndAcceptsLargerCompletedMedia()
+    public static async Task PersistsMultiLanguageCaptionEmbedAndAcceptsLargerCompletedMedia()
     {
         using var directory = new TestDirectory();
         var store = new DownloadQueueStore(Path.Combine(directory.Path, "queue.json"));
         var now = DateTimeOffset.UtcNow;
+        var captionIdentity = string.Join(',', Enumerable.Range(0, CaptionEmbedSelectionSet.MaximumTracks)
+            .Select(index => $"m.x{index}{new string('a', 33)}"));
+        var sourceIdentity = $"Fixture123_:18~{captionIdentity}";
+        Assert.True(sourceIdentity.Length > 256);
+        Assert.True(sourceIdentity.Length <= DownloadSourceIdentity.MaximumIdentityLength);
         var completed = Item(Guid.NewGuid(), DownloadQueueStatus.Completed, now) with
         {
             FormatId = 18,
-            SourceIdentity = "Fixture123_:18~m.en-US",
+            SourceIdentity = sourceIdentity,
             ExpectedLength = 1_024,
             BytesReceived = 1_536
         };
@@ -237,7 +242,7 @@ public static class DownloadQueueStoreTests
         Assert.True(save.IsSuccess, save.Error?.Message);
         var load = await new DownloadQueueStore(store.StoragePath).LoadAsync();
         Assert.True(load.IsSuccess, load.Error?.Message);
-        Assert.Equal("Fixture123_:18~m.en-US", load.Value.Items[0].SourceIdentity);
+        Assert.Equal(sourceIdentity, load.Value.Items[0].SourceIdentity);
         Assert.Equal(1_536L, load.Value.Items[0].ExpectedLength);
     }
 

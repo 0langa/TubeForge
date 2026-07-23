@@ -242,7 +242,7 @@ public sealed class DownloadHistoryStore
                 entry.Id == Guid.Empty ||
                 !ids.Add(entry.Id) ||
                 !YouTubeVideoId.TryCreate(entry.VideoId, out var videoId) ||
-                !IsSafeText(entry.SourceIdentity, 256) ||
+                !IsSafeText(entry.SourceIdentity, DownloadSourceIdentity.MaximumIdentityLength) ||
                 !DownloadSourceIdentity.TryParse(entry.SourceIdentity, out var identity) ||
                 identity.VideoId != videoId ||
                 !IsSafeText(entry.DisplayTitle, 512) ||

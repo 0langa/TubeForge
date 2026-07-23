@@ -16,7 +16,7 @@ TubeForge is no longer a thin prototype. Current `main` builds cleanly and alrea
 - MP3, AAC/M4A, Opus/OGG, WAV, and FLAC audio conversion through bundled FFmpeg, with fail-closed output validation and queue recovery.
 - Optional resolution-aware H.264/AAC MP4, H.265/AAC MP4, and VP9/Opus WebM conversion presets, with native stream copy remaining default.
 - Preset-first setup for Best original, Windows MP4, Small file, MP3 320, and fully custom selection.
-- Caption SRT/WebVTT sidecars plus opt-in single-video MP4/MKV/WebM soft-subtitle embedding, chapter embed/split, bounded trim, disabled-by-default SponsorBlock chapter/removal modes, thumbnails, JSON sidecars, filename templates, duplicate detection, resumable `.part` files, segmented transfer, disk forecasting, queue recovery, unified system/manual/off proxy controls, installer, release scripts, optional Authenticode signing, GitHub release update checks, and redacted diagnostics.
+- Caption SRT/WebVTT sidecars plus opt-in embedding of up to eight ordered MP4/MKV/WebM soft-subtitle tracks for single videos and collection/archive queue items, chapter embed/split, bounded trim, disabled-by-default SponsorBlock chapter/removal modes, thumbnails, JSON sidecars, filename templates, duplicate detection, resumable `.part` files, segmented transfer, disk forecasting, queue recovery, unified system/manual/off proxy controls, installer, release scripts, optional Authenticode signing, GitHub release update checks, and redacted diagnostics.
 
 Verified during this audit:
 
@@ -30,7 +30,7 @@ Result: passed, 0 warnings, 0 errors.
 dotnet run --project tests\TubeForge.Tests --configuration Release --no-build -- --all
 ```
 
-Result after the Phase 7 UX slice: 233/233 passed.
+Result after multi-language caption selection: 237/237 passed.
 
 ```powershell
 dotnet run --project tools\TubeForge.Performance --configuration Release --no-build -- --core-only
@@ -80,7 +80,7 @@ Popular tools define user expectations beyond "download a public YouTube video":
 | Multi-site support | YouTube-only | Major competitors support hundreds/thousands of sites | Strategic gap |
 | SponsorBlock | Disabled-by-default category selection with chapter markers or transcode removal on current v2 branch | Common in yt-dlp GUIs | Medium, needs installed-app/live third-party proof |
 | Trim/cut/split | Bounded start/end trim plus chapter split on current v2 branch; copy cuts are keyframe-aligned and selected transcodes are precise | Common in SnapDownloader/VideoProc, chapter split in MediaHuman | Low, needs installed-app proof |
-| Captions/subtitles | Sidecar SRT/WebVTT plus one selected soft-subtitle track in single-video MP4/MKV/WebM on current v2 branch | Expected | Medium, multi-language batch, burn-in, and installed-app proof remain |
+| Captions/subtitles | Sidecar SRT/WebVTT plus up to eight ordered soft-subtitle tracks in single-video and collection/archive MP4/MKV/WebM outputs on current v2 branch | Expected | Low, burn-in is deferred and installed-app proof remains |
 | Chapter handling | Opt-in embed and lossless split on current v2 branch | Embed chapters or split by chapters common | Low, batch controls and installed-app proof remain |
 | Thumbnails/metadata sidecars | Present | Expected | Low |
 | Queue/resume | Strong | Required | Low |
@@ -215,20 +215,20 @@ Recommendation:
 - Preserve the current trim distinction in UI: keyframe-aligned copy for original outputs and precise cut during a selected re-encode.
 - Capture sanitized installed-app evidence for trim, SponsorBlock chapter marking, and SponsorBlock removal before v2 release.
 
-### P2: Caption Embed Implemented; Batch And Burn-In Remain
+### P2: Multi-Language Caption Embed Implemented; Burn-In Deferred
 
-TubeForge can save SRT/WebVTT sidecars and opt in one selected manual/auto track as a soft subtitle in a single-video MP4, MKV, or WebM output. Market tools also support multi-language batch selection and burn-in.
+TubeForge can save SRT/WebVTT sidecars and opt in up to eight ordered manual/auto tracks as soft subtitles in single-video and collection/archive MP4, MKV, or WebM outputs. Queue identity stores only bounded language/type selections, and FFmpeg validates every expected subtitle stream. Permanent burn-in remains outside v2.
 
 Wrong/optimizable:
 
-- No multi-language batch caption selection in UI.
-- No burn-in option.
+- Collection/archive preferences embed all eligible manual tracks or a deterministic bounded manual/auto set; single-video UI exposes individual track checkboxes.
+- No burn-in option by design; soft subtitles stay reversible and do not alter video pixels.
 - Bundled-FFmpeg synthetic smoke verifies MP4 `mov_text`, MKV `srt`, and WebM `webvtt`; installed-app live media proof remains open.
 
 Recommendation:
 
-- Add multi-language selection to single-video and collection queue workflows.
-- Keep burn-in separate because it requires video transcode and permanent image changes.
+- Keep the eight-track bound, canonical queue identity, per-track FFmpeg mapping, and recovery validation covered by deterministic tests.
+- Reconsider burn-in only as a separate post-v2 feature because it requires video transcode and permanent image changes.
 
 ### P2: Queue UX Still Looks Workmanlike Compared With Premium Apps
 

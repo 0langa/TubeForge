@@ -306,7 +306,7 @@ public sealed class DownloadQueueStore
                 !ids.Add(item.Id) ||
                 !YouTubeVideoId.TryCreate(item.VideoId, out _) ||
                 item.FormatId <= 0 ||
-                !IsSafeText(item.SourceIdentity, 256) ||
+                !IsSafeText(item.SourceIdentity, DownloadSourceIdentity.MaximumIdentityLength) ||
                 !DownloadSourceIdentity.TryParse(item.SourceIdentity, out var sourceIdentity) ||
                 sourceIdentity.VideoId.Value != item.VideoId ||
                 sourceIdentity.PrimaryFormatId != item.FormatId ||
@@ -345,7 +345,7 @@ public sealed class DownloadQueueStore
         DownloadSourceIdentity sourceIdentity) =>
         item.Status == DownloadQueueStatus.Completed &&
         (sourceIdentity.Output.Kind != Core.Media.OutputProfileKind.Native ||
-         sourceIdentity.Caption is not null ||
+         sourceIdentity.Captions is not null ||
          sourceIdentity.EmbedChapters ||
          sourceIdentity.SponsorBlock is not null ||
          sourceIdentity.LiveCapture is not null);

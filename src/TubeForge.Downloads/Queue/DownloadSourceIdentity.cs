@@ -8,19 +8,24 @@ public readonly record struct DownloadSourceIdentity(
     int PrimaryFormatId,
     int? AudioFormatId,
     OutputProfile Output = default,
-    CaptionEmbedSelection? Caption = null,
+    CaptionEmbedSelectionSet? Captions = null,
     bool EmbedChapters = false,
     bool SplitChapters = false,
     MediaTrimRange? Trim = null,
     SponsorBlockSelection? SponsorBlock = null,
     LiveCaptureOptions? LiveCapture = null)
 {
+    public const int MaximumIdentityLength = 512;
+
+    public CaptionEmbedSelection? Caption =>
+        Captions is { } set && set.Selections.Count == 1 ? set.Selections[0] : null;
+
     public static string Create(
         YouTubeVideoId videoId,
         int primaryFormatId,
         int? audioFormatId = null,
         OutputProfile output = default,
-        CaptionEmbedSelection? caption = null,
+        CaptionEmbedSelectionSet? captions = null,
         bool embedChapters = false,
         bool splitChapters = false,
         MediaTrimRange? trim = null,
@@ -42,9 +47,9 @@ public readonly record struct DownloadSourceIdentity(
             throw new ArgumentException("The output profile is invalid.", nameof(output));
         }
 
-        if (caption is { IsValid: false })
+        if (captions is { IsValid: false })
         {
-            throw new ArgumentException("The embedded caption selection is invalid.", nameof(caption));
+            throw new ArgumentException("The embedded caption selections are invalid.", nameof(captions));
         }
 
         if (trim is { IsValid: false })
@@ -68,7 +73,7 @@ public readonly record struct DownloadSourceIdentity(
         var media = output.Kind == OutputProfileKind.Native
             ? streams
             : $"{streams}@{output.Identity}";
-        var captioned = caption is null ? media : $"{media}~{caption.Value.Identity}";
+        var captioned = captions is null ? media : $"{media}~{captions.Value.Identity}";
         var chapterMode = (embedChapters, splitChapters) switch
         {
             (true, true) => "chapters+split",
@@ -79,13 +84,19 @@ public readonly record struct DownloadSourceIdentity(
         var chaptered = chapterMode is null ? captioned : $"{captioned}^{chapterMode}";
         var trimmed = trim is null ? chaptered : $"{chaptered}%{trim.Value.Identity}";
         var sponsored = sponsorBlock is null ? trimmed : $"{trimmed}&{sponsorBlock.Value.Identity}";
-        return liveCapture is null ? sponsored : $"{sponsored}!{liveCapture.Value.Identity}";
+        var identity = liveCapture is null ? sponsored : $"{sponsored}!{liveCapture.Value.Identity}";
+        if (identity.Length > MaximumIdentityLength)
+        {
+            throw new ArgumentException("The combined download source identity exceeds its safe limit.");
+        }
+
+        return identity;
     }
 
     public static bool TryParse(string? value, out DownloadSourceIdentity identity)
     {
         identity = default;
-        if (string.IsNullOrWhiteSpace(value))
+        if (string.IsNullOrWhiteSpace(value) || value.Length > MaximumIdentityLength)
         {
             return false;
         }
@@ -180,7 +191,7 @@ public readonly record struct DownloadSourceIdentity(
             formatPart = formatPart[..caret];
         }
 
-        CaptionEmbedSelection? caption = null;
+        CaptionEmbedSelectionSet? captions = null;
         var tilde = formatPart.IndexOf('~');
         if (tilde != formatPart.LastIndexOf('~'))
         {
@@ -190,12 +201,12 @@ public readonly record struct DownloadSourceIdentity(
         if (tilde >= 0)
         {
             if (tilde == formatPart.Length - 1 ||
-                !CaptionEmbedSelection.TryParseIdentity(formatPart[(tilde + 1)..], out var parsedCaption))
+                !CaptionEmbedSelectionSet.TryParseIdentity(formatPart[(tilde + 1)..], out var parsedCaptions))
             {
                 return false;
             }
 
-            caption = parsedCaption;
+            captions = parsedCaptions;
             formatPart = formatPart[..tilde];
         }
 
@@ -248,7 +259,7 @@ public readonly record struct DownloadSourceIdentity(
             primaryFormatId,
             audioFormatId,
             output,
-            caption,
+            captions,
             embedChapters,
             splitChapters,
             trim,

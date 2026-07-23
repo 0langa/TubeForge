@@ -6,6 +6,7 @@ using TubeForge.Core.Errors;
 using TubeForge.Core.Media;
 using TubeForge.Core.Networking;
 using TubeForge.Core.Results;
+using TubeForge.Downloads.Queue;
 using TubeForge.Downloads.Resume;
 using TubeForge.Media;
 
@@ -532,7 +533,8 @@ public sealed class DirectDownloadEngine
                 "The selected media URL is not an approved YouTube media endpoint.");
         }
 
-        if (string.IsNullOrWhiteSpace(request.SourceIdentity) || request.SourceIdentity.Length > 256)
+        if (string.IsNullOrWhiteSpace(request.SourceIdentity) ||
+            request.SourceIdentity.Length > DownloadSourceIdentity.MaximumIdentityLength)
         {
             return new TubeForgeError(
                 "Download.InvalidSourceIdentity",

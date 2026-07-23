@@ -25,7 +25,7 @@ Working now:
 - optional resolution-aware H.264/AAC MP4, H.265/AAC MP4, and VP9/Opus WebM conversion presets in the current development branch, with original-quality stream copy remaining default;
 - preset-first download setup for Best original, Windows MP4, Small file, MP3 320, and fully custom selection in the current development branch;
 - simple-by-default preset selection with persisted first-run folder/preset/update choices, optional advanced format disclosure, consistent vector navigation, and direct recovery links for common failures;
-- caption-track metadata plus manual/auto language selection, atomic SRT/WebVTT sidecar saves, and opt-in single-video soft-subtitle embedding for MP4/MKV/WebM in the current development branch;
+- caption-track metadata plus manual/auto language selection, atomic SRT/WebVTT sidecar saves, and opt-in embedding of up to eight ordered soft-subtitle tracks for single videos and collection/archive queue items in MP4/MKV/WebM;
 - opt-in chapter embedding and lossless chapter splitting for single-video MP4/MKV/WebM outputs, with atomic publication, sanitized numbered names, and queue recovery validation;
 - bounded start/end trim controls with keyframe-aligned stream copy for original outputs, precise trim during selected transcodes, and synchronized caption/chapter rebasing;
 - disabled-by-default SponsorBlock integration using a privacy-preserving video-ID hash prefix, selectable categories, local candidate matching, and either chapter markers or explicit transcode removal;
