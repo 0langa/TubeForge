@@ -659,12 +659,20 @@
                                         Command="{Binding SelectAllCollectionCommand}" />
                                 <Button Style="{StaticResource SecondaryButton}" Content="Select none" Padding="13,8"
                                         Margin="8,0,0,0" Command="{Binding SelectNoneCollectionCommand}" />
+                                <Button Style="{StaticResource SecondaryButton}" Content="Select missing" Padding="13,8"
+                                        Margin="8,0,0,0" Command="{Binding SelectMissingCollectionCommand}"
+                                        ToolTip="Select videos absent from both Queue and Library" />
                             </StackPanel>
                         </Grid>
 
                         <Border Grid.Row="2" Background="#0E1A2B" BorderBrush="#29405F" BorderThickness="1"
                                 CornerRadius="8" Padding="12,10">
                             <Grid>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="12" />
+                                    <RowDefinition Height="Auto" />
+                                </Grid.RowDefinitions>
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="Auto" />
                                     <ColumnDefinition Width="14" />
@@ -677,6 +685,36 @@
                                          AutomationProperties.Name="Collection download folder" />
                                 <Button Grid.Column="4" Style="{StaticResource SecondaryButton}" Content="Browse"
                                         Click="BrowseButton_OnClick" />
+
+                                <Grid Grid.Row="2" Grid.ColumnSpan="5">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="180" />
+                                        <ColumnDefinition Width="12" />
+                                        <ColumnDefinition Width="220" />
+                                        <ColumnDefinition Width="16" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="16" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel>
+                                        <TextBlock Text="ARCHIVE OUTPUT" Style="{StaticResource FieldLabel}" />
+                                        <ComboBox ItemsSource="{Binding ArchiveOutputPresets}"
+                                                  SelectedItem="{Binding SelectedArchiveOutputPreset}"
+                                                  Margin="0,5,0,0" />
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="2">
+                                        <TextBlock Text="CAPTIONS" Style="{StaticResource FieldLabel}" />
+                                        <ComboBox ItemsSource="{Binding ArchiveCaptionPreferences}"
+                                                  SelectedItem="{Binding SelectedArchiveCaptionPreference}"
+                                                  Margin="0,5,0,0" />
+                                    </StackPanel>
+                                    <CheckBox Grid.Column="4" IsChecked="{Binding ArchiveEmbedChapters}"
+                                              Content="Embed chapters when available" VerticalAlignment="Bottom"
+                                              Margin="0,0,0,8" />
+                                    <Button Grid.Column="6" Style="{StaticResource SecondaryButton}"
+                                            Content="Save archive profile" Padding="13,9" VerticalAlignment="Bottom"
+                                            Command="{Binding SaveArchiveProfileCommand}" />
+                                </Grid>
                             </Grid>
                         </Border>
 
@@ -712,7 +750,7 @@
                         </ListBox>
 
                         <Border Grid.Row="6" Background="#111A2A" CornerRadius="8" Padding="12,9">
-                            <TextBlock Text="Best complete file per video: highest-quality compatible video + audio, MP4 preferred only when quality is equal. Use {index} in the filename template to include collection positions."
+                            <TextBlock Text="Archive output uses the selected preset and current filename template. Saving a profile marks the currently listed videos as checked; use Select missing, then Add selected to queue for existing gaps. Use {index} in the filename template to include collection positions."
                                        TextWrapping="Wrap" FontSize="10" Foreground="#A8B7CE" />
                         </Border>
 
@@ -759,6 +797,8 @@
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="24" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="14" />
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="14" />
                     <RowDefinition Height="Auto" />
@@ -840,7 +880,39 @@
                     </Grid>
                 </Border>
 
-                <Border Grid.Row="4">
+                <Border Grid.Row="4" Style="{StaticResource Card}">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="16" />
+                            <ColumnDefinition Width="280" />
+                            <ColumnDefinition Width="10" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="8" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <StackPanel>
+                            <TextBlock Text="PLAYLIST AND CHANNEL ARCHIVES" FontSize="15" FontWeight="SemiBold" />
+                            <TextBlock Text="{Binding ArchiveStatus}" Margin="0,6,0,0" FontSize="10"
+                                       Foreground="{StaticResource MutedTextBrush}" TextWrapping="Wrap"
+                                       AutomationProperties.LiveSetting="Polite" />
+                            <TextBlock Text="{Binding ArchiveStoragePath}" Margin="0,4,0,0" FontSize="9"
+                                       Foreground="{StaticResource MutedTextBrush}" TextWrapping="Wrap" />
+                        </StackPanel>
+                        <ComboBox Grid.Column="2" ItemsSource="{Binding ArchiveProfiles}"
+                                  SelectedItem="{Binding SelectedArchiveProfile}"
+                                  DisplayMemberPath="DisplayName" VerticalAlignment="Center"
+                                  AutomationProperties.Name="Saved collection archive profile" />
+                        <Button Grid.Column="4" Style="{StaticResource PrimaryButton}" Content="Check all new"
+                                Padding="13,9" VerticalAlignment="Center"
+                                Command="{Binding CheckArchiveProfilesCommand}" />
+                        <Button Grid.Column="6" Style="{StaticResource SecondaryButton}" Content="Remove profile"
+                                Padding="13,9" VerticalAlignment="Center"
+                                Command="{Binding RemoveArchiveProfileCommand}" />
+                    </Grid>
+                </Border>
+
+                <Border Grid.Row="6">
                     <Border.Style>
                         <Style TargetType="Border" BasedOn="{StaticResource Card}">
                             <Style.Triggers>
@@ -857,7 +929,7 @@
                     </StackPanel>
                 </Border>
 
-                <ListBox Grid.Row="6" ItemsSource="{Binding HistoryItems}" Height="600"
+                <ListBox Grid.Row="8" ItemsSource="{Binding HistoryItems}" Height="600"
                          ScrollViewer.VerticalScrollBarVisibility="Auto"
                          VirtualizingPanel.IsVirtualizing="True"
                          VirtualizingPanel.VirtualizationMode="Recycling"

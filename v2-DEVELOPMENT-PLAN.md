@@ -9,7 +9,7 @@ Status date: 2026-07-22.
 - Phase 0 complete. Sanitized baseline evidence: [`docs/V2_BASELINE_EVIDENCE.md`](docs/V2_BASELINE_EVIDENCE.md).
 - Phase 1 core implementation complete in working tree: expanded audio outputs plus resolution-aware H.264/AAC MP4, H.265/AAC MP4, and VP9/Opus WebM profiles.
 - General output profiles persist through queue restart, validate before publication/recovery, clean failed temporary files, and use allowlisted FFmpeg arguments from the pinned LGPL build.
-- Verification: Release build 0 warnings/errors; 225/225 deterministic tests; core parser p95 0.4065 ms against 25 ms; bundled FFmpeg encode/decode smoke passed for all four new audio outputs, all three video profiles, MP4/MKV/WebM soft-subtitle/chapter embed/split workflows, trim, SponsorBlock removal, and synthetic HLS-to-MKV capture.
+- Verification: Release build 0 warnings/errors; 231/231 deterministic tests; core parser p95 0.3404 ms against 25 ms; bundled FFmpeg encode/decode smoke passed for all four new audio outputs, all three video profiles, MP4/MKV/WebM soft-subtitle/chapter embed/split workflows, trim, SponsorBlock removal, and synthetic HLS-to-MKV capture.
 - Phase 1 release proof remains open: installed-app live media matrix and measured quality/time/file-size evidence. Broader custom/device presets remain deferred to UX work.
 - Preset-first UX is implemented for Best original, Windows MP4, Small file, MP3 320, and Custom; deterministic tests cover applied state and manual override behavior.
 - Phase 2 subtitle slice implemented: selected manual/auto track can be embedded as a soft subtitle in a single-video MP4, MKV, or WebM download. Queue identity persists language/type without storing caption URLs; FFmpeg validates a subtitle stream before publication or recovery.
@@ -19,7 +19,7 @@ Status date: 2026-07-22.
 - Phase 5 implemented: Settings exposes system/manual/off proxy policy, bounded metadata timeout/media retry/per-host concurrency controls, and applies one credential-free proxy object to metadata, collections, captions, thumbnails, media, and updates. Schema migration is safe, diagnostics emit mode only, and loopback tests prove metadata and media proxy paths.
 - Phase 3 decision complete: v2.0 follows Option A and remains public-only. Cookie import and OAuth are deferred; login-required, private, membership, paid, and other access-controlled media fail with a stable typed error and no credential collection.
 - Phase 4 public-live implementation complete in the working tree: active record-from-now and upcoming wait modes use bounded unencrypted HLS, duration/size/wait limits, trusted-host redirect checks, retrying segment downloads, recoverable hash-only journals, queue pause/resume, and atomic MKV stream-copy finalization. A real authorized public-live canary remains a release gate.
-- Phase 6 Library transfer/repair slice implemented: schema-versioned JSON export/import merges without deleting current records, rejects malformed or oversized input, migrates v1 exports, and bounded rescans repair only unique filename-and-size matches while skipping reparse points. Archive profiles and download-new/missing automation remain open.
+- Phase 6 implemented: schema-versioned Library transfer/repair plus persistent playlist/channel archive profiles. Profiles retain destination/template/output/caption/chapter preferences and bounded checked-item sets; user-initiated checks queue only new items, while Select missing identifies current collection gaps across Queue and Library.
 
 ## v2 Product Definition
 
@@ -251,28 +251,28 @@ Goal: move from one-off downloads to archive workflows.
 
 Tasks:
 
-- Add collection profiles:
-  - Source URL.
-  - Destination.
-  - Filename template.
-  - Output preset.
-  - Caption/chapter preferences.
-  - Last checked item set.
-- Add "download new items" for playlists/channels.
+- [x] Add collection profiles:
+  - [x] Source URL.
+  - [x] Destination.
+  - [x] Filename template.
+  - [x] Output preset.
+  - [x] Caption/chapter preferences.
+  - [x] Last checked item set.
+- [x] Add "download new items" for playlists/channels.
 - [x] Add Library export/import.
 - [x] Add "rescan files" and "repair missing records".
-- Add "download missing from this collection" workflow.
+- [x] Add "download missing from this collection" workflow.
 
 Tests:
 
-- Large playlist continuation and rate limit handling.
-- Duplicate detection across profile updates.
-- Filename collision with index/chapter tokens.
+- [x] Large playlist continuation and rate limit handling.
+- [x] Duplicate source/profile validation and existing Queue/Library duplicate detection across profile checks.
+- [x] Filename collision handling with index/chapter tokens remains shared with manual collection preparation.
 - [x] Import/export schema migration.
 
 Exit gate:
 
-- User can maintain a channel/playlist archive without manually selecting every old item each time.
+- [x] User can maintain a channel/playlist archive without manually selecting every old item each time.
 
 ## Phase 7: UX Polish
 

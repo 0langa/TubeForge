@@ -19,6 +19,7 @@ using TubeForge.Core.Results;
 using TubeForge.Core.Settings;
 using TubeForge.Core.YouTube;
 using TubeForge.Downloads;
+using TubeForge.Downloads.Archives;
 using TubeForge.Downloads.History;
 using TubeForge.Downloads.Hls;
 using TubeForge.Downloads.Queue;
@@ -94,6 +95,21 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         new(CaptionOutputFormat.WebVtt, "WebVTT · native timed text", "vtt")
     ];
 
+    private static readonly IReadOnlyList<ArchiveOutputPresetOption> ArchiveOutputPresetChoices =
+    [
+        new(ArchiveOutputPreset.BestOriginal, "Best original"),
+        new(ArchiveOutputPreset.WindowsCompatibleMp4, "Windows MP4"),
+        new(ArchiveOutputPreset.SmallFile, "Small file"),
+        new(ArchiveOutputPreset.Mp3_320, "MP3 320")
+    ];
+
+    private static readonly IReadOnlyList<ArchiveCaptionPreferenceOption> ArchiveCaptionPreferenceChoices =
+    [
+        new(ArchiveCaptionPreference.None, "No embedded captions"),
+        new(ArchiveCaptionPreference.ManualPreferred, "Embed manual captions"),
+        new(ArchiveCaptionPreference.ManualOrAutomatic, "Manual or automatic captions")
+    ];
+
     private static readonly IReadOnlyList<FilterOption<LibrarySortOrder>> LibrarySortChoices =
     [
         new("Newest first", LibrarySortOrder.NewestFirst),
@@ -119,6 +135,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     private readonly DownloadQueueStore _queueStore;
     private readonly DownloadHistoryStore _historyStore;
     private readonly LibraryTransferService _libraryTransferService = new();
+    private readonly CollectionArchiveStore _archiveStore;
     private readonly TubeForgeSettingsStore _settingsStore;
     private readonly GitHubUpdateClient _updateClient;
     private readonly string _updateDirectory;
@@ -171,11 +188,18 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     private OutputProcessingOption _selectedVideoProcessing = VideoProcessingChoices[0];
     private DownloadQueueSnapshot _queueSnapshot = new();
     private DownloadHistorySnapshot _historySnapshot = new();
+    private CollectionArchiveSnapshot _archiveSnapshot = new();
     private bool _isInitialized;
     private bool _queueUnavailable;
     private bool _historyUnavailable;
     private string _librarySearchText = string.Empty;
     private string _libraryStatus = "Export, import, or rescan durable local history.";
+    private string _archiveStatus = "Save a playlist or channel once, then check it for new items later.";
+    private CollectionArchiveProfile? _selectedArchiveProfile;
+    private ArchiveOutputPresetOption _selectedArchiveOutputPreset = ArchiveOutputPresetChoices[0];
+    private ArchiveCaptionPreferenceOption _selectedArchiveCaptionPreference = ArchiveCaptionPreferenceChoices[0];
+    private bool _archiveEmbedChapters;
+    private CollectionQueueConfiguration? _activeCollectionQueueConfiguration;
     private FilterOption<LibrarySortOrder> _selectedLibrarySort = LibrarySortChoices[0];
     private string _downloadActionLabel = "Add to queue";
     private AppPage _activePage = AppPage.Download;
@@ -285,6 +309,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         applicationDataDirectory = Path.GetFullPath(applicationDataDirectory);
         _queueStore = new DownloadQueueStore(Path.Combine(applicationDataDirectory, "queue.json"));
         _historyStore = new DownloadHistoryStore(Path.Combine(applicationDataDirectory, "history.json"));
+        _archiveStore = new CollectionArchiveStore(Path.Combine(applicationDataDirectory, "archives.json"));
         _settingsStore = new TubeForgeSettingsStore(Path.Combine(applicationDataDirectory, "settings.json"));
         _updateDirectory = Path.Combine(applicationDataDirectory, "updates");
         _downloadFolder = Path.Combine(
@@ -316,6 +341,18 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         QueueCollectionCommand = new AsyncRelayCommand(
             QueueSelectedCollectionAsync,
             () => !ShowResponsibleUseNotice && !IsAnalyzing && CollectionItems.Any(item => item.IsSelected));
+        SelectMissingCollectionCommand = new RelayCommand(
+            SelectMissingCollection,
+            () => !IsAnalyzing && CollectionItems.Count > 0);
+        SaveArchiveProfileCommand = new AsyncRelayCommand(
+            SaveArchiveProfileAsync,
+            () => !ShowResponsibleUseNotice && !IsAnalyzing && _collection is not null);
+        CheckArchiveProfilesCommand = new AsyncRelayCommand(
+            CheckArchiveProfilesAsync,
+            () => !ShowResponsibleUseNotice && !IsAnalyzing && _archiveSnapshot.Profiles.Count > 0);
+        RemoveArchiveProfileCommand = new AsyncRelayCommand(
+            RemoveArchiveProfileAsync,
+            () => !IsAnalyzing && SelectedArchiveProfile is not null);
         CancelAnalysisCommand = new RelayCommand(CancelAnalysis, () => IsAnalyzing);
         CancelCommand = new RelayCommand(PauseAll, () => IsDownloading);
         ShowDownloadCommand = new RelayCommand(() => ShowPage(AppPage.Download));
@@ -350,6 +387,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
 
     public ObservableCollection<HistoryItemViewModel> HistoryItems { get; } = [];
 
+    public ObservableCollection<CollectionArchiveProfile> ArchiveProfiles { get; } = [];
+
     public IReadOnlyList<DownloadModeOption> DownloadModes => _downloadModes;
 
     public IReadOnlyList<DownloadPresetOption> DownloadPresets => DownloadPresetChoices;
@@ -373,6 +412,14 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     public RelayCommand SelectNoneCollectionCommand { get; }
 
     public AsyncRelayCommand QueueCollectionCommand { get; }
+
+    public RelayCommand SelectMissingCollectionCommand { get; }
+
+    public AsyncRelayCommand SaveArchiveProfileCommand { get; }
+
+    public AsyncRelayCommand CheckArchiveProfilesCommand { get; }
+
+    public AsyncRelayCommand RemoveArchiveProfileCommand { get; }
 
     public RelayCommand CancelCommand { get; }
 
@@ -482,6 +529,59 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
 
     public string CollectionSelectionSummary =>
         $"{CollectionItems.Count(item => item.IsSelected)} of {CollectionItems.Count} selected";
+
+    public IReadOnlyList<ArchiveOutputPresetOption> ArchiveOutputPresets => ArchiveOutputPresetChoices;
+
+    public ArchiveOutputPresetOption SelectedArchiveOutputPreset
+    {
+        get => _selectedArchiveOutputPreset;
+        set
+        {
+            if (value is not null)
+            {
+                Set(ref _selectedArchiveOutputPreset, value);
+            }
+        }
+    }
+
+    public IReadOnlyList<ArchiveCaptionPreferenceOption> ArchiveCaptionPreferences =>
+        ArchiveCaptionPreferenceChoices;
+
+    public ArchiveCaptionPreferenceOption SelectedArchiveCaptionPreference
+    {
+        get => _selectedArchiveCaptionPreference;
+        set
+        {
+            if (value is not null)
+            {
+                Set(ref _selectedArchiveCaptionPreference, value);
+            }
+        }
+    }
+
+    public bool ArchiveEmbedChapters
+    {
+        get => _archiveEmbedChapters;
+        set => Set(ref _archiveEmbedChapters, value);
+    }
+
+    public CollectionArchiveProfile? SelectedArchiveProfile
+    {
+        get => _selectedArchiveProfile;
+        set
+        {
+            if (Set(ref _selectedArchiveProfile, value))
+            {
+                RemoveArchiveProfileCommand.RaiseCanExecuteChanged();
+            }
+        }
+    }
+
+    public string ArchiveStatus
+    {
+        get => _archiveStatus;
+        private set => Set(ref _archiveStatus, value);
+    }
 
     public IReadOnlyList<CaptionTrackOption> CaptionTracks
     {
@@ -662,6 +762,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     public string QueueStoragePath => _queueStore.StoragePath;
 
     public string HistoryStoragePath => _historyStore.StoragePath;
+
+    public string ArchiveStoragePath => _archiveStore.StoragePath;
 
     public string LibraryStatus
     {
@@ -1312,6 +1414,17 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             RebuildHistoryItems();
         }
 
+        var archiveResult = await _archiveStore.LoadAsync();
+        if (!archiveResult.IsSuccess)
+        {
+            ArchiveStatus = $"{archiveResult.Error!.Message} ({archiveResult.Error.Code})";
+        }
+        else
+        {
+            _archiveSnapshot = archiveResult.Value;
+            RebuildArchiveProfiles();
+        }
+
         if (!_queueUnavailable)
         {
             PumpQueue();
@@ -1767,6 +1880,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             return;
         }
 
+        var configuration = _activeCollectionQueueConfiguration ?? CurrentCollectionQueueConfiguration();
+
         await InitializeAsync();
         CancelAnalysis();
         _analysisCancellation = new CancellationTokenSource();
@@ -1822,18 +1937,31 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                 }
 
                 var metadata = resolved.Value.Metadata;
-                var selection = BestCompleteFileSelection(metadata.Formats);
-                if (selection is null)
+                var presetSelection = CollectionPresetSelection(metadata.Formats, configuration.OutputPreset);
+                if (presetSelection is null)
                 {
                     card.SetStatus("Failed · no complete output");
                     failed++;
                     continue;
                 }
 
+                var selection = presetSelection.Value.Selection;
+                var output = presetSelection.Value.Output.ForVideoHeight(selection.Format.Height);
+                var caption = CollectionCaptionSelection(metadata, selection, output, configuration.CaptionPreference);
+                var embedChapters = configuration.EmbedChapters &&
+                                    !output.IsAudioTranscode &&
+                                    metadata.Chapters.Count > 0;
+
                 try
                 {
                     var position = card.Item.Index ?? itemIndex + 1;
-                    var renderedName = RenderFileName(metadata, selection, position, indexWidth);
+                    var renderedName = RenderCollectionFileName(
+                        metadata,
+                        selection,
+                        position,
+                        indexWidth,
+                        output,
+                        configuration.FileNameTemplate);
                     if (!renderedName.IsSuccess)
                     {
                         card.SetStatus($"Failed · {renderedName.Error!.Code}");
@@ -1842,11 +1970,9 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                     }
 
                     var destination = FileNamePolicy.AvailablePath(
-                        DownloadFolder,
+                        configuration.DestinationPath,
                         renderedName.Value,
-                        selection.RequiresMuxing
-                            ? FormatDisplay.Extension(selection.OutputContainer)
-                            : FormatDisplay.OutputExtension(selection.Format),
+                        OutputExtension(selection, output),
                         path => File.Exists(path) ||
                                 File.Exists(path + ".part") ||
                                 _queueSnapshot.Items.Any(existing => existing.DestinationPath.Equals(
@@ -1856,7 +1982,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                                     path,
                                     StringComparison.OrdinalIgnoreCase)));
                     var duplicate = DownloadDuplicateDetector.Find(
-                        SelectionIdentity(metadata, selection),
+                        SelectionIdentity(metadata, selection, output, caption, embedChapters),
                         destination,
                         _queueSnapshot.Items,
                         _historySnapshot.Entries);
@@ -1867,7 +1993,13 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                         continue;
                     }
 
-                    var queueItem = CreateQueueItem(metadata, selection, destination);
+                    var queueItem = CreateQueueItem(
+                        metadata,
+                        selection,
+                        destination,
+                        output,
+                        caption,
+                        embedChapters);
                     var queueError = await UpsertQueueItemAsync(queueItem, cancellationToken);
                     if (queueError is not null)
                     {
@@ -1903,8 +2035,310 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         }
         finally
         {
+            _activeCollectionQueueConfiguration = null;
             IsAnalyzing = false;
         }
+    }
+
+    private CollectionQueueConfiguration CurrentCollectionQueueConfiguration() => new(
+        DownloadFolder,
+        FileNameTemplateText,
+        SelectedArchiveOutputPreset.Value,
+        SelectedArchiveCaptionPreference.Value,
+        ArchiveEmbedChapters);
+
+    private void SelectMissingCollection()
+    {
+        var present = _queueSnapshot.Items
+            .Where(item => item.Status != DownloadQueueStatus.Cancelled)
+            .Select(item => item.VideoId)
+            .Concat(_historySnapshot.Entries.Select(entry => entry.VideoId))
+            .ToHashSet(StringComparer.Ordinal);
+        foreach (var item in CollectionItems)
+        {
+            item.IsSelected = !present.Contains(item.Item.VideoId.Value);
+        }
+
+        CollectionSelectionChanged();
+        StatusMessage = $"Selected {CollectionItems.Count(item => item.IsSelected)} items missing from Queue and Library";
+    }
+
+    private async Task SaveArchiveProfileAsync()
+    {
+        if (_collection is null)
+        {
+            return;
+        }
+
+        try
+        {
+            var now = DateTimeOffset.UtcNow;
+            var sourceUrl = _collection.Source.CanonicalUrl.AbsoluteUri;
+            var existing = _archiveSnapshot.Profiles.FirstOrDefault(profile =>
+                profile.SourceUrl.Equals(sourceUrl, StringComparison.OrdinalIgnoreCase));
+            var profile = new CollectionArchiveProfile
+            {
+                Id = existing?.Id ?? Guid.NewGuid(),
+                SourceKind = _collection.Source.Kind,
+                SourceUrl = sourceUrl,
+                DisplayName = _collection.Title,
+                DestinationPath = Path.GetFullPath(DownloadFolder),
+                FileNameTemplate = FileNameTemplateText,
+                OutputPreset = SelectedArchiveOutputPreset.Value,
+                CaptionPreference = SelectedArchiveCaptionPreference.Value,
+                EmbedChapters = ArchiveEmbedChapters,
+                LastCheckedVideoIds = CollectionItems
+                    .Select(item => item.Item.VideoId.Value)
+                    .Distinct(StringComparer.Ordinal)
+                    .Take(CollectionArchiveStore.MaximumCheckedItems)
+                    .ToArray(),
+                CreatedAtUtc = existing?.CreatedAtUtc ?? now,
+                LastCheckedAtUtc = now
+            };
+            var next = new CollectionArchiveSnapshot
+            {
+                Profiles = _archiveSnapshot.Profiles
+                    .Where(candidate => candidate.Id != profile.Id)
+                    .Append(profile)
+                    .OrderBy(candidate => candidate.DisplayName, StringComparer.CurrentCultureIgnoreCase)
+                    .ToArray()
+            };
+            var result = await _archiveStore.SaveAsync(next);
+            if (!result.IsSuccess)
+            {
+                ArchiveStatus = $"{result.Error!.Message} ({result.Error.Code})";
+                return;
+            }
+
+            _archiveSnapshot = next;
+            RebuildArchiveProfiles(profile.Id);
+            ArchiveStatus = existing is null
+                ? $"Saved archive profile for {_collection.Title}."
+                : $"Updated archive profile for {_collection.Title}.";
+        }
+        catch (Exception exception) when (exception is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            ArchiveStatus = $"The archive destination is invalid. (Archive.InvalidDestination: {exception.GetType().Name})";
+        }
+    }
+
+    private async Task RemoveArchiveProfileAsync()
+    {
+        if (SelectedArchiveProfile is null)
+        {
+            return;
+        }
+
+        var removedName = SelectedArchiveProfile.DisplayName;
+        var next = new CollectionArchiveSnapshot
+        {
+            Profiles = _archiveSnapshot.Profiles
+                .Where(profile => profile.Id != SelectedArchiveProfile.Id)
+                .ToArray()
+        };
+        var result = await _archiveStore.SaveAsync(next);
+        if (!result.IsSuccess)
+        {
+            ArchiveStatus = $"{result.Error!.Message} ({result.Error.Code})";
+            return;
+        }
+
+        _archiveSnapshot = next;
+        RebuildArchiveProfiles();
+        ArchiveStatus = $"Removed archive profile for {removedName}. Downloaded media and Library records were unchanged.";
+    }
+
+    private async Task CheckArchiveProfilesAsync()
+    {
+        var profiles = _archiveSnapshot.Profiles.ToArray();
+        var updated = _archiveSnapshot.Profiles.ToDictionary(profile => profile.Id);
+        var totalQueued = 0;
+        var checkedProfiles = 0;
+        foreach (var profile in profiles)
+        {
+            var parsed = YouTubeCollectionUrlParser.Parse(profile.SourceUrl);
+            if (!parsed.IsSuccess)
+            {
+                ArchiveStatus = $"Could not parse saved source for {profile.DisplayName}. ({parsed.Error!.Code})";
+                continue;
+            }
+
+            CancelAnalysis();
+            _analysisCancellation = new CancellationTokenSource();
+            IsAnalyzing = true;
+            ArchiveStatus = $"Checking {profile.DisplayName} for new items…";
+            Result<YouTubeCollectionResult> result;
+            try
+            {
+                result = await _rateLimitedRequests.ExecuteAsync(
+                    YouTubeOrigin,
+                    token => _collectionResolver.ResolveAsync(parsed.Value, maximumItems: 1_000, token),
+                    delay => ArchiveStatus = $"Rate limited · retrying in {FormatRateLimitDelay(delay)}",
+                    _analysisCancellation.Token);
+            }
+            finally
+            {
+                IsAnalyzing = false;
+            }
+            if (!result.IsSuccess)
+            {
+                ArchiveStatus = $"{result.Error!.Message} ({result.Error.Code})";
+                if (result.Error.Code == "Network.RateLimited")
+                {
+                    break;
+                }
+
+                continue;
+            }
+
+            var known = profile.LastCheckedVideoIds.ToHashSet(StringComparer.Ordinal);
+            var candidates = result.Value.Items.Where(item => !known.Contains(item.VideoId.Value)).ToArray();
+            _collection = result.Value;
+            CollectionItems.Clear();
+            foreach (var item in candidates)
+            {
+                CollectionItems.Add(new CollectionItemViewModel(item, CollectionSelectionChanged));
+            }
+            NotifyCollectionProperties();
+            checkedProfiles++;
+            if (candidates.Length == 0)
+            {
+                updated[profile.Id] = profile with { LastCheckedAtUtc = DateTimeOffset.UtcNow };
+                continue;
+            }
+
+            _activeCollectionQueueConfiguration = new CollectionQueueConfiguration(
+                profile.DestinationPath,
+                profile.FileNameTemplate,
+                profile.OutputPreset,
+                profile.CaptionPreference,
+                profile.EmbedChapters);
+            await QueueSelectedCollectionAsync();
+            var handled = CollectionItems
+                .Where(item => item.Status.StartsWith("Queued", StringComparison.Ordinal) ||
+                               item.Status.StartsWith("Skipped", StringComparison.Ordinal))
+                .Select(item => item.Item.VideoId.Value)
+                .ToArray();
+            totalQueued += CollectionItems.Count(item => item.Status.StartsWith("Queued", StringComparison.Ordinal));
+            updated[profile.Id] = profile with
+            {
+                LastCheckedVideoIds = profile.LastCheckedVideoIds
+                    .Concat(handled)
+                    .Distinct(StringComparer.Ordinal)
+                    .TakeLast(CollectionArchiveStore.MaximumCheckedItems)
+                    .ToArray(),
+                LastCheckedAtUtc = DateTimeOffset.UtcNow
+            };
+        }
+
+        var next = new CollectionArchiveSnapshot
+        {
+            Profiles = updated.Values
+                .OrderBy(profile => profile.DisplayName, StringComparer.CurrentCultureIgnoreCase)
+                .ToArray()
+        };
+        var saved = await _archiveStore.SaveAsync(next);
+        if (!saved.IsSuccess)
+        {
+            ArchiveStatus = $"Queue preparation finished, but profile checkpoints could not be saved. ({saved.Error!.Code})";
+            return;
+        }
+
+        _archiveSnapshot = next;
+        RebuildArchiveProfiles(SelectedArchiveProfile?.Id);
+        ArchiveStatus = $"Checked {checkedProfiles} archive profiles; queued {totalQueued} new items.";
+    }
+
+    private void RebuildArchiveProfiles(Guid? selectedId = null)
+    {
+        ArchiveProfiles.Clear();
+        foreach (var profile in _archiveSnapshot.Profiles)
+        {
+            ArchiveProfiles.Add(profile);
+        }
+
+        SelectedArchiveProfile = ArchiveProfiles.FirstOrDefault(profile => profile.Id == selectedId) ??
+                                 ArchiveProfiles.FirstOrDefault();
+        CheckArchiveProfilesCommand.RaiseCanExecuteChanged();
+        RemoveArchiveProfileCommand.RaiseCanExecuteChanged();
+    }
+
+    private void NotifyCollectionProperties()
+    {
+        OnPropertyChanged(nameof(HasCollection));
+        OnPropertyChanged(nameof(CollectionTitle));
+        OnPropertyChanged(nameof(CollectionSummary));
+        OnPropertyChanged(nameof(CollectionSelectionSummary));
+        RefreshCommands();
+    }
+
+    private static (FormatItemViewModel Selection, OutputProfile Output)? CollectionPresetSelection(
+        IReadOnlyList<StreamFormat> formats,
+        ArchiveOutputPreset preset)
+    {
+        if (preset == ArchiveOutputPreset.Mp3_320)
+        {
+            var audio = formats
+                .Where(format => format.Kind == StreamKind.AudioOnly)
+                .OrderByDescending(format => format.Bitrate ?? 0)
+                .ThenByDescending(format => format.AudioSampleRate ?? 0)
+                .ThenBy(format => format.FormatId)
+                .FirstOrDefault();
+            return audio is null ? null : (new FormatItemViewModel(audio), OutputProfile.Mp3(320));
+        }
+
+        var eligible = formats;
+        if (preset == ArchiveOutputPreset.SmallFile)
+        {
+            var bounded = formats
+                .Where(format => !format.HasVideo || format.Height is > 0 and <= 720)
+                .ToArray();
+            if (bounded.Any(format => format.HasVideo))
+            {
+                eligible = bounded;
+            }
+        }
+
+        var selection = BestCompleteFileSelection(eligible);
+        if (selection is null)
+        {
+            return null;
+        }
+
+        var output = preset switch
+        {
+            ArchiveOutputPreset.WindowsCompatibleMp4 => OutputProfile.H264AacMp4,
+            ArchiveOutputPreset.SmallFile => OutputProfile.H265AacMp4,
+            _ => OutputProfile.Native
+        };
+        return (selection, output);
+    }
+
+    private static CaptionEmbedSelection? CollectionCaptionSelection(
+        VideoMetadata metadata,
+        FormatItemViewModel selection,
+        OutputProfile output,
+        ArchiveCaptionPreference preference)
+    {
+        if (preference == ArchiveCaptionPreference.None || output.IsAudioTranscode ||
+            !IsCaptionContainerSupported(FinalMediaContainer(selection, output)))
+        {
+            return null;
+        }
+
+        var track = metadata.CaptionTracks.FirstOrDefault(candidate => !candidate.IsAutoGenerated);
+        if (track is null && preference == ArchiveCaptionPreference.ManualOrAutomatic)
+        {
+            track = metadata.CaptionTracks.FirstOrDefault();
+        }
+
+        if (track is null)
+        {
+            return null;
+        }
+
+        var caption = new CaptionEmbedSelection(track.LanguageCode, track.IsAutoGenerated);
+        return caption.IsValid ? caption : null;
     }
 
     private static FormatItemViewModel? BestCompleteFileSelection(IReadOnlyList<StreamFormat> formats)
@@ -3993,7 +4427,16 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         FormatItemViewModel selection,
         int? index,
         int indexWidth,
-        OutputProfile output = default)
+        OutputProfile output = default) =>
+        RenderCollectionFileName(metadata, selection, index, indexWidth, output, FileNameTemplateText);
+
+    private static Result<string> RenderCollectionFileName(
+        VideoMetadata metadata,
+        FormatItemViewModel selection,
+        int? index,
+        int indexWidth,
+        OutputProfile output,
+        string fileNameTemplate)
     {
         var format = selection.Format;
         var quality = output.IsAudioTranscode
@@ -4002,9 +4445,9 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                 ? format.Height is > 0 ? $"{format.Height}p" : "video"
                 : format.Bitrate is > 0 ? $"{Math.Round(format.Bitrate.Value / 1000d):0}kbps" : "audio";
         var extension = OutputExtension(selection, output);
-        var template = index is not null && FileNameTemplateText == FileNameTemplate.Default
+        var template = index is not null && fileNameTemplate == FileNameTemplate.Default
             ? "{index} - {title}"
-            : FileNameTemplateText;
+            : fileNameTemplate;
         return FileNameTemplate.Render(template, new FileNameTemplateContext
         {
             Title = metadata.Title,
@@ -4360,6 +4803,10 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         SelectAllCollectionCommand.RaiseCanExecuteChanged();
         SelectNoneCollectionCommand.RaiseCanExecuteChanged();
         QueueCollectionCommand.RaiseCanExecuteChanged();
+        SelectMissingCollectionCommand.RaiseCanExecuteChanged();
+        SaveArchiveProfileCommand.RaiseCanExecuteChanged();
+        CheckArchiveProfilesCommand.RaiseCanExecuteChanged();
+        RemoveArchiveProfileCommand.RaiseCanExecuteChanged();
     }
 
     private void RebuildFormatFilters(bool resetSelections)
@@ -5119,6 +5566,13 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         Settings,
         Diagnostics
     }
+
+    private sealed record CollectionQueueConfiguration(
+        string DestinationPath,
+        string FileNameTemplate,
+        ArchiveOutputPreset OutputPreset,
+        ArchiveCaptionPreference CaptionPreference,
+        bool EmbedChapters);
 
     private sealed record QueuedDownloadWork(
         VideoMetadata Metadata,

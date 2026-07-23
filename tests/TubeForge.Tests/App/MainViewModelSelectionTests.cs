@@ -3,6 +3,7 @@ using TubeForge.App.ViewModels;
 using TubeForge.Core.Media;
 using TubeForge.Core.Results;
 using TubeForge.Core.YouTube;
+using TubeForge.Downloads.Archives;
 using TubeForge.Tests.Framework;
 
 namespace TubeForge.Tests.App;
@@ -194,6 +195,40 @@ public static class MainViewModelSelectionTests
         viewModel.SelectedVideoProcessing = viewModel.VideoProcessingOptions.First(option =>
             option.Value.Kind == OutputProfileKind.Native);
         Assert.Equal(DownloadPresetKind.Custom, viewModel.SelectedDownloadPreset.Value);
+    }
+
+    [Test]
+    public static void ArchivePresetsChoosePersistableOutputsAndBoundSmallVideo()
+    {
+        var select = typeof(MainViewModel).GetMethod(
+            "CollectionPresetSelection",
+            BindingFlags.Static | BindingFlags.NonPublic)
+            ?? throw new MissingMethodException(typeof(MainViewModel).FullName, "CollectionPresetSelection");
+        var formats = BuildCompleteCatalog();
+
+        foreach (var testCase in new[]
+                 {
+                     (ArchiveOutputPreset.BestOriginal, OutputProfileKind.Native),
+                     (ArchiveOutputPreset.WindowsCompatibleMp4, OutputProfileKind.H264AacMp4),
+                     (ArchiveOutputPreset.SmallFile, OutputProfileKind.H265AacMp4),
+                     (ArchiveOutputPreset.Mp3_320, OutputProfileKind.Mp3)
+                 })
+        {
+            var value = ((FormatItemViewModel Selection, OutputProfile Output))select.Invoke(
+                null,
+                [formats, testCase.Item1])!;
+            Assert.Equal(testCase.Item2, value.Output.Kind);
+            Assert.True(value.Output.ForVideoHeight(value.Selection.Format.Height).IsValid);
+            if (testCase.Item1 == ArchiveOutputPreset.SmallFile)
+            {
+                Assert.True(value.Selection.Format.Height is > 0 and <= 720);
+            }
+            if (testCase.Item1 == ArchiveOutputPreset.Mp3_320)
+            {
+                Assert.Equal(StreamKind.AudioOnly, value.Selection.Format.Kind);
+                Assert.Equal(320, value.Output.BitrateKbps);
+            }
+        }
     }
 
     [Test]

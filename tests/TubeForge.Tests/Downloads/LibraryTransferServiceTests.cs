@@ -84,15 +84,15 @@ public static class LibraryTransferServiceTests
         string identity,
         string destination,
         DateTimeOffset completedAt) => new()
-    {
-        Id = id,
-        VideoId = "Fixture123_",
-        SourceIdentity = identity,
-        DisplayTitle = "Fixture",
-        DestinationPath = destination,
-        BytesWritten = 1_024,
-        CompletedAtUtc = completedAt
-    };
+        {
+            Id = id,
+            VideoId = "Fixture123_",
+            SourceIdentity = identity,
+            DisplayTitle = "Fixture",
+            DestinationPath = destination,
+            BytesWritten = 1_024,
+            CompletedAtUtc = completedAt
+        };
 
     private sealed class TestDirectory : IDisposable
     {

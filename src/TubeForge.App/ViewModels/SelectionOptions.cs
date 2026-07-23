@@ -1,4 +1,5 @@
 using TubeForge.Core.Media;
+using TubeForge.Downloads.Archives;
 using TubeForge.YouTube.Captions;
 
 namespace TubeForge.App.ViewModels;
@@ -16,6 +17,16 @@ public sealed record DownloadPresetOption(
     DownloadPresetKind Value,
     string Label,
     string Description)
+{
+    public override string ToString() => Label;
+}
+
+public sealed record ArchiveOutputPresetOption(ArchiveOutputPreset Value, string Label)
+{
+    public override string ToString() => Label;
+}
+
+public sealed record ArchiveCaptionPreferenceOption(ArchiveCaptionPreference Value, string Label)
 {
     public override string ToString() => Label;
 }

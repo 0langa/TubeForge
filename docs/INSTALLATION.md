@@ -54,6 +54,7 @@ Portable rollback uses the previous version directory. Installer rollback requir
 TubeForge stores application state in `%LOCALAPPDATA%\TubeForge`:
 
 - `settings.json`: download directory, filename template, concurrency, accelerated-transfer preference, Library sort preference, responsible-use acknowledgement;
+- `archives.json`: user-created playlist/channel archive sources, local destination/template/output preferences, and bounded checked video identifiers; no signed media URLs or credentials;
 - `queue.json`: video IDs, display titles, format identities, destination paths, byte counts, attempt counts, timestamps, and failure codes;
 - `history.json`: completed video IDs, display titles, format identities, destination paths, sizes, and timestamps;
 - `.bak` and `.pending` siblings: crash-recovery copies of those stores.

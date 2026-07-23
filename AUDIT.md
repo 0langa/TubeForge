@@ -252,16 +252,15 @@ Library has search/sort and cleanup for moved/deleted files. Competitors with ch
 
 Wrong/optimizable:
 
-- No re-check source for updated metadata.
-- No channel/playlist subscriptions or monitoring.
-- Library export/import and bounded moved-file repair are implemented on the current v2 branch; collection archive profiles and download-missing automation remain open.
-- No "download missing from collection" workflow.
+- Re-checking is explicit rather than a background subscription service, so users control every network request and queue mutation.
+- Persistent channel/playlist archive profiles, bounded new-item checkpoints, and download-missing selection are implemented on the current v2 branch.
+- Library export/import and bounded moved-file repair are implemented on the current v2 branch.
 
 Recommendation:
 
-- Add collection subscriptions after v2 core stable.
+- Keep archive checks user-initiated for v2.0; evaluate scheduled monitoring only with explicit background-work and notification design.
 - Keep the implemented schema-versioned Library export/import and bounded rescan paths covered by migration and ambiguity tests.
-- Add "archive profile" defaults for folder/template/format per channel/playlist.
+- Keep archive profile folder/template/output/caption/chapter defaults covered by persistence, duplicate, and rate-limit tests.
 
 ### P2: Distribution Trust Still Needs Production Hardening
 
