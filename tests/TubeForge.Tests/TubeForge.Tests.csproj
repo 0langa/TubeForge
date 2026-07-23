@@ -10,6 +10,7 @@
     <ProjectReference Include="../../src/TubeForge.Core/TubeForge.Core.csproj" />
     <ProjectReference Include="../../src/TubeForge.Downloads/TubeForge.Downloads.csproj" />
     <ProjectReference Include="../../src/TubeForge.Installation/TubeForge.Installation.csproj" />
+    <ProjectReference Include="../../src/TubeForge.Installer/TubeForge.Installer.csproj" />
     <ProjectReference Include="../../src/TubeForge.Media/TubeForge.Media.csproj" />
     <ProjectReference Include="../../src/TubeForge.Transcoding/TubeForge.Transcoding.csproj" />
     <ProjectReference Include="../../src/TubeForge.Updates/TubeForge.Updates.csproj" />
