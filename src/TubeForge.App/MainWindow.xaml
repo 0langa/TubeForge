@@ -811,11 +811,32 @@
                                     Content="Remove missing" Command="{Binding RemoveMissingHistoryCommand}"
                                     Padding="13,9" VerticalAlignment="Bottom" />
                         </Grid>
-                        <StackPanel Grid.Row="2">
-                            <TextBlock Text="HISTORY STORAGE" Style="{StaticResource FieldLabel}" />
-                            <TextBlock Text="{Binding HistoryStoragePath}" Margin="0,6,0,0" FontSize="10"
-                                       Foreground="{StaticResource MutedTextBrush}" TextWrapping="Wrap" />
-                        </StackPanel>
+                        <Grid Grid.Row="2">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="16" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <StackPanel>
+                                <TextBlock Text="HISTORY STORAGE" Style="{StaticResource FieldLabel}" />
+                                <TextBlock Text="{Binding HistoryStoragePath}" Margin="0,6,0,0" FontSize="10"
+                                           Foreground="{StaticResource MutedTextBrush}" TextWrapping="Wrap" />
+                                <TextBlock Text="{Binding LibraryStatus}" Margin="0,7,0,0" FontSize="10"
+                                           Foreground="{StaticResource MutedTextBrush}" TextWrapping="Wrap"
+                                           AutomationProperties.LiveSetting="Polite" />
+                                <TextBlock Text="Exports contain Library metadata and local file paths, but no media URLs or credentials. Imports merge without deleting current records."
+                                           Margin="0,5,0,0" FontSize="9" Foreground="{StaticResource MutedTextBrush}"
+                                           TextWrapping="Wrap" />
+                            </StackPanel>
+                            <WrapPanel Grid.Column="2" VerticalAlignment="Bottom">
+                                <Button Style="{StaticResource SecondaryButton}" Content="Export" Padding="13,9"
+                                        Click="ExportLibraryButton_OnClick" />
+                                <Button Style="{StaticResource SecondaryButton}" Content="Import" Padding="13,9"
+                                        Margin="8,0,0,0" Click="ImportLibraryButton_OnClick" />
+                                <Button Style="{StaticResource SecondaryButton}" Content="Rescan folder" Padding="13,9"
+                                        Margin="8,0,0,0" Click="RescanLibraryButton_OnClick" />
+                            </WrapPanel>
+                        </Grid>
                     </Grid>
                 </Border>
 

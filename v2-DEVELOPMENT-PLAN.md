@@ -19,6 +19,7 @@ Status date: 2026-07-22.
 - Phase 5 implemented: Settings exposes system/manual/off proxy policy, bounded metadata timeout/media retry/per-host concurrency controls, and applies one credential-free proxy object to metadata, collections, captions, thumbnails, media, and updates. Schema migration is safe, diagnostics emit mode only, and loopback tests prove metadata and media proxy paths.
 - Phase 3 decision complete: v2.0 follows Option A and remains public-only. Cookie import and OAuth are deferred; login-required, private, membership, paid, and other access-controlled media fail with a stable typed error and no credential collection.
 - Phase 4 public-live implementation complete in the working tree: active record-from-now and upcoming wait modes use bounded unencrypted HLS, duration/size/wait limits, trusted-host redirect checks, retrying segment downloads, recoverable hash-only journals, queue pause/resume, and atomic MKV stream-copy finalization. A real authorized public-live canary remains a release gate.
+- Phase 6 Library transfer/repair slice implemented: schema-versioned JSON export/import merges without deleting current records, rejects malformed or oversized input, migrates v1 exports, and bounded rescans repair only unique filename-and-size matches while skipping reparse points. Archive profiles and download-new/missing automation remain open.
 
 ## v2 Product Definition
 
@@ -258,8 +259,8 @@ Tasks:
   - Caption/chapter preferences.
   - Last checked item set.
 - Add "download new items" for playlists/channels.
-- Add Library export/import.
-- Add "rescan files" and "repair missing records".
+- [x] Add Library export/import.
+- [x] Add "rescan files" and "repair missing records".
 - Add "download missing from this collection" workflow.
 
 Tests:
@@ -267,7 +268,7 @@ Tests:
 - Large playlist continuation and rate limit handling.
 - Duplicate detection across profile updates.
 - Filename collision with index/chapter tokens.
-- Import/export schema migration.
+- [x] Import/export schema migration.
 
 Exit gate:
 

@@ -86,7 +86,7 @@ public sealed class DownloadHistoryStore
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(snapshot);
-        var validation = Validate(snapshot);
+        var validation = ValidateSnapshot(snapshot);
         if (validation is not null)
         {
             return Result<bool>.Failure(validation);
@@ -191,7 +191,7 @@ public sealed class DownloadHistoryStore
                 return Corrupt();
             }
 
-            var validation = Validate(snapshot);
+            var validation = ValidateSnapshot(snapshot);
             return validation is null
                 ? Result<DownloadHistorySnapshot>.Success(snapshot)
                 : Result<DownloadHistorySnapshot>.Failure(validation);
@@ -221,7 +221,7 @@ public sealed class DownloadHistoryStore
         }
     }
 
-    private static TubeForgeError? Validate(DownloadHistorySnapshot snapshot)
+    internal static TubeForgeError? ValidateSnapshot(DownloadHistorySnapshot snapshot)
     {
         if (snapshot.SchemaVersion != DownloadHistorySnapshot.CurrentSchemaVersion)
         {

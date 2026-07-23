@@ -118,6 +118,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     private readonly SponsorBlockClient _sponsorBlockClient;
     private readonly DownloadQueueStore _queueStore;
     private readonly DownloadHistoryStore _historyStore;
+    private readonly LibraryTransferService _libraryTransferService = new();
     private readonly TubeForgeSettingsStore _settingsStore;
     private readonly GitHubUpdateClient _updateClient;
     private readonly string _updateDirectory;
@@ -174,6 +175,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     private bool _queueUnavailable;
     private bool _historyUnavailable;
     private string _librarySearchText = string.Empty;
+    private string _libraryStatus = "Export, import, or rescan durable local history.";
     private FilterOption<LibrarySortOrder> _selectedLibrarySort = LibrarySortChoices[0];
     private string _downloadActionLabel = "Add to queue";
     private AppPage _activePage = AppPage.Download;
@@ -660,6 +662,12 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     public string QueueStoragePath => _queueStore.StoragePath;
 
     public string HistoryStoragePath => _historyStore.StoragePath;
+
+    public string LibraryStatus
+    {
+        get => _libraryStatus;
+        private set => Set(ref _libraryStatus, value);
+    }
 
     public string SettingsStoragePath => _settingsStore.StoragePath;
 
@@ -3066,6 +3074,92 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             .Where(entry => File.Exists(entry.DestinationPath))
             .ToArray();
         await SaveHistoryEntriesAsync(existing);
+    }
+
+    public async Task ExportLibraryAsync(string path)
+    {
+        var result = await _libraryTransferService.ExportAsync(_historySnapshot, path);
+        if (!result.IsSuccess)
+        {
+            LibraryStatus = $"{result.Error!.Message} ({result.Error.Code})";
+            return;
+        }
+
+        LibraryStatus = $"Exported {_historySnapshot.Entries.Count} Library records.";
+    }
+
+    public async Task ImportLibraryAsync(string path)
+    {
+        var imported = await _libraryTransferService.ImportAsync(path);
+        if (!imported.IsSuccess)
+        {
+            LibraryStatus = $"{imported.Error!.Message} ({imported.Error.Code})";
+            return;
+        }
+
+        await _historyMutationLock.WaitAsync();
+        try
+        {
+            var merged = LibraryTransferService.Merge(_historySnapshot, imported.Value);
+            if (!merged.IsSuccess)
+            {
+                LibraryStatus = $"{merged.Error!.Message} ({merged.Error.Code})";
+                return;
+            }
+
+            var result = await _historyStore.SaveAsync(merged.Value);
+            if (!result.IsSuccess)
+            {
+                LibraryStatus = $"{result.Error!.Message} ({result.Error.Code})";
+                return;
+            }
+
+            var added = merged.Value.Entries.Count - _historySnapshot.Entries.Count;
+            _historySnapshot = merged.Value;
+            _historyUnavailable = false;
+            RebuildHistoryItems();
+            LibraryStatus = added > 0
+                ? $"Imported {added} new Library records; duplicates were merged."
+                : "Import complete; no new Library records were found.";
+        }
+        finally
+        {
+            _historyMutationLock.Release();
+        }
+    }
+
+    public async Task RescanLibraryAsync(string rootPath)
+    {
+        await _historyMutationLock.WaitAsync();
+        try
+        {
+            LibraryStatus = "Scanning for moved files…";
+            var rescanned = await Task.Run(() => LibraryRescanner.Rescan(_historySnapshot, rootPath));
+            if (!rescanned.IsSuccess)
+            {
+                LibraryStatus = $"{rescanned.Error!.Message} ({rescanned.Error.Code})";
+                return;
+            }
+
+            var result = await _historyStore.SaveAsync(rescanned.Value.Snapshot);
+            if (!result.IsSuccess)
+            {
+                LibraryStatus = $"{result.Error!.Message} ({result.Error.Code})";
+                return;
+            }
+
+            _historySnapshot = rescanned.Value.Snapshot;
+            _historyUnavailable = false;
+            RebuildHistoryItems();
+            LibraryStatus = $"Scanned {rescanned.Value.FilesScanned} files; repaired {rescanned.Value.RecordsRepaired} records" +
+                            (rescanned.Value.AmbiguousMatches > 0
+                                ? $"; left {rescanned.Value.AmbiguousMatches} ambiguous matches unchanged."
+                                : ".");
+        }
+        finally
+        {
+            _historyMutationLock.Release();
+        }
     }
 
     private async Task SaveLibrarySortOrderAsync(LibrarySortOrder order)

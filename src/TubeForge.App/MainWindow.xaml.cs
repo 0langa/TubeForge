@@ -126,6 +126,64 @@ public partial class MainWindow : Window
         }
     }
 
+    private async void ExportLibraryButton_OnClick(object sender, RoutedEventArgs e)
+    {
+        var dialog = new SaveFileDialog
+        {
+            Title = "Export TubeForge Library history",
+            FileName = $"tubeforge-library-{DateTime.UtcNow:yyyyMMdd-HHmmss}.json",
+            DefaultExt = ".json",
+            Filter = "TubeForge Library (*.json)|*.json",
+            AddExtension = true,
+            OverwritePrompt = true
+        };
+        if (dialog.ShowDialog(this) == true)
+        {
+            await _viewModel.ExportLibraryAsync(dialog.FileName);
+        }
+    }
+
+    private async void ImportLibraryButton_OnClick(object sender, RoutedEventArgs e)
+    {
+        var dialog = new OpenFileDialog
+        {
+            Title = "Import TubeForge Library history",
+            DefaultExt = ".json",
+            Filter = "TubeForge Library (*.json)|*.json",
+            CheckFileExists = true,
+            Multiselect = false
+        };
+        if (dialog.ShowDialog(this) != true)
+        {
+            return;
+        }
+
+        var answer = MessageBox.Show(
+            "Import this Library export?\n\nRecords are merged with your current history. Existing records and downloaded media are not deleted.",
+            "Import TubeForge Library",
+            MessageBoxButton.YesNo,
+            MessageBoxImage.Question);
+        if (answer == MessageBoxResult.Yes)
+        {
+            await _viewModel.ImportLibraryAsync(dialog.FileName);
+        }
+    }
+
+    private async void RescanLibraryButton_OnClick(object sender, RoutedEventArgs e)
+    {
+        var dialog = new OpenFolderDialog
+        {
+            Title = "Choose folder containing moved downloads",
+            InitialDirectory = Directory.Exists(_viewModel.DownloadFolder)
+                ? _viewModel.DownloadFolder
+                : Environment.GetFolderPath(Environment.SpecialFolder.UserProfile)
+        };
+        if (dialog.ShowDialog(this) == true)
+        {
+            await _viewModel.RescanLibraryAsync(dialog.FolderName);
+        }
+    }
+
     private async void InstallUpdateButton_OnClick(object sender, RoutedEventArgs e)
     {
         var answer = MessageBox.Show(

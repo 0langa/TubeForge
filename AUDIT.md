@@ -254,13 +254,13 @@ Wrong/optimizable:
 
 - No re-check source for updated metadata.
 - No channel/playlist subscriptions or monitoring.
-- No export/import of Library records.
+- Library export/import and bounded moved-file repair are implemented on the current v2 branch; collection archive profiles and download-missing automation remain open.
 - No "download missing from collection" workflow.
 
 Recommendation:
 
 - Add collection subscriptions after v2 core stable.
-- Add Library export/import JSON and rescan paths.
+- Keep the implemented schema-versioned Library export/import and bounded rescan paths covered by migration and ambiguity tests.
 - Add "archive profile" defaults for folder/template/format per channel/playlist.
 
 ### P2: Distribution Trust Still Needs Production Hardening

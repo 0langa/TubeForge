@@ -33,7 +33,7 @@ Working now:
 - shared per-provider request limits and bounded `Retry-After` backoff that stops persistent rate-limited bulk preparation;
 - unified system/manual/off proxy settings for metadata, collections, captions, thumbnails, media, and updates, with bounded metadata timeout, media retries, and per-host concurrency; proxy credentials are rejected and never stored;
 - customizable token-based filenames plus a durable local Library used for exact-output and destination duplicate detection;
-- searchable/sortable Library history with one-click cleanup for records whose files were moved or deleted;
+- searchable/sortable Library history with bounded moved-file rescans, portable schema-versioned JSON export/import, duplicate-safe merging, and one-click cleanup for missing records;
 - Short and completed-live-replay classification, plus bounded public active/upcoming HLS capture with record-now/wait modes, duration/size limits, recoverable segment journals, and validated MKV stream-copy finalization in the current development branch;
 - resumable `.part` transfers, bounded container validation, retries, progress, cancellation, and atomic finalization;
 - opt-in segmented transfer for large files with validated parallel ranges, resumable segment state, and automatic direct-transfer fallback;
