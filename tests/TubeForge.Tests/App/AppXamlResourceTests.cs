@@ -64,4 +64,29 @@ public static class AppXamlResourceTests
             "Use {index} in the filename template to include collection positions.",
             StringComparison.Ordinal));
     }
+
+    [Test]
+    public static void NavigationDisclosureAndRecoveryUseAccessibleControls()
+    {
+        var fixtureDirectory = Path.Combine(AppContext.BaseDirectory, "Fixtures");
+        var mainWindowXaml = File.ReadAllText(Path.Combine(fixtureDirectory, "MainWindow.xaml"));
+
+        foreach (var icon in new[]
+                 {
+                     "DownloadNavIcon",
+                     "QueueNavIcon",
+                     "LibraryNavIcon",
+                     "SettingsNavIcon",
+                     "DiagnosticsNavIcon"
+                 })
+        {
+            Assert.True(mainWindowXaml.Contains($"Data=\"{{StaticResource {icon}}}\"", StringComparison.Ordinal));
+        }
+
+        Assert.False(mainWindowXaml.Contains("Content=\"↓   Download\"", StringComparison.Ordinal));
+        Assert.True(mainWindowXaml.Contains("Show advanced format controls", StringComparison.Ordinal));
+        Assert.True(mainWindowXaml.Contains("Content=\"Change destination\"", StringComparison.Ordinal));
+        Assert.True(mainWindowXaml.Contains("Content=\"Open diagnostics\"", StringComparison.Ordinal));
+        Assert.True(mainWindowXaml.Contains("Content=\"Copy report\"", StringComparison.Ordinal));
+    }
 }

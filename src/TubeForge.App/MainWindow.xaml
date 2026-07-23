@@ -5,6 +5,13 @@
         MinHeight="680" MinWidth="980"
         UseLayoutRounding="True" SnapsToDevicePixels="True"
         WindowStartupLocation="CenterScreen">
+    <Window.Resources>
+        <Geometry x:Key="DownloadNavIcon">M2,10 L8,16 L14,10 M8,2 L8,16 M2,20 L14,20</Geometry>
+        <Geometry x:Key="QueueNavIcon">M3,4 L15,4 M3,10 L15,10 M3,16 L15,16</Geometry>
+        <Geometry x:Key="LibraryNavIcon">M2,3 L16,3 L16,17 L2,17 Z M5,7 L13,7 M5,11 L13,11</Geometry>
+        <Geometry x:Key="SettingsNavIcon">M9,2 A7,7 0 1 1 8.99,2 M9,6 A3,3 0 1 1 8.99,6</Geometry>
+        <Geometry x:Key="DiagnosticsNavIcon">M9,2 L16,9 L9,16 L2,9 Z M9,6 L9,10 M9,13 L9,13.1</Geometry>
+    </Window.Resources>
     <Grid Background="{StaticResource WindowBrush}">
         <Grid.ColumnDefinitions>
             <ColumnDefinition Width="226" />
@@ -40,7 +47,7 @@
                 </StackPanel>
 
                 <StackPanel Grid.Row="2">
-                    <Button Content="↓   Download" Command="{Binding ShowDownloadCommand}"
+                    <Button Command="{Binding ShowDownloadCommand}"
                             AutomationProperties.Name="Download page">
                         <Button.Style>
                             <Style TargetType="Button" BasedOn="{StaticResource NavButton}">
@@ -52,8 +59,12 @@
                                 </Style.Triggers>
                             </Style>
                         </Button.Style>
+                        <StackPanel Orientation="Horizontal">
+                            <Viewbox Width="18" Height="18"><Path Data="{StaticResource DownloadNavIcon}" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType={x:Type Button}}}" StrokeThickness="1.7" StrokeStartLineCap="Round" StrokeEndLineCap="Round" /></Viewbox>
+                            <TextBlock Text="Download" Margin="12,0,0,0" VerticalAlignment="Center" />
+                        </StackPanel>
                     </Button>
-                    <Button Content="≡   Queue" Command="{Binding ShowQueueCommand}"
+                    <Button Command="{Binding ShowQueueCommand}"
                             AutomationProperties.Name="Download queue page">
                         <Button.Style>
                             <Style TargetType="Button" BasedOn="{StaticResource NavButton}">
@@ -65,8 +76,12 @@
                                 </Style.Triggers>
                             </Style>
                         </Button.Style>
+                        <StackPanel Orientation="Horizontal">
+                            <Viewbox Width="18" Height="18"><Path Data="{StaticResource QueueNavIcon}" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType={x:Type Button}}}" StrokeThickness="1.7" StrokeStartLineCap="Round" StrokeEndLineCap="Round" /></Viewbox>
+                            <TextBlock Text="Queue" Margin="12,0,0,0" VerticalAlignment="Center" />
+                        </StackPanel>
                     </Button>
-                    <Button Content="□   Library" Command="{Binding ShowLibraryCommand}"
+                    <Button Command="{Binding ShowLibraryCommand}"
                             AutomationProperties.Name="Download library page">
                         <Button.Style>
                             <Style TargetType="Button" BasedOn="{StaticResource NavButton}">
@@ -78,8 +93,12 @@
                                 </Style.Triggers>
                             </Style>
                         </Button.Style>
+                        <StackPanel Orientation="Horizontal">
+                            <Viewbox Width="18" Height="18"><Path Data="{StaticResource LibraryNavIcon}" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType={x:Type Button}}}" StrokeThickness="1.7" StrokeStartLineCap="Round" StrokeEndLineCap="Round" /></Viewbox>
+                            <TextBlock Text="Library" Margin="12,0,0,0" VerticalAlignment="Center" />
+                        </StackPanel>
                     </Button>
-                    <Button Content="⚙   Settings" Command="{Binding ShowSettingsCommand}"
+                    <Button Command="{Binding ShowSettingsCommand}"
                             AutomationProperties.Name="Settings page">
                         <Button.Style>
                             <Style TargetType="Button" BasedOn="{StaticResource NavButton}">
@@ -91,8 +110,12 @@
                                 </Style.Triggers>
                             </Style>
                         </Button.Style>
+                        <StackPanel Orientation="Horizontal">
+                            <Viewbox Width="18" Height="18"><Path Data="{StaticResource SettingsNavIcon}" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType={x:Type Button}}}" StrokeThickness="1.7" /></Viewbox>
+                            <TextBlock Text="Settings" Margin="12,0,0,0" VerticalAlignment="Center" />
+                        </StackPanel>
                     </Button>
-                    <Button Content="◇   Diagnostics" Command="{Binding ShowDiagnosticsCommand}"
+                    <Button Command="{Binding ShowDiagnosticsCommand}"
                             AutomationProperties.Name="Diagnostics page">
                         <Button.Style>
                             <Style TargetType="Button" BasedOn="{StaticResource NavButton}">
@@ -104,6 +127,10 @@
                                 </Style.Triggers>
                             </Style>
                         </Button.Style>
+                        <StackPanel Orientation="Horizontal">
+                            <Viewbox Width="18" Height="18"><Path Data="{StaticResource DiagnosticsNavIcon}" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType={x:Type Button}}}" StrokeThickness="1.7" StrokeStartLineCap="Round" StrokeEndLineCap="Round" /></Viewbox>
+                            <TextBlock Text="Diagnostics" Margin="12,0,0,0" VerticalAlignment="Center" />
+                        </StackPanel>
                     </Button>
                 </StackPanel>
 
@@ -168,10 +195,22 @@
                 <Border Grid.Row="4" Style="{StaticResource Card}" BorderBrush="#613143"
                         AutomationProperties.LiveSetting="Assertive"
                         Visibility="{Binding HasError, Converter={StaticResource BooleanToVisibilityConverter}}">
-                    <StackPanel Orientation="Horizontal">
-                        <TextBlock Text="!" Foreground="{StaticResource ErrorBrush}" FontSize="18" FontWeight="Bold" />
-                        <TextBlock Text="{Binding ErrorMessage}" Margin="12,1,0,0" TextWrapping="Wrap"
-                                   Foreground="#FFC4CE" />
+                    <StackPanel>
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Text="!" Foreground="{StaticResource ErrorBrush}" FontSize="18" FontWeight="Bold" />
+                            <TextBlock Text="{Binding ErrorMessage}" Margin="12,1,0,0" TextWrapping="Wrap"
+                                       Foreground="#FFC4CE" />
+                        </StackPanel>
+                        <WrapPanel Margin="30,12,0,0">
+                            <Button Style="{StaticResource SecondaryButton}" Content="Change destination"
+                                    Click="BrowseButton_OnClick" Padding="11,7" />
+                            <Button Style="{StaticResource SecondaryButton}" Content="Open settings"
+                                    Command="{Binding ShowSettingsCommand}" Padding="11,7" Margin="8,0,0,0" />
+                            <Button Style="{StaticResource SecondaryButton}" Content="Open diagnostics"
+                                    Command="{Binding ShowDiagnosticsCommand}" Padding="11,7" Margin="8,0,0,0" />
+                            <Button Style="{StaticResource SecondaryButton}" Content="Copy report"
+                                    Click="CopyDiagnosticsButton_OnClick" Padding="11,7" Margin="8,0,0,0" />
+                        </WrapPanel>
                     </StackPanel>
                 </Border>
 
@@ -433,6 +472,12 @@
                                 </ComboBox.ItemTemplate>
                             </ComboBox>
 
+                            <CheckBox Content="Show advanced format controls"
+                                      IsChecked="{Binding ShowAdvancedDownloadOptions}"
+                                      Margin="0,14,0,0"
+                                      AutomationProperties.Name="Show advanced download format controls" />
+
+                            <StackPanel Visibility="{Binding ShowAdvancedDownloadOptions, Converter={StaticResource BooleanToVisibilityConverter}}">
                             <TextBlock Text="DOWNLOAD TYPE" Style="{StaticResource FieldLabel}" Margin="0,16,0,6" />
                             <ComboBox ItemsSource="{Binding DownloadModes}" SelectedItem="{Binding SelectedDownloadMode}"
                                       AutomationProperties.Name="Download type">
@@ -601,6 +646,7 @@
                                     </DataTemplate>
                                 </ComboBox.ItemTemplate>
                             </ComboBox>
+                            </StackPanel>
 
                             <ProgressBar Minimum="0" Maximum="1" Value="{Binding DownloadFraction, Mode=OneWay}"
                                          Margin="0,16,0,0"
@@ -1170,6 +1216,16 @@
                                    Margin="0,6,0,0" FontSize="10" TextWrapping="Wrap"
                                    Foreground="{StaticResource MutedTextBrush}" />
 
+                        <TextBlock Text="DEFAULT QUICK PRESET" Style="{StaticResource FieldLabel}" Margin="0,18,0,6" />
+                        <ComboBox ItemsSource="{Binding DefaultDownloadPresets}"
+                                  SelectedItem="{Binding DefaultDownloadPreset}"
+                                  Width="320" HorizontalAlignment="Left"
+                                  AutomationProperties.Name="Default quick download preset" />
+                        <CheckBox Content="Show advanced format controls after analysis"
+                                  IsChecked="{Binding ShowAdvancedDownloadOptions}"
+                                  Margin="0,14,0,0"
+                                  AutomationProperties.Name="Show advanced download controls by default" />
+
                         <TextBlock Text="MAXIMUM CONCURRENT DOWNLOADS" Style="{StaticResource FieldLabel}" Margin="0,18,0,6" />
                         <ComboBox ItemsSource="{Binding MaxConcurrentDownloadOptions}"
                                   SelectedItem="{Binding SelectedMaxConcurrentDownloads}" Width="160"
@@ -1428,6 +1484,34 @@
                                Margin="0,8,0,0" TextWrapping="Wrap" />
                     <TextBlock Text="• TubeForge does not bypass DRM, payments, membership, or access controls."
                                Margin="0,8,0,0" TextWrapping="Wrap" />
+
+                    <Border Background="#0E1A2B" BorderBrush="#29405F" BorderThickness="1"
+                            CornerRadius="8" Padding="12" Margin="0,18,0,0">
+                        <StackPanel>
+                            <TextBlock Text="QUICK START" Style="{StaticResource FieldLabel}" />
+                            <Grid Margin="0,7,0,0">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="8" />
+                                    <ColumnDefinition Width="76" />
+                                </Grid.ColumnDefinitions>
+                                <TextBox Text="{Binding DownloadFolder, UpdateSourceTrigger=PropertyChanged}"
+                                         AutomationProperties.Name="First run download folder" />
+                                <Button Grid.Column="2" Style="{StaticResource SecondaryButton}" Content="Browse"
+                                        Click="BrowseButton_OnClick" Padding="9,7" />
+                            </Grid>
+                            <ComboBox ItemsSource="{Binding DefaultDownloadPresets}"
+                                      SelectedItem="{Binding DefaultDownloadPreset}"
+                                      Margin="0,9,0,0"
+                                      AutomationProperties.Name="First run default download preset" />
+                            <CheckBox Content="Check for verified updates at startup"
+                                      IsChecked="{Binding EnableAutomaticUpdateChecks}"
+                                      Margin="0,9,0,0" />
+                            <CheckBox Content="Show advanced format controls"
+                                      IsChecked="{Binding ShowAdvancedDownloadOptions}"
+                                      Margin="0,7,0,0" />
+                        </StackPanel>
+                    </Border>
                     <TextBlock Text="Acknowledgement is stored only on this device."
                                Margin="0,18,0,0" FontSize="10" Foreground="{StaticResource MutedTextBrush}" />
                     <TextBlock Text="{Binding ErrorMessage}" Margin="0,12,0,0" TextWrapping="Wrap"

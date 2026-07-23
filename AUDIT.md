@@ -234,17 +234,16 @@ Current WPF UI is functional and keyboard-aware, but uses text/symbol button con
 
 Wrong/optimizable:
 
-- Quick presets now cover the primary download flows, but the selected preset is not yet saved as a default across app restarts.
-- Advanced filter controls may overwhelm normal users.
-- Icons are improvised text symbols, not a consistent icon set.
-- No in-app guided failure recovery for common cases: rate-limited, private/access, missing codec, low disk, path too long.
+- Quick presets cover the primary download flows and a non-Custom default now persists across app restarts.
+- Detailed format filters are hidden behind an explicit advanced disclosure by default; Custom reveals them automatically.
+- Sidebar navigation uses consistent vector resources that inherit button foreground color.
+- The main error surface now links directly to destination selection, Settings, Diagnostics, and a redacted report; Queue retains retry/resume controls for failed or rate-limited work.
 
 Recommendation:
 
-- Add simple/advanced mode.
-- Persist an optional default preset and add simple/advanced disclosure around the detailed filters.
-- Replace nav glyph text with proper WPF vector resources or packaged icon font.
-- Add failure action buttons: retry later, open settings, change destination, copy diagnostic report.
+- Keep the implemented simple/advanced preference and default-preset schema migration covered by deterministic tests.
+- Keep vector navigation resources and recovery actions in the static XAML/accessibility gate.
+- Complete Narrator, Windows high-contrast, and 100/125/150/200-percent DPI release passes before v2.0 publication.
 
 ### P2: Library Needs Management Features
 

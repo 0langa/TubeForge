@@ -169,6 +169,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     private IReadOnlyList<DownloadModeOption> _downloadModes = BaseModeChoices;
     private DownloadModeOption _selectedDownloadMode = BaseModeChoices[0];
     private DownloadPresetOption _selectedDownloadPreset = DownloadPresetChoices[0];
+    private DownloadPresetOption _defaultDownloadPreset = DownloadPresetChoices[0];
+    private bool _showAdvancedDownloadOptions;
     private bool _applyingDownloadPreset;
     private IReadOnlyList<FilterOption<int>> _resolutionOptions = [];
     private FilterOption<int>? _selectedResolution;
@@ -392,6 +394,9 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     public IReadOnlyList<DownloadModeOption> DownloadModes => _downloadModes;
 
     public IReadOnlyList<DownloadPresetOption> DownloadPresets => DownloadPresetChoices;
+
+    public IReadOnlyList<DownloadPresetOption> DefaultDownloadPresets =>
+        DownloadPresetChoices.Where(option => option.Value != DownloadPresetKind.Custom).ToArray();
 
     public IReadOnlyList<OutputProcessingOption> AudioProcessingOptions => AudioProcessingChoices;
 
@@ -965,13 +970,40 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             var accepted = IsLiveCapture
                 ? DownloadPresetChoices.First(option => option.Value == DownloadPresetKind.BestOriginal)
                 : value;
-            if (accepted is null || !Set(ref _selectedDownloadPreset, accepted))
+            if (accepted is null)
+            {
+                return;
+            }
+
+            if (accepted.Value == DownloadPresetKind.Custom)
+            {
+                ShowAdvancedDownloadOptions = true;
+            }
+            if (!Set(ref _selectedDownloadPreset, accepted))
             {
                 return;
             }
 
             ApplyDownloadPreset(accepted);
         }
+    }
+
+    public DownloadPresetOption DefaultDownloadPreset
+    {
+        get => _defaultDownloadPreset;
+        set
+        {
+            if (value is not null && value.Value != DownloadPresetKind.Custom)
+            {
+                Set(ref _defaultDownloadPreset, value);
+            }
+        }
+    }
+
+    public bool ShowAdvancedDownloadOptions
+    {
+        get => _showAdvancedDownloadOptions;
+        set => Set(ref _showAdvancedDownloadOptions, value);
     }
 
     public bool CanEmbedSelectedCaption =>
@@ -1371,6 +1403,13 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             ApplyNetworkSettings(_settings);
             _selectedLibrarySort = LibrarySortChoices.First(option => option.Value == _settings.LibrarySortOrder);
             OnPropertyChanged(nameof(SelectedLibrarySort));
+            _defaultDownloadPreset = DownloadPresetChoices.First(option =>
+                option.Value == DownloadPresetFromSettings(_settings.DefaultDownloadPreset));
+            _selectedDownloadPreset = _defaultDownloadPreset;
+            OnPropertyChanged(nameof(DefaultDownloadPreset));
+            OnPropertyChanged(nameof(SelectedDownloadPreset));
+            _showAdvancedDownloadOptions = _settings.ShowAdvancedDownloadOptions;
+            OnPropertyChanged(nameof(ShowAdvancedDownloadOptions));
             ShowResponsibleUseNotice = !_settings.ResponsibleUseAccepted;
         }
         else
@@ -1474,7 +1513,9 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                 MetadataTimeoutSeconds = MetadataTimeoutSeconds,
                 DownloadRetryAttempts = DownloadRetryAttempts,
                 PerHostConcurrency = PerHostConcurrency,
-                LibrarySortOrder = SelectedLibrarySort.Value ?? LibrarySortOrder.NewestFirst
+                LibrarySortOrder = SelectedLibrarySort.Value ?? LibrarySortOrder.NewestFirst,
+                DefaultDownloadPreset = DownloadPresetToSettings(DefaultDownloadPreset.Value),
+                ShowAdvancedDownloadOptions = ShowAdvancedDownloadOptions
             };
         }
         catch (Exception exception) when (exception is ArgumentException or NotSupportedException or PathTooLongException)
@@ -1536,6 +1577,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                 EnableAcceleratedTransfers = EnableAcceleratedTransfers,
                 EnableAutomaticUpdateChecks = EnableAutomaticUpdateChecks,
                 LibrarySortOrder = SelectedLibrarySort.Value ?? LibrarySortOrder.NewestFirst,
+                DefaultDownloadPreset = DownloadPresetToSettings(DefaultDownloadPreset.Value),
+                ShowAdvancedDownloadOptions = ShowAdvancedDownloadOptions,
                 ResponsibleUseAccepted = true
             };
         }
@@ -5210,6 +5253,22 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             _applyingDownloadPreset = false;
         }
     }
+
+    private static DownloadPresetKind DownloadPresetFromSettings(PreferredDownloadPreset preset) => preset switch
+    {
+        PreferredDownloadPreset.WindowsCompatibleMp4 => DownloadPresetKind.WindowsCompatibleMp4,
+        PreferredDownloadPreset.SmallFile => DownloadPresetKind.SmallFile,
+        PreferredDownloadPreset.Mp3_320 => DownloadPresetKind.Mp3_320,
+        _ => DownloadPresetKind.BestOriginal
+    };
+
+    private static PreferredDownloadPreset DownloadPresetToSettings(DownloadPresetKind preset) => preset switch
+    {
+        DownloadPresetKind.WindowsCompatibleMp4 => PreferredDownloadPreset.WindowsCompatibleMp4,
+        DownloadPresetKind.SmallFile => PreferredDownloadPreset.SmallFile,
+        DownloadPresetKind.Mp3_320 => PreferredDownloadPreset.Mp3_320,
+        _ => PreferredDownloadPreset.BestOriginal
+    };
 
     private void MarkPresetCustom(bool force = false)
     {

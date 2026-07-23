@@ -195,6 +195,11 @@ public static class MainViewModelSelectionTests
         viewModel.SelectedVideoProcessing = viewModel.VideoProcessingOptions.First(option =>
             option.Value.Kind == OutputProfileKind.Native);
         Assert.Equal(DownloadPresetKind.Custom, viewModel.SelectedDownloadPreset.Value);
+
+        viewModel.ShowAdvancedDownloadOptions = false;
+        viewModel.SelectedDownloadPreset = viewModel.DownloadPresets.First(option =>
+            option.Value == DownloadPresetKind.Custom);
+        Assert.True(viewModel.ShowAdvancedDownloadOptions);
     }
 
     [Test]

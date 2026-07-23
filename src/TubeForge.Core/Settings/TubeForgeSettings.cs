@@ -2,7 +2,7 @@ namespace TubeForge.Core.Settings;
 
 public sealed record TubeForgeSettings
 {
-    public const int CurrentSchemaVersion = 4;
+    public const int CurrentSchemaVersion = 5;
 
     public int SchemaVersion { get; init; } = CurrentSchemaVersion;
 
@@ -28,6 +28,10 @@ public sealed record TubeForgeSettings
 
     public LibrarySortOrder LibrarySortOrder { get; init; } = LibrarySortOrder.NewestFirst;
 
+    public PreferredDownloadPreset DefaultDownloadPreset { get; init; } = PreferredDownloadPreset.BestOriginal;
+
+    public bool ShowAdvancedDownloadOptions { get; init; }
+
     public bool ResponsibleUseAccepted { get; init; }
 }
 
@@ -44,4 +48,12 @@ public enum LibrarySortOrder
     OldestFirst,
     TitleAscending,
     LargestFirst
+}
+
+public enum PreferredDownloadPreset
+{
+    BestOriginal,
+    WindowsCompatibleMp4,
+    SmallFile,
+    Mp3_320
 }

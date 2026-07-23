@@ -181,6 +181,7 @@ public sealed class TubeForgeSettingsStore
             settings.ProxyMode != NetworkProxyMode.Manual &&
                 !string.IsNullOrEmpty(settings.ManualProxyUri) ||
             !Enum.IsDefined(settings.LibrarySortOrder) ||
+            !Enum.IsDefined(settings.DefaultDownloadPreset) ||
             !FileNameTemplate.IsValid(settings.FileNameTemplate) ||
             string.IsNullOrWhiteSpace(settings.DownloadFolder) ||
             settings.DownloadFolder.Length > 32_767 ||
@@ -226,6 +227,12 @@ public sealed class TubeForgeSettingsStore
             MetadataTimeoutSeconds = 20,
             DownloadRetryAttempts = 3,
             PerHostConcurrency = 2
+        },
+        4 => settings with
+        {
+            SchemaVersion = TubeForgeSettings.CurrentSchemaVersion,
+            DefaultDownloadPreset = PreferredDownloadPreset.BestOriginal,
+            ShowAdvancedDownloadOptions = false
         },
         _ => settings
     };

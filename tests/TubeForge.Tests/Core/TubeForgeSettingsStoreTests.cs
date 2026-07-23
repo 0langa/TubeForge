@@ -25,6 +25,8 @@ public static class TubeForgeSettingsStoreTests
             MetadataTimeoutSeconds = 45,
             DownloadRetryAttempts = 5,
             PerHostConcurrency = 1,
+            DefaultDownloadPreset = PreferredDownloadPreset.SmallFile,
+            ShowAdvancedDownloadOptions = true,
             ResponsibleUseAccepted = true
         });
         var loaded = await store.LoadAsync(defaults);
@@ -42,6 +44,8 @@ public static class TubeForgeSettingsStoreTests
         Assert.Equal(45, loaded.Value.MetadataTimeoutSeconds);
         Assert.Equal(5, loaded.Value.DownloadRetryAttempts);
         Assert.Equal(1, loaded.Value.PerHostConcurrency);
+        Assert.Equal(PreferredDownloadPreset.SmallFile, loaded.Value.DefaultDownloadPreset);
+        Assert.True(loaded.Value.ShowAdvancedDownloadOptions);
         Assert.True(loaded.Value.ResponsibleUseAccepted);
     }
 
@@ -70,6 +74,10 @@ public static class TubeForgeSettingsStoreTests
             ProxyMode = NetworkProxyMode.None,
             ManualProxyUri = "not-used"
         });
+        var invalidPreset = await store.SaveAsync(Settings(directory.Path) with
+        {
+            DefaultDownloadPreset = (PreferredDownloadPreset)99
+        });
         await File.WriteAllTextAsync(path, "{ malformed");
 
         var corrupt = await store.LoadAsync(Settings(directory.Path));
@@ -82,7 +90,9 @@ public static class TubeForgeSettingsStoreTests
         Assert.Equal("Settings.InvalidState", invalidTemplate.Error?.Code);
         Assert.False(credentialedProxy.IsSuccess);
         Assert.False(unusedProxy.IsSuccess);
+        Assert.False(invalidPreset.IsSuccess);
         Assert.Equal("Settings.InvalidState", credentialedProxy.Error?.Code);
+        Assert.Equal("Settings.InvalidState", invalidPreset.Error?.Code);
         Assert.False(corrupt.IsSuccess);
         Assert.Equal("Settings.Corrupt", corrupt.Error?.Code);
         Assert.Equal("{ malformed", await File.ReadAllTextAsync(path));
@@ -163,6 +173,36 @@ public static class TubeForgeSettingsStoreTests
         Assert.Equal(20, loaded.Value.MetadataTimeoutSeconds);
         Assert.Equal(3, loaded.Value.DownloadRetryAttempts);
         Assert.Equal(2, loaded.Value.PerHostConcurrency);
+    }
+
+    [Test]
+    public static async Task MigratesPublishedSchemaFourToSimpleBestOriginalDefaults()
+    {
+        using var directory = new TestDirectory();
+        var path = Path.Combine(directory.Path, "settings.json");
+        await File.WriteAllTextAsync(path, JsonSerializer.Serialize(new
+        {
+            schemaVersion = 4,
+            downloadFolder = Path.GetFullPath(directory.Path),
+            maximumConcurrentDownloads = 2,
+            fileNameTemplate = "{title}",
+            enableAcceleratedTransfers = true,
+            enableAutomaticUpdateChecks = true,
+            proxyMode = 0,
+            manualProxyUri = string.Empty,
+            metadataTimeoutSeconds = 20,
+            downloadRetryAttempts = 3,
+            perHostConcurrency = 2,
+            librarySortOrder = 0,
+            responsibleUseAccepted = true
+        }));
+
+        var loaded = await new TubeForgeSettingsStore(path).LoadAsync(Settings(directory.Path));
+
+        Assert.True(loaded.IsSuccess, loaded.Error?.Message);
+        Assert.Equal(TubeForgeSettings.CurrentSchemaVersion, loaded.Value.SchemaVersion);
+        Assert.Equal(PreferredDownloadPreset.BestOriginal, loaded.Value.DefaultDownloadPreset);
+        Assert.False(loaded.Value.ShowAdvancedDownloadOptions);
     }
 
     private static TubeForgeSettings Settings(string folder) => new()

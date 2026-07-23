@@ -9,7 +9,7 @@ Status date: 2026-07-22.
 - Phase 0 complete. Sanitized baseline evidence: [`docs/V2_BASELINE_EVIDENCE.md`](docs/V2_BASELINE_EVIDENCE.md).
 - Phase 1 core implementation complete in working tree: expanded audio outputs plus resolution-aware H.264/AAC MP4, H.265/AAC MP4, and VP9/Opus WebM profiles.
 - General output profiles persist through queue restart, validate before publication/recovery, clean failed temporary files, and use allowlisted FFmpeg arguments from the pinned LGPL build.
-- Verification: Release build 0 warnings/errors; 231/231 deterministic tests; core parser p95 0.3404 ms against 25 ms; bundled FFmpeg encode/decode smoke passed for all four new audio outputs, all three video profiles, MP4/MKV/WebM soft-subtitle/chapter embed/split workflows, trim, SponsorBlock removal, and synthetic HLS-to-MKV capture.
+- Verification: Release build 0 warnings/errors; 233/233 deterministic tests; isolated core parser p95 0.2214 ms against 25 ms and desktop budgets passed; bundled FFmpeg encode/decode smoke passed for all four new audio outputs, all three video profiles, MP4/MKV/WebM soft-subtitle/chapter embed/split workflows, trim, SponsorBlock removal, and synthetic HLS-to-MKV capture.
 - Phase 1 release proof remains open: installed-app live media matrix and measured quality/time/file-size evidence. Broader custom/device presets remain deferred to UX work.
 - Preset-first UX is implemented for Best original, Windows MP4, Small file, MP3 320, and Custom; deterministic tests cover applied state and manual override behavior.
 - Phase 2 subtitle slice implemented: selected manual/auto track can be embedded as a soft subtitle in a single-video MP4, MKV, or WebM download. Queue identity persists language/type without storing caption URLs; FFmpeg validates a subtitle stream before publication or recovery.
@@ -20,6 +20,7 @@ Status date: 2026-07-22.
 - Phase 3 decision complete: v2.0 follows Option A and remains public-only. Cookie import and OAuth are deferred; login-required, private, membership, paid, and other access-controlled media fail with a stable typed error and no credential collection.
 - Phase 4 public-live implementation complete in the working tree: active record-from-now and upcoming wait modes use bounded unencrypted HLS, duration/size/wait limits, trusted-host redirect checks, retrying segment downloads, recoverable hash-only journals, queue pause/resume, and atomic MKV stream-copy finalization. A real authorized public-live canary remains a release gate.
 - Phase 6 implemented: schema-versioned Library transfer/repair plus persistent playlist/channel archive profiles. Profiles retain destination/template/output/caption/chapter preferences and bounded checked-item sets; user-initiated checks queue only new items, while Select missing identifies current collection gaps across Queue and Library.
+- Phase 7 implementation complete: preset-first simple mode hides detailed format controls until requested, Custom reveals them, schema-v5 settings persist a default preset and disclosure choice, first run captures folder/preset/update preferences, vector navigation replaces text glyphs, and error recovery links expose destination, Settings, Diagnostics, and redacted-report actions. Manual Narrator/high-contrast/DPI release passes remain open.
 
 ## v2 Product Definition
 
@@ -280,29 +281,29 @@ Goal: make v2 feel like a finished app, not engineering demo.
 
 Tasks:
 
-- Add simple/advanced mode.
+- [x] Add simple/advanced mode.
 - [x] Add preset-first download UI:
   - [x] Windows-compatible MP4.
   - [x] Best original.
   - [x] MP3 320.
   - [x] Small file.
   - [x] Custom.
-- Replace improvised nav glyphs with consistent icon resources.
-- Add clearer progress states: analyzing, queued, downloading video, downloading audio, muxing, transcoding, writing captions, complete.
-- Add recovery actions for common failures:
-  - Change destination.
-  - Free disk space and retry.
-  - Retry after rate-limit.
-  - Open diagnostics.
-  - Copy report.
-- Add first-run quick settings: default folder, preset, update checks.
+- [x] Replace improvised nav glyphs with consistent vector icon resources.
+- [x] Add clearer progress states: analyzing, queued, downloading video, downloading audio, muxing, transcoding, writing captions, complete.
+- [x] Add recovery actions for common failures:
+  - [x] Change destination.
+  - [x] Free disk space/change destination and retry through Queue.
+  - [x] Retry after rate-limit through existing failed/deferred Queue controls.
+  - [x] Open diagnostics.
+  - [x] Copy report.
+- [x] Add first-run quick settings: default folder, preset, update checks.
 
 Accessibility:
 
-- Keyboard-only flow through analyze, presets, queue controls, diagnostics.
-- Narrator smoke pass.
-- High contrast check.
-- DPI scaling check at 100, 125, 150, 200 percent.
+- [x] Keyboard focus and automation labels cover analyze, presets, queue controls, diagnostics, first-run, and recovery actions.
+- [ ] Narrator smoke pass on packaged v2 build.
+- [ ] Windows high-contrast check on packaged v2 build.
+- [ ] DPI scaling check at 100, 125, 150, 200 percent on packaged v2 build.
 
 Exit gate:
 
