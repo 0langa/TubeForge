@@ -55,6 +55,22 @@ The final rebuilt setup was exercised on the current Windows workstation with th
 
 The remove-data relocation path is covered by a deterministic regression test so `/uninstall /quiet /remove-data` cannot silently lose the removal intent.
 
+## Installed UI and accessibility probe
+
+The final installed candidate later produced a ready main window on the current workstation. Severe host memory pressure made readiness take 37,160 ms, so this observation proves window creation but does not satisfy the 4,000 ms desktop performance budget; the isolated desktop performance run remains the valid budget evidence.
+
+A policy-controlled Windows accessibility inspection confirmed:
+
+- named Download, Queue, Library, Settings, and Diagnostics navigation buttons;
+- a named URL input and analysis action;
+- named settings inputs for folder, filename template, preset, concurrency, proxy, retries, updates, and save/check actions;
+- named Diagnostics copy/export actions and runtime state;
+- keyboard focus reached the default-download-folder editor from the selected Settings navigation control.
+
+The installed Diagnostics copy action produced valid JSON. Aggregate inspection found no user name, user-profile path, URL, or sensitive media identity in ordinary string values; sensitive vocabulary appeared only in the report's explicit exclusion declarations.
+
+This was not a Narrator pass, high contrast was not enabled, and Windows scaling was not changed. Narrator, high-contrast, and the full 100/125/150/200-percent DPI matrix remain manual release gates.
+
 ## Trust state
 
 The candidate is intentionally recorded as unsigned. No Authenticode certificate was supplied, the release manifest reports `authenticodeSigned: false`, and the setup executable has no signer certificate. SHA-256 manifests are present, but they do not replace Authenticode reputation or GitHub build-provenance attestations from the final release workflow.

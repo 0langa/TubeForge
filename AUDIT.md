@@ -38,7 +38,7 @@ dotnet run --project tools\TubeForge.Performance --configuration Release --no-bu
 
 Latest isolated release-candidate rerun: passed. Core parser p95 0.2214 ms against the 25 ms budget; startup 1,743.7 ms, idle CPU 0%, working set 146.76 MiB, and UI frame p95 39.927 ms also passed. One earlier combined sample exceeded the startup budget at 4,491 ms, so cold-start variance remains a release-monitoring risk.
 
-Locally verified after the initial audit: version 2.0.0 portable and installer candidates, checksums, release manifest, dependency layout, pinned FFmpeg, embedded installer payload, portable launch probe, v1.2.5 update with data preservation, clean-state install, and both uninstall data modes. The candidate is explicitly unsigned. The installed process stayed running in a bounded clean-state launch probe, but no window became ready under severe host memory pressure; independent packaged UI readiness remains open.
+Locally verified after the initial audit: version 2.0.0 portable and installer candidates, checksums, release manifest, dependency layout, pinned FFmpeg, embedded installer payload, portable launch probe, v1.2.5 update with data preservation, clean-state install, and both uninstall data modes. The candidate is explicitly unsigned. The clean-state process stayed running without a ready window under severe pressure; a later installed-candidate probe did create the main window and exposed named controls across Download, Settings, and Diagnostics, but took 37,160 ms. Independent packaged UI performance and accessibility remain open.
 
 Not verified in this audit: current live YouTube canary downloads, independent clean-Windows packaged UI readiness, code signing, VirusTotal/SmartScreen reputation, store/winget distribution, long-run queue soak, or accessibility with Narrator/NVDA.
 
@@ -245,6 +245,7 @@ Recommendation:
 
 - Keep the implemented simple/advanced preference and default-preset schema migration covered by deterministic tests.
 - Keep vector navigation resources and recovery actions in the static XAML/accessibility gate.
+- Preserve the installed accessibility-tree and redacted-report probes as release evidence; they confirmed named controls and valid JSON without user-profile paths or URLs.
 - Complete Narrator, Windows high-contrast, and 100/125/150/200-percent DPI release passes before v2.0 publication.
 
 ### P2: Library Needs Management Features
