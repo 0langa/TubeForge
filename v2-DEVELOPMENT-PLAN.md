@@ -21,6 +21,7 @@ Status date: 2026-07-22.
 - Phase 4 public-live implementation complete in the working tree: active record-from-now and upcoming wait modes use bounded unencrypted HLS, duration/size/wait limits, trusted-host redirect checks, retrying segment downloads, recoverable hash-only journals, queue pause/resume, and atomic MKV stream-copy finalization. A real authorized public-live canary remains a release gate.
 - Phase 6 implemented: schema-versioned Library transfer/repair plus persistent playlist/channel archive profiles. Profiles retain destination/template/output/caption/chapter preferences and bounded checked-item sets; user-initiated checks queue only new items, while Select missing identifies current collection gaps across Queue and Library.
 - Phase 7 implementation complete: preset-first simple mode hides detailed format controls until requested, Custom reveals them, schema-v5 settings persist a default preset and disclosure choice, first run captures folder/preset/update preferences, vector navigation replaces text glyphs, and error recovery links expose destination, Settings, Diagnostics, and redacted-report actions. Manual Narrator/high-contrast/DPI release passes remain open.
+- Phase 8 local release-candidate packaging complete at version 2.0.0: framework-dependent and self-contained ZIPs, installer, checksums, manifest, dependency layout, pinned FFmpeg, embedded payload, and portable launch probes pass. The candidate is explicitly unsigned. Publication, clean-machine install/update/uninstall, live canaries, and final public-doc sync remain release gates.
 
 ## v2 Product Definition
 
@@ -315,16 +316,16 @@ Goal: ship v2 as something normal Windows users can install and update.
 
 Tasks:
 
-- Finalize versioning to 2.0.0.
-- Acquire/use Authenticode certificate or clearly document unsigned status.
-- Publish installer and portable ZIPs.
-- Publish checksums and release manifest.
-- Publish GitHub release.
-- Verify update from v1.2.5 to v2.0.0.
-- Add winget manifest after release.
-- Add Scoop manifest if desired.
-- Prepare false-positive security response template.
-- Update `README.md`, `docs/SUPPORT_POLICY.md`, `docs/RELEASE_NOTES.md`, `docs/INSTALLATION.md`, and `THIRD_PARTY_NOTICES.md`.
+- [x] Finalize release-candidate packaging inputs to 2.0.0.
+- [x] Clearly document the current unsigned Authenticode status in the manifest, installation guidance, and release-candidate evidence.
+- [x] Build and verify local installer and portable ZIP candidates.
+- [x] Build and verify checksums and release manifest.
+- [ ] Publish GitHub release after every Phase 9 gate passes.
+- [ ] Verify update from v1.2.5 to 2.0.0 using the final packaged candidate.
+- [ ] Add winget manifest after release.
+- [ ] Add Scoop manifest if desired after release.
+- [x] Prepare false-positive security response template.
+- [ ] Update `README.md`, `docs/SUPPORT_POLICY.md`, `docs/RELEASE_NOTES.md`, `docs/INSTALLATION.md`, and `THIRD_PARTY_NOTICES.md` after final validation freezes the public feature surface.
 
 Exit gate:
 

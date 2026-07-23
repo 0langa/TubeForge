@@ -30,15 +30,17 @@ Result: passed, 0 warnings, 0 errors.
 dotnet run --project tests\TubeForge.Tests --configuration Release --no-build -- --all
 ```
 
-Result after public HLS/live implementation: 225/225 passed in 26183 ms.
+Result after the Phase 7 UX slice: 233/233 passed.
 
 ```powershell
 dotnet run --project tools\TubeForge.Performance --configuration Release --no-build -- --core-only
 ```
 
-Result after public HLS/live implementation: passed. Core parser p95 0.4065 ms against 25 ms budget.
+Latest isolated release-candidate rerun: passed. Core parser p95 0.2214 ms against the 25 ms budget; startup 1,743.7 ms, idle CPU 0%, working set 146.76 MiB, and UI frame p95 39.927 ms also passed. One earlier combined sample exceeded the startup budget at 4,491 ms, so cold-start variance remains a release-monitoring risk.
 
-Not verified in this audit: live YouTube canary downloads, installer publication, installer execution, desktop visual/performance probe, update flow against a real GitHub release, code signing, VirusTotal/SmartScreen reputation, store/winget distribution, long-run queue soak, or accessibility with Narrator/NVDA.
+Locally verified after the initial audit: version 2.0.0 portable and installer candidates, checksums, release manifest, dependency layout, pinned FFmpeg, embedded installer payload, and portable launch probe. The candidate is explicitly unsigned.
+
+Not verified in this audit: current live YouTube canary downloads, installer execution, clean update flow from v1.2.5, code signing, VirusTotal/SmartScreen reputation, store/winget distribution, long-run queue soak, or accessibility with Narrator/NVDA.
 
 ## Market Baseline
 
@@ -167,14 +169,14 @@ Recommendation:
 
 ### P1: Release-Grade Live Evidence Not Current
 
-Repository contains strong release automation and docs, but this audit did not run live canaries or installer packaging.
+Repository contains strong release automation and docs. Local version 2.0.0 archive and installer packaging now pass their checksum, layout, dependency, payload, and portable launch probes, but this audit did not run live canaries or execute the installer.
 
 Wrong/optimizable:
 
 - `docs/EXTRACTION_COMPATIBILITY.md` last live validation is 2026-07-20/2026-07-21 era, while audit date is 2026-07-22.
 - Live YouTube behavior changes frequently. Deterministic fixtures cannot prove current upstream compatibility.
 - `docs/PERFORMANCE_BUDGET.md` requires ten desktop runs, canary set, active direct download, and adaptive mux run before release; those were not run in this audit.
-- Installer/update scripts are present and tests exist, but current v2 release plan needs fresh proof from `Publish-Release.ps1`, `Test-Release.ps1`, `Publish-Installer.ps1`, and `Test-Installer.ps1`.
+- Fresh local proof from `Publish-Release.ps1`, `Test-Release.ps1`, `Publish-Installer.ps1`, and `Test-Installer.ps1` now passes; actual install/update/uninstall and current-upstream media proof remain open.
 
 Recommendation:
 
@@ -268,8 +270,8 @@ Release workflow supports signing and attestations, but user trust for a Windows
 Wrong/optimizable:
 
 - No winget/Scoop manifests.
-- No signed-certificate acquisition/status documented for release.
-- No SmartScreen reputation plan.
+- Current release-candidate evidence documents that no signing certificate was supplied and the candidate is unsigned; a production signing decision remains open.
+- A false-positive response template now covers checksum, provenance, signature-state, and vendor-submission handling; SmartScreen reputation remains unproven.
 - No rollback/update integration test against published release assets in this audit.
 
 Recommendation:
