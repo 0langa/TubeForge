@@ -1,6 +1,6 @@
 # TubeForge Audit
 
-Audit date: 2026-07-22.
+Audit date: 2026-07-23.
 
 Scope: v1.2.5 `main` baseline plus the current v2 implementation branch, deterministic local build/test/performance gates, release docs, WPF UI surface, downloader/extractor/media/update/installer code shape, and current public feature surface of popular YouTube downloaders.
 
@@ -30,7 +30,7 @@ Result: passed, 0 warnings, 0 errors.
 dotnet run --project tests\TubeForge.Tests --configuration Release --no-build -- --all
 ```
 
-Result after multi-language caption selection: 237/237 passed.
+Result after installer remove-data regression coverage: 238/238 passed.
 
 ```powershell
 dotnet run --project tools\TubeForge.Performance --configuration Release --no-build -- --core-only
@@ -38,9 +38,9 @@ dotnet run --project tools\TubeForge.Performance --configuration Release --no-bu
 
 Latest isolated release-candidate rerun: passed. Core parser p95 0.2214 ms against the 25 ms budget; startup 1,743.7 ms, idle CPU 0%, working set 146.76 MiB, and UI frame p95 39.927 ms also passed. One earlier combined sample exceeded the startup budget at 4,491 ms, so cold-start variance remains a release-monitoring risk.
 
-Locally verified after the initial audit: version 2.0.0 portable and installer candidates, checksums, release manifest, dependency layout, pinned FFmpeg, embedded installer payload, and portable launch probe. The candidate is explicitly unsigned.
+Locally verified after the initial audit: version 2.0.0 portable and installer candidates, checksums, release manifest, dependency layout, pinned FFmpeg, embedded installer payload, portable launch probe, v1.2.5 update with data preservation, clean-state install, and both uninstall data modes. The candidate is explicitly unsigned. The installed process stayed running in a bounded clean-state launch probe, but no window became ready under severe host memory pressure; independent packaged UI readiness remains open.
 
-Not verified in this audit: current live YouTube canary downloads, installer execution, clean update flow from v1.2.5, code signing, VirusTotal/SmartScreen reputation, store/winget distribution, long-run queue soak, or accessibility with Narrator/NVDA.
+Not verified in this audit: current live YouTube canary downloads, independent clean-Windows packaged UI readiness, code signing, VirusTotal/SmartScreen reputation, store/winget distribution, long-run queue soak, or accessibility with Narrator/NVDA.
 
 ## Market Baseline
 
@@ -169,14 +169,14 @@ Recommendation:
 
 ### P1: Release-Grade Live Evidence Not Current
 
-Repository contains strong release automation and docs. Local version 2.0.0 archive and installer packaging now pass their checksum, layout, dependency, payload, and portable launch probes, but this audit did not run live canaries or execute the installer.
+Repository contains strong release automation and docs. Local version 2.0.0 archive and installer packaging pass their checksum, layout, dependency, payload, and portable launch probes. The final rebuilt installer also passes local update, clean-state install, keep-data uninstall, and remove-data uninstall transactions, but this audit did not run live canaries or prove a ready packaged UI window on an independent clean Windows environment.
 
 Wrong/optimizable:
 
-- `docs/EXTRACTION_COMPATIBILITY.md` last live validation is 2026-07-20/2026-07-21 era, while audit date is 2026-07-22.
+- `docs/EXTRACTION_COMPATIBILITY.md` last live validation is 2026-07-20/2026-07-21 era, while audit date is 2026-07-23.
 - Live YouTube behavior changes frequently. Deterministic fixtures cannot prove current upstream compatibility.
 - `docs/PERFORMANCE_BUDGET.md` requires ten desktop runs, canary set, active direct download, and adaptive mux run before release; those were not run in this audit.
-- Fresh local proof from `Publish-Release.ps1`, `Test-Release.ps1`, `Publish-Installer.ps1`, and `Test-Installer.ps1` now passes; actual install/update/uninstall and current-upstream media proof remain open.
+- Fresh local proof from `Publish-Release.ps1`, `Test-Release.ps1`, `Publish-Installer.ps1`, and `Test-Installer.ps1` passes. Local install/update/uninstall transactions also pass with exact v1.2.5 and user-data restoration; independent clean-Windows UI readiness and current-upstream media proof remain open.
 
 Recommendation:
 
@@ -272,7 +272,7 @@ Wrong/optimizable:
 - No winget/Scoop manifests.
 - Current release-candidate evidence documents that no signing certificate was supplied and the candidate is unsigned; a production signing decision remains open.
 - A false-positive response template now covers checksum, provenance, signature-state, and vendor-submission handling; SmartScreen reputation remains unproven.
-- No rollback/update integration test against published release assets in this audit.
+- Local update and exact stable restoration pass against the final candidate bits; published-release asset integration remains open until publication is authorized.
 
 Recommendation:
 

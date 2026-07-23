@@ -2,16 +2,16 @@
 
 Evidence date: 2026-07-23.
 
-Candidate source: commit `f41481d` on `cdx/v2-phase1-formats`.
+Candidate source: commit `6fa9289` on `cdx/v2-phase1-formats`.
 
 This file records sanitized aggregate evidence only. It contains no media URLs, video identifiers, titles, channel names, signed stream URLs, credentials, user-data contents, or private local paths.
 
 ## Source gates
 
 - Release build: passed with 0 warnings and 0 errors.
-- Full deterministic suite: 233/233 passed.
+- Full deterministic suite: 238/238 passed.
 - Formatter verification: passed.
-- Exact candidate CI: passed in GitHub Actions run `29970204407`.
+- Exact candidate CI: passed in GitHub Actions run `29975627857`.
 - Isolated performance rerun: passed; core parser p95 0.2214 ms, startup 1,743.7 ms, idle CPU 0%, working set 146.76 MiB, and UI frame p95 39.927 ms.
 - One earlier combined performance sample exceeded the 4,000 ms startup budget at 4,491 ms. The isolated rerun passed; cold-start variance remains a release-monitoring risk.
 
@@ -28,9 +28,9 @@ This file records sanitized aggregate evidence only. It contains no media URLs, 
 
 Candidate hashes:
 
-- framework-dependent ZIP: `17993B44B782B99C5FAE48AA00AB6D00AF81DC023DBA34481BDF6287081CE2A3`;
-- self-contained ZIP: `39C3511D81B52E182D35DDB99363EF3CB6E429DC2477308A3EDE4B5EA98F54D9`;
-- release manifest: `322CBFDED81EF8A290394FC6BAF70B5E35E5AADAF94D2B232B2E0B3A6F2390BD`.
+- framework-dependent ZIP: `896839E71F4BF05C77F6C5DA9017BB256741D276AE65436850ECAC9698E68867`;
+- self-contained ZIP: `A5E4A4C56B2D8B8D0AA381C3AE96CB951132B2354AAC431E70A7835AE31C2EC9`;
+- release manifest: `EF9A16CA450069702AC4D4C57A48AB4F3C18270A0247610F6384BD8A0F916FD9`.
 
 ## Installer package
 
@@ -40,7 +40,20 @@ Candidate hashes:
 
 Candidate installer hash:
 
-- setup executable: `2E1C04D43CC8B1CC33FB352365F42037F33E4F9E21BC794D1F1672C2CD168155`.
+- setup executable: `15BA4BB2983BE54209F60A74E382D8F13B779D97E4B304A5B09766F64A9B47AA`.
+
+## Installed candidate system proof
+
+The final rebuilt setup was exercised on the current Windows workstation with the existing v1.2.5 user data protected by an immutable hash snapshot:
+
+- v1.2.5 to v2.0.0 update passed, changed the application executable, and preserved all five user-data files byte-for-byte;
+- keep-data uninstall removed the v2 program directory and uninstall registration while preserving all five user-data files byte-for-byte;
+- a clean-state v2 install passed after the existing application data was isolated outside the active profile;
+- the installed application process launched and stayed running, but no main-window handle became ready during the bounded probe under severe host memory pressure, so this is not recorded as a packaged UI-readiness pass;
+- quiet remove-data uninstall removed the program directory, uninstall registration, and a fresh application-data sentinel;
+- every transaction restored v1.2.5, its exact executable hash, all five original user-data files, and the pre-test absence of a rollback directory.
+
+The remove-data relocation path is covered by a deterministic regression test so `/uninstall /quiet /remove-data` cannot silently lose the removal intent.
 
 ## Trust state
 
@@ -50,7 +63,7 @@ The candidate is intentionally recorded as unsigned. No Authenticode certificate
 
 - authorized current-upstream public live and output-matrix canaries;
 - installed-app playback, quality, duration, and size measurements;
-- fresh install, update from v1.2.5, and both uninstall-retention modes on the final candidate;
+- independent clean-Windows repetition with a ready packaged UI window;
 - packaged Narrator, high-contrast, and 100/125/150/200 percent DPI checks;
 - final diagnostics redaction pass after live failure scenarios;
 - final public documentation and release-note sync;

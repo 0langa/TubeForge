@@ -4,12 +4,12 @@ Target: TubeForge 2.0 should be release-grade, user-friendly, and functionally c
 
 ## Implementation Status
 
-Status date: 2026-07-22.
+Status date: 2026-07-23.
 
 - Phase 0 complete. Sanitized baseline evidence: [`docs/V2_BASELINE_EVIDENCE.md`](docs/V2_BASELINE_EVIDENCE.md).
 - Phase 1 core implementation complete in working tree: expanded audio outputs plus resolution-aware H.264/AAC MP4, H.265/AAC MP4, and VP9/Opus WebM profiles.
 - General output profiles persist through queue restart, validate before publication/recovery, clean failed temporary files, and use allowlisted FFmpeg arguments from the pinned LGPL build.
-- Verification: Release build 0 warnings/errors; 237/237 deterministic tests; isolated core parser p95 0.2214 ms against 25 ms and desktop budgets passed; bundled FFmpeg encode/decode smoke passed for all four new audio outputs, all three video profiles, MP4/MKV/WebM soft-subtitle/chapter embed/split workflows, trim, SponsorBlock removal, and synthetic HLS-to-MKV capture.
+- Verification: Release build 0 warnings/errors; 238/238 deterministic tests; isolated core parser p95 0.2214 ms against 25 ms and desktop budgets passed; bundled FFmpeg encode/decode smoke passed for all four new audio outputs, all three video profiles, MP4/MKV/WebM soft-subtitle/chapter embed/split workflows, trim, SponsorBlock removal, and synthetic HLS-to-MKV capture.
 - Phase 1 release proof remains open: installed-app live media matrix and measured quality/time/file-size evidence. Broader custom/device presets remain deferred to UX work.
 - Preset-first UX is implemented for Best original, Windows MP4, Small file, MP3 320, and Custom; deterministic tests cover applied state and manual override behavior.
 - Phase 2 subtitle slice implemented: up to eight ordered manual/auto tracks can be embedded as soft subtitles in single-video and collection/archive MP4, MKV, or WebM downloads. Queue identity persists language/type without storing caption URLs; FFmpeg validates every expected subtitle stream before publication or recovery.
@@ -21,7 +21,7 @@ Status date: 2026-07-22.
 - Phase 4 public-live implementation complete in the working tree: active record-from-now and upcoming wait modes use bounded unencrypted HLS, duration/size/wait limits, trusted-host redirect checks, retrying segment downloads, recoverable hash-only journals, queue pause/resume, and atomic MKV stream-copy finalization. A real authorized public-live canary remains a release gate.
 - Phase 6 implemented: schema-versioned Library transfer/repair plus persistent playlist/channel archive profiles. Profiles retain destination/template/output/caption/chapter preferences and bounded checked-item sets; user-initiated checks queue only new items, while Select missing identifies current collection gaps across Queue and Library.
 - Phase 7 implementation complete: preset-first simple mode hides detailed format controls until requested, Custom reveals them, schema-v5 settings persist a default preset and disclosure choice, first run captures folder/preset/update preferences, vector navigation replaces text glyphs, and error recovery links expose destination, Settings, Diagnostics, and redacted-report actions. Manual Narrator/high-contrast/DPI release passes remain open.
-- Phase 8 local release-candidate packaging complete at version 2.0.0: framework-dependent and self-contained ZIPs, installer, checksums, manifest, dependency layout, pinned FFmpeg, embedded payload, and portable launch probes pass. The candidate is explicitly unsigned. Publication, clean-machine install/update/uninstall, live canaries, and final public-doc sync remain release gates.
+- Phase 8 local release-candidate packaging complete at version 2.0.0: framework-dependent and self-contained ZIPs, installer, checksums, manifest, dependency layout, pinned FFmpeg, embedded payload, and portable launch probes pass. Exact candidate CI, local v1.2.5 update, clean-state install, and both uninstall data modes pass; quiet remove-data relocation now has regression coverage. The candidate is explicitly unsigned. Independent clean-Windows UI readiness, publication, live canaries, and final public-doc sync remain release gates.
 
 ## v2 Product Definition
 
@@ -321,7 +321,7 @@ Tasks:
 - [x] Build and verify local installer and portable ZIP candidates.
 - [x] Build and verify checksums and release manifest.
 - [ ] Publish GitHub release after every Phase 9 gate passes.
-- [ ] Verify update from v1.2.5 to 2.0.0 using the final packaged candidate.
+- [x] Verify update from v1.2.5 to 2.0.0 using the final packaged candidate.
 - [ ] Add winget manifest after release.
 - [ ] Add Scoop manifest if desired after release.
 - [x] Prepare false-positive security response template.
@@ -368,13 +368,13 @@ Output matrix:
 - Chapter split if implemented.
 - Trim if implemented.
 
-System matrix:
+System matrix status:
 
-- Fresh install.
-- Update from v1.2.5.
-- Portable ZIP.
-- Uninstall keep data.
-- Uninstall remove data.
+- [x] Fresh install on the current workstation with existing application data isolated; process launch stayed alive, while packaged window readiness remains open.
+- [x] Update from v1.2.5 with byte-identical user-data preservation and exact stable restoration.
+- [x] Portable ZIP.
+- [x] Uninstall keep data.
+- [x] Uninstall remove data, including quiet relocation regression coverage.
 - Queue recovery after app kill.
 - Network interruption.
 - Low disk.
