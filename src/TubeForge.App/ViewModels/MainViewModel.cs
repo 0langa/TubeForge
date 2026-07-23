@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Diagnostics;
+using System.Globalization;
 using System.Net;
 using System.Net.Http;
 using System.IO;
@@ -13,11 +14,14 @@ using TubeForge.Core.Diagnostics;
 using TubeForge.Core.Errors;
 using TubeForge.Core.Files;
 using TubeForge.Core.Media;
+using TubeForge.Core.Networking;
 using TubeForge.Core.Results;
 using TubeForge.Core.Settings;
 using TubeForge.Core.YouTube;
 using TubeForge.Downloads;
+using TubeForge.Downloads.Archives;
 using TubeForge.Downloads.History;
+using TubeForge.Downloads.Hls;
 using TubeForge.Downloads.Queue;
 using TubeForge.Media;
 using TubeForge.Transcoding;
@@ -26,13 +30,27 @@ using TubeForge.YouTube;
 using TubeForge.YouTube.Captions;
 using TubeForge.YouTube.Collections;
 using TubeForge.YouTube.Sidecars;
+using TubeForge.YouTube.SponsorBlock;
 
 namespace TubeForge.App.ViewModels;
 
 public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
 {
-    private const int MaximumConcurrentRequestsPerHost = 2;
     private static readonly Uri YouTubeOrigin = new("https://www.youtube.com/");
+    private static readonly Uri SponsorBlockOrigin = new("https://sponsor.ajay.app/");
+
+    private static readonly IReadOnlyList<FilterOption<NetworkProxyMode>> ProxyModeChoices =
+    [
+        new("Use Windows system proxy", NetworkProxyMode.System),
+        new("Manual HTTP/HTTPS proxy", NetworkProxyMode.Manual),
+        new("No proxy", NetworkProxyMode.None)
+    ];
+
+    private static readonly IReadOnlyList<FilterOption<SponsorBlockMode>> SponsorBlockModeChoices =
+    [
+        new("Write chapters", SponsorBlockMode.Chapters),
+        new("Remove segments", SponsorBlockMode.Remove)
+    ];
 
     private static readonly IReadOnlyList<DownloadModeOption> BaseModeChoices =
     [
@@ -41,19 +59,55 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         new(DownloadMode.VideoOnly, "Video only", "Maximum video quality; audio not included")
     ];
 
-    private static readonly IReadOnlyList<AudioProcessingOption> AudioProcessingChoices =
+    private static readonly IReadOnlyList<DownloadPresetOption> DownloadPresetChoices =
     [
-        new(AudioOutputProfile.Native, "Native stream · no conversion", "Fastest; preserves source quality"),
-        new(AudioOutputProfile.Mp3(320), "MP3 · 320 kbps", "Highest MP3 bitrate; largest file"),
-        new(AudioOutputProfile.Mp3(256), "MP3 · 256 kbps", "High-quality MP3"),
-        new(AudioOutputProfile.Mp3(192), "MP3 · 192 kbps", "Balanced quality and size"),
-        new(AudioOutputProfile.Mp3(128), "MP3 · 128 kbps", "Smallest MP3 file")
+        new(DownloadPresetKind.BestOriginal, "Best original", "Highest available quality; stream copy when possible"),
+        new(DownloadPresetKind.WindowsCompatibleMp4, "Windows MP4", "Highest source converted to H.264/AAC MP4"),
+        new(DownloadPresetKind.SmallFile, "Small file", "Efficient H.265/AAC MP4; prefers 720p when available"),
+        new(DownloadPresetKind.Mp3_320, "MP3 320", "Best audio converted to high-bitrate MP3"),
+        new(DownloadPresetKind.Custom, "Custom", "Use the detailed controls below")
+    ];
+
+    private static readonly IReadOnlyList<OutputProcessingOption> AudioProcessingChoices =
+    [
+        new(OutputProfile.Native, "Native stream · no conversion", "Fastest; preserves source quality"),
+        new(OutputProfile.Mp3(320), "MP3 · 320 kbps", "Highest MP3 bitrate; largest file"),
+        new(OutputProfile.Mp3(256), "MP3 · 256 kbps", "High-quality MP3"),
+        new(OutputProfile.Mp3(192), "MP3 · 192 kbps", "Balanced quality and size"),
+        new(OutputProfile.Mp3(128), "MP3 · 128 kbps", "Smallest MP3 file"),
+        new(OutputProfile.Aac(256), "AAC/M4A · 256 kbps", "Broad Apple and Windows compatibility"),
+        new(OutputProfile.Opus(160), "Opus/OGG · 160 kbps", "Efficient open audio format"),
+        new(OutputProfile.Flac, "FLAC · lossless", "Lossless compressed audio"),
+        new(OutputProfile.Wav, "WAV · PCM", "Uncompressed 16-bit audio; largest file")
+    ];
+
+    private static readonly IReadOnlyList<OutputProcessingOption> VideoProcessingChoices =
+    [
+        new(OutputProfile.Native, "Original quality · stream copy", "Fastest; preserves selected source codecs"),
+        new(OutputProfile.H264AacMp4, "Compatible MP4 · H.264/AAC", "Broad Windows/device playback; re-encodes locally"),
+        new(OutputProfile.H265AacMp4, "Compact MP4 · H.265/AAC", "Smaller modern MP4; slower conversion"),
+        new(OutputProfile.Vp9OpusWebM, "Open WebM · VP9/Opus", "Open codecs; slower conversion")
     ];
 
     private static readonly IReadOnlyList<CaptionFormatOption> CaptionOutputChoices =
     [
         new(CaptionOutputFormat.SubRip, "SRT · broad player support", "srt"),
         new(CaptionOutputFormat.WebVtt, "WebVTT · native timed text", "vtt")
+    ];
+
+    private static readonly IReadOnlyList<ArchiveOutputPresetOption> ArchiveOutputPresetChoices =
+    [
+        new(ArchiveOutputPreset.BestOriginal, "Best original"),
+        new(ArchiveOutputPreset.WindowsCompatibleMp4, "Windows MP4"),
+        new(ArchiveOutputPreset.SmallFile, "Small file"),
+        new(ArchiveOutputPreset.Mp3_320, "MP3 320")
+    ];
+
+    private static readonly IReadOnlyList<ArchiveCaptionPreferenceOption> ArchiveCaptionPreferenceChoices =
+    [
+        new(ArchiveCaptionPreference.None, "No embedded captions"),
+        new(ArchiveCaptionPreference.ManualPreferred, "Embed all manual captions"),
+        new(ArchiveCaptionPreference.ManualOrAutomatic, "Embed up to 8 manual + auto captions")
     ];
 
     private static readonly IReadOnlyList<FilterOption<LibrarySortOrder>> LibrarySortChoices =
@@ -67,22 +121,28 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     private readonly HttpClient _httpClient;
     private readonly HttpClient _sidecarHttpClient;
     private readonly HttpClient _updateHttpClient;
-    private readonly YouTubeMetadataResolver _resolver;
-    private readonly DirectDownloadEngine _downloader;
-    private readonly AdaptiveDownloadEngine _adaptiveDownloader;
+    private YouTubeMetadataResolver _resolver;
+    private DirectDownloadEngine _downloader;
+    private AdaptiveDownloadEngine _adaptiveDownloader;
     private readonly FfmpegMediaProcessor _mediaProcessor;
+    private readonly FfmpegChapterSplitter _chapterSplitter;
     private readonly FfmpegAudioTranscoder _audioTranscoder;
+    private readonly FfmpegVideoTranscoder _videoTranscoder;
     private readonly CaptionDownloadEngine _captionDownloader;
     private readonly YouTubeCollectionResolver _collectionResolver;
     private readonly ThumbnailDownloadEngine _thumbnailDownloader;
+    private readonly SponsorBlockClient _sponsorBlockClient;
     private readonly DownloadQueueStore _queueStore;
     private readonly DownloadHistoryStore _historyStore;
+    private readonly LibraryTransferService _libraryTransferService = new();
+    private readonly CollectionArchiveStore _archiveStore;
     private readonly TubeForgeSettingsStore _settingsStore;
     private readonly GitHubUpdateClient _updateClient;
     private readonly string _updateDirectory;
     private readonly DownloadQueueDispatcher _queueDispatcher = new(2);
-    private readonly HostRequestGate _hostRequestGate;
-    private readonly RateLimitedRequestExecutor _rateLimitedRequests;
+    private HostRequestGate _hostRequestGate;
+    private RateLimitedRequestExecutor _rateLimitedRequests;
+    private readonly ConfigurableWebProxy _networkProxy;
     private readonly SemaphoreSlim _queueMutationLock = new(1, 1);
     private readonly SemaphoreSlim _historyMutationLock = new(1, 1);
     private readonly Dictionary<Guid, QueuedDownloadWork> _preparedQueueWork = [];
@@ -108,6 +168,10 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     private bool _updatingFormatFilters;
     private IReadOnlyList<DownloadModeOption> _downloadModes = BaseModeChoices;
     private DownloadModeOption _selectedDownloadMode = BaseModeChoices[0];
+    private DownloadPresetOption _selectedDownloadPreset = DownloadPresetChoices[0];
+    private DownloadPresetOption _defaultDownloadPreset = DownloadPresetChoices[0];
+    private bool _showAdvancedDownloadOptions;
+    private bool _applyingDownloadPreset;
     private IReadOnlyList<FilterOption<int>> _resolutionOptions = [];
     private FilterOption<int>? _selectedResolution;
     private IReadOnlyList<FilterOption<MediaContainer>> _containerOptions = [];
@@ -122,19 +186,33 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     private FilterOption<long>? _selectedBitrate;
     private IReadOnlyList<FilterOption<AudioCodec>> _audioCodecOptions = [];
     private FilterOption<AudioCodec>? _selectedAudioCodec;
-    private AudioProcessingOption _selectedAudioProcessing = AudioProcessingChoices[0];
+    private OutputProcessingOption _selectedAudioProcessing = AudioProcessingChoices[0];
+    private OutputProcessingOption _selectedVideoProcessing = VideoProcessingChoices[0];
     private DownloadQueueSnapshot _queueSnapshot = new();
     private DownloadHistorySnapshot _historySnapshot = new();
+    private CollectionArchiveSnapshot _archiveSnapshot = new();
     private bool _isInitialized;
     private bool _queueUnavailable;
     private bool _historyUnavailable;
     private string _librarySearchText = string.Empty;
+    private string _libraryStatus = "Export, import, or rescan durable local history.";
+    private string _archiveStatus = "Save a playlist or channel once, then check it for new items later.";
+    private CollectionArchiveProfile? _selectedArchiveProfile;
+    private ArchiveOutputPresetOption _selectedArchiveOutputPreset = ArchiveOutputPresetChoices[0];
+    private ArchiveCaptionPreferenceOption _selectedArchiveCaptionPreference = ArchiveCaptionPreferenceChoices[0];
+    private bool _archiveEmbedChapters;
+    private CollectionQueueConfiguration? _activeCollectionQueueConfiguration;
     private FilterOption<LibrarySortOrder> _selectedLibrarySort = LibrarySortChoices[0];
     private string _downloadActionLabel = "Add to queue";
     private AppPage _activePage = AppPage.Download;
     private int _selectedMaxConcurrentDownloads = 2;
     private bool _enableAcceleratedTransfers = true;
     private bool _enableAutomaticUpdateChecks = true;
+    private FilterOption<NetworkProxyMode> _selectedProxyMode = ProxyModeChoices[0];
+    private string _manualProxyUri = string.Empty;
+    private int _metadataTimeoutSeconds = 20;
+    private int _downloadRetryAttempts = 3;
+    private int _perHostConcurrency = 2;
     private string _fileNameTemplate = FileNameTemplate.Default;
     private TubeForgeSettings _settings;
     private bool _showResponsibleUseNotice = true;
@@ -150,6 +228,23 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     private IReadOnlyList<CaptionTrackOption> _captionTracks = [];
     private CaptionTrackOption? _selectedCaptionTrack;
     private CaptionFormatOption _selectedCaptionFormat = CaptionOutputChoices[0];
+    private bool _embedChapters;
+    private bool _splitChapters;
+    private bool _enableTrim;
+    private string _trimStartText = "00:00:00";
+    private string _trimEndText = "00:00:00";
+    private bool _enableSponsorBlock;
+    private FilterOption<SponsorBlockMode> _selectedSponsorBlockMode = SponsorBlockModeChoices[0];
+    private bool _sponsorCategory = true;
+    private bool _introCategory;
+    private bool _outroCategory;
+    private bool _selfPromotionCategory;
+    private bool _interactionCategory;
+    private bool _previewCategory;
+    private bool _fillerCategory;
+    private string _liveDurationMinutesText = "60";
+    private string _liveMaximumSizeGiBText = "4";
+    private string _liveMaximumWaitMinutesText = "360";
     private bool _isSavingCaption;
     private bool _isSavingSidecar;
     private YouTubeCollectionResult? _collection;
@@ -160,23 +255,29 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
 
     internal MainViewModel(string? applicationDataDirectory)
     {
-        _hostRequestGate = new HostRequestGate(MaximumConcurrentRequestsPerHost);
+        _hostRequestGate = new HostRequestGate(2);
         _rateLimitedRequests = new RateLimitedRequestExecutor(_hostRequestGate);
+        _networkProxy = new ConfigurableWebProxy(new NetworkProxyConfiguration(NetworkProxyMode.System));
         var handler = new SocketsHttpHandler
         {
             AutomaticDecompression = DecompressionMethods.All,
             AllowAutoRedirect = true,
             MaxAutomaticRedirections = 5,
             ConnectTimeout = TimeSpan.FromSeconds(10),
-            PooledConnectionLifetime = TimeSpan.FromMinutes(5)
+            PooledConnectionLifetime = TimeSpan.FromMinutes(5),
+            Proxy = _networkProxy,
+            UseProxy = true
         };
         _httpClient = new HttpClient(handler) { Timeout = Timeout.InfiniteTimeSpan };
         _resolver = new YouTubeMetadataResolver(_httpClient);
         _downloader = new DirectDownloadEngine(_httpClient);
         _mediaProcessor = new FfmpegMediaProcessor(
             FfmpegMediaProcessor.BundledExecutablePath(AppContext.BaseDirectory));
+        _chapterSplitter = new FfmpegChapterSplitter(_mediaProcessor.ExecutablePath);
         _audioTranscoder = new FfmpegAudioTranscoder(
             FfmpegAudioTranscoder.BundledExecutablePath(AppContext.BaseDirectory));
+        _videoTranscoder = new FfmpegVideoTranscoder(
+            FfmpegVideoTranscoder.BundledExecutablePath(AppContext.BaseDirectory));
         _adaptiveDownloader = new AdaptiveDownloadEngine(_downloader, _mediaProcessor);
         _captionDownloader = new CaptionDownloadEngine(_httpClient);
         _collectionResolver = new YouTubeCollectionResolver(_httpClient);
@@ -185,16 +286,21 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             AutomaticDecompression = DecompressionMethods.All,
             AllowAutoRedirect = false,
             ConnectTimeout = TimeSpan.FromSeconds(10),
-            PooledConnectionLifetime = TimeSpan.FromMinutes(5)
+            PooledConnectionLifetime = TimeSpan.FromMinutes(5),
+            Proxy = _networkProxy,
+            UseProxy = true
         };
         _sidecarHttpClient = new HttpClient(sidecarHandler) { Timeout = TimeSpan.FromSeconds(60) };
         _thumbnailDownloader = new ThumbnailDownloadEngine(_sidecarHttpClient);
+        _sponsorBlockClient = new SponsorBlockClient(_sidecarHttpClient);
         var updateHandler = new SocketsHttpHandler
         {
             AutomaticDecompression = DecompressionMethods.All,
             AllowAutoRedirect = false,
             ConnectTimeout = TimeSpan.FromSeconds(10),
-            PooledConnectionLifetime = TimeSpan.FromMinutes(5)
+            PooledConnectionLifetime = TimeSpan.FromMinutes(5),
+            Proxy = _networkProxy,
+            UseProxy = true
         };
         _updateHttpClient = new HttpClient(updateHandler) { Timeout = TimeSpan.FromSeconds(60) };
         _updateClient = new GitHubUpdateClient(_updateHttpClient);
@@ -204,6 +310,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         applicationDataDirectory = Path.GetFullPath(applicationDataDirectory);
         _queueStore = new DownloadQueueStore(Path.Combine(applicationDataDirectory, "queue.json"));
         _historyStore = new DownloadHistoryStore(Path.Combine(applicationDataDirectory, "history.json"));
+        _archiveStore = new CollectionArchiveStore(Path.Combine(applicationDataDirectory, "archives.json"));
         _settingsStore = new TubeForgeSettingsStore(Path.Combine(applicationDataDirectory, "settings.json"));
         _updateDirectory = Path.Combine(applicationDataDirectory, "updates");
         _downloadFolder = Path.Combine(
@@ -235,6 +342,18 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         QueueCollectionCommand = new AsyncRelayCommand(
             QueueSelectedCollectionAsync,
             () => !ShowResponsibleUseNotice && !IsAnalyzing && CollectionItems.Any(item => item.IsSelected));
+        SelectMissingCollectionCommand = new RelayCommand(
+            SelectMissingCollection,
+            () => !IsAnalyzing && CollectionItems.Count > 0);
+        SaveArchiveProfileCommand = new AsyncRelayCommand(
+            SaveArchiveProfileAsync,
+            () => !ShowResponsibleUseNotice && !IsAnalyzing && _collection is not null);
+        CheckArchiveProfilesCommand = new AsyncRelayCommand(
+            CheckArchiveProfilesAsync,
+            () => !ShowResponsibleUseNotice && !IsAnalyzing && _archiveSnapshot.Profiles.Count > 0);
+        RemoveArchiveProfileCommand = new AsyncRelayCommand(
+            RemoveArchiveProfileAsync,
+            () => !IsAnalyzing && SelectedArchiveProfile is not null);
         CancelAnalysisCommand = new RelayCommand(CancelAnalysis, () => IsAnalyzing);
         CancelCommand = new RelayCommand(PauseAll, () => IsDownloading);
         ShowDownloadCommand = new RelayCommand(() => ShowPage(AppPage.Download));
@@ -242,7 +361,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         ShowLibraryCommand = new RelayCommand(() => ShowPage(AppPage.Library));
         ShowSettingsCommand = new RelayCommand(() => ShowPage(AppPage.Settings));
         ShowDiagnosticsCommand = new RelayCommand(() => ShowPage(AppPage.Diagnostics));
-        SaveSettingsCommand = new AsyncRelayCommand(SaveSettingsAsync);
+        SaveSettingsCommand = new AsyncRelayCommand(SaveSettingsAsync, () => !IsBusy);
         AcceptResponsibleUseCommand = new AsyncRelayCommand(AcceptResponsibleUseAsync);
         CheckForUpdatesCommand = new AsyncRelayCommand(
             () => CheckForUpdatesAsync(isAutomatic: false),
@@ -269,9 +388,18 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
 
     public ObservableCollection<HistoryItemViewModel> HistoryItems { get; } = [];
 
+    public ObservableCollection<CollectionArchiveProfile> ArchiveProfiles { get; } = [];
+
     public IReadOnlyList<DownloadModeOption> DownloadModes => _downloadModes;
 
-    public IReadOnlyList<AudioProcessingOption> AudioProcessingOptions => AudioProcessingChoices;
+    public IReadOnlyList<DownloadPresetOption> DownloadPresets => DownloadPresetChoices;
+
+    public IReadOnlyList<DownloadPresetOption> DefaultDownloadPresets =>
+        DownloadPresetChoices.Where(option => option.Value != DownloadPresetKind.Custom).ToArray();
+
+    public IReadOnlyList<OutputProcessingOption> AudioProcessingOptions => AudioProcessingChoices;
+
+    public IReadOnlyList<OutputProcessingOption> VideoProcessingOptions => VideoProcessingChoices;
 
     public AsyncRelayCommand AnalyzeCommand { get; }
 
@@ -288,6 +416,14 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     public RelayCommand SelectNoneCollectionCommand { get; }
 
     public AsyncRelayCommand QueueCollectionCommand { get; }
+
+    public RelayCommand SelectMissingCollectionCommand { get; }
+
+    public AsyncRelayCommand SaveArchiveProfileCommand { get; }
+
+    public AsyncRelayCommand CheckArchiveProfilesCommand { get; }
+
+    public AsyncRelayCommand RemoveArchiveProfileCommand { get; }
 
     public RelayCommand CancelCommand { get; }
 
@@ -319,6 +455,14 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
 
     public IReadOnlyList<int> MaxConcurrentDownloadOptions { get; } = [1, 2, 3, 4];
 
+    public IReadOnlyList<FilterOption<NetworkProxyMode>> ProxyModeOptions => ProxyModeChoices;
+
+    public IReadOnlyList<int> MetadataTimeoutOptions { get; } = [5, 10, 20, 30, 60, 120];
+
+    public IReadOnlyList<int> DownloadRetryOptions { get; } = [1, 2, 3, 4, 5];
+
+    public IReadOnlyList<int> PerHostConcurrencyOptions { get; } = [1, 2, 3, 4];
+
     public string UrlText
     {
         get => _urlText;
@@ -344,6 +488,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         {
             VideoContentKind.Short => "Short",
             VideoContentKind.LiveReplay => "Completed live replay",
+            VideoContentKind.LiveActive => "Active live · record from now",
+            VideoContentKind.LiveUpcoming => "Upcoming live · wait then record",
             _ => string.Empty
         },
         _metadata?.Chapters.Count > 0 ? $"{_metadata.Chapters.Count} chapters" : string.Empty
@@ -388,6 +534,59 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     public string CollectionSelectionSummary =>
         $"{CollectionItems.Count(item => item.IsSelected)} of {CollectionItems.Count} selected";
 
+    public IReadOnlyList<ArchiveOutputPresetOption> ArchiveOutputPresets => ArchiveOutputPresetChoices;
+
+    public ArchiveOutputPresetOption SelectedArchiveOutputPreset
+    {
+        get => _selectedArchiveOutputPreset;
+        set
+        {
+            if (value is not null)
+            {
+                Set(ref _selectedArchiveOutputPreset, value);
+            }
+        }
+    }
+
+    public IReadOnlyList<ArchiveCaptionPreferenceOption> ArchiveCaptionPreferences =>
+        ArchiveCaptionPreferenceChoices;
+
+    public ArchiveCaptionPreferenceOption SelectedArchiveCaptionPreference
+    {
+        get => _selectedArchiveCaptionPreference;
+        set
+        {
+            if (value is not null)
+            {
+                Set(ref _selectedArchiveCaptionPreference, value);
+            }
+        }
+    }
+
+    public bool ArchiveEmbedChapters
+    {
+        get => _archiveEmbedChapters;
+        set => Set(ref _archiveEmbedChapters, value);
+    }
+
+    public CollectionArchiveProfile? SelectedArchiveProfile
+    {
+        get => _selectedArchiveProfile;
+        set
+        {
+            if (Set(ref _selectedArchiveProfile, value))
+            {
+                RemoveArchiveProfileCommand.RaiseCanExecuteChanged();
+            }
+        }
+    }
+
+    public string ArchiveStatus
+    {
+        get => _archiveStatus;
+        private set => Set(ref _archiveStatus, value);
+    }
+
     public IReadOnlyList<CaptionTrackOption> CaptionTracks
     {
         get => _captionTracks;
@@ -396,11 +595,14 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             if (Set(ref _captionTracks, value))
             {
                 OnPropertyChanged(nameof(HasCaptions));
+                OnPropertyChanged(nameof(CanEmbedSelectedCaption));
             }
         }
     }
 
     public bool HasCaptions => CaptionTracks.Count > 0;
+
+    public bool HasChapters => _metadata?.Chapters.Count > 0;
 
     public CaptionTrackOption? SelectedCaptionTrack
     {
@@ -409,6 +611,11 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         {
             if (Set(ref _selectedCaptionTrack, value))
             {
+                OnPropertyChanged(nameof(CanEmbedSelectedCaption));
+                if (!CanEmbedSelectedCaption)
+                {
+                    ClearEmbeddedCaptionSelections();
+                }
                 RefreshCommands();
             }
         }
@@ -560,6 +767,14 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
 
     public string HistoryStoragePath => _historyStore.StoragePath;
 
+    public string ArchiveStoragePath => _archiveStore.StoragePath;
+
+    public string LibraryStatus
+    {
+        get => _libraryStatus;
+        private set => Set(ref _libraryStatus, value);
+    }
+
     public string SettingsStoragePath => _settingsStore.StoragePath;
 
     public string DiagnosticsExtractionStatus => _diagnosticsExtractionStage;
@@ -650,6 +865,44 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         set => Set(ref _enableAutomaticUpdateChecks, value);
     }
 
+    public FilterOption<NetworkProxyMode> SelectedProxyMode
+    {
+        get => _selectedProxyMode;
+        set
+        {
+            if (value is not null && Set(ref _selectedProxyMode, value))
+            {
+                OnPropertyChanged(nameof(UsesManualProxy));
+            }
+        }
+    }
+
+    public bool UsesManualProxy => SelectedProxyMode.Value == NetworkProxyMode.Manual;
+
+    public string ManualProxyUri
+    {
+        get => _manualProxyUri;
+        set => Set(ref _manualProxyUri, value ?? string.Empty);
+    }
+
+    public int MetadataTimeoutSeconds
+    {
+        get => _metadataTimeoutSeconds;
+        set => Set(ref _metadataTimeoutSeconds, value);
+    }
+
+    public int DownloadRetryAttempts
+    {
+        get => _downloadRetryAttempts;
+        set => Set(ref _downloadRetryAttempts, value);
+    }
+
+    public int PerHostConcurrency
+    {
+        get => _perHostConcurrency;
+        set => Set(ref _perHostConcurrency, value);
+    }
+
     public string FileNameTemplateText
     {
         get => _fileNameTemplate;
@@ -667,8 +920,259 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         get => _selectedFormat;
         set
         {
-            if (Set(ref _selectedFormat, value)) RefreshCommands();
+            if (Set(ref _selectedFormat, value))
+            {
+                OnPropertyChanged(nameof(CanEmbedSelectedCaption));
+                OnPropertyChanged(nameof(CanEmbedChapters));
+                OnPropertyChanged(nameof(CanSplitChapters));
+                OnPropertyChanged(nameof(CanTrim));
+                OnPropertyChanged(nameof(CanUseSponsorBlock));
+                OnPropertyChanged(nameof(IsLiveCapture));
+                OnPropertyChanged(nameof(IsUpcomingLiveCapture));
+                OnPropertyChanged(nameof(LiveCaptureModeNotice));
+                if (IsLiveCapture && _selectedVideoProcessing.Value != OutputProfile.Native)
+                {
+                    _selectedVideoProcessing = VideoProcessingChoices[0];
+                    OnPropertyChanged(nameof(SelectedVideoProcessing));
+                }
+                if (!CanEmbedSelectedCaption)
+                {
+                    ClearEmbeddedCaptionSelections();
+                }
+                if (!CanEmbedChapters)
+                {
+                    EmbedChapters = false;
+                }
+                if (!CanSplitChapters)
+                {
+                    SplitChapters = false;
+                }
+                if (!CanTrim)
+                {
+                    EnableTrim = false;
+                }
+                if (!CanUseSponsorBlock)
+                {
+                    EnableSponsorBlock = false;
+                }
+
+                RefreshCommands();
+            }
         }
+    }
+
+    public DownloadPresetOption SelectedDownloadPreset
+    {
+        get => _selectedDownloadPreset;
+        set
+        {
+            var accepted = IsLiveCapture
+                ? DownloadPresetChoices.First(option => option.Value == DownloadPresetKind.BestOriginal)
+                : value;
+            if (accepted is null)
+            {
+                return;
+            }
+
+            if (accepted.Value == DownloadPresetKind.Custom)
+            {
+                ShowAdvancedDownloadOptions = true;
+            }
+            if (!Set(ref _selectedDownloadPreset, accepted))
+            {
+                return;
+            }
+
+            ApplyDownloadPreset(accepted);
+        }
+    }
+
+    public DownloadPresetOption DefaultDownloadPreset
+    {
+        get => _defaultDownloadPreset;
+        set
+        {
+            if (value is not null && value.Value != DownloadPresetKind.Custom)
+            {
+                Set(ref _defaultDownloadPreset, value);
+            }
+        }
+    }
+
+    public bool ShowAdvancedDownloadOptions
+    {
+        get => _showAdvancedDownloadOptions;
+        set => Set(ref _showAdvancedDownloadOptions, value);
+    }
+
+    public bool CanEmbedSelectedCaption =>
+        !IsLiveCapture &&
+        IsAudioVideo &&
+        SelectedCaptionTrack is not null &&
+        SelectedFormat is not null &&
+        IsCaptionContainerSupported(FinalMediaContainer(
+            SelectedFormat,
+            OutputProfileFor(SelectedFormat))) &&
+        new CaptionEmbedSelection(
+            SelectedCaptionTrack.Track.LanguageCode,
+            SelectedCaptionTrack.Track.IsAutoGenerated).IsValid;
+
+    public bool EmbedSelectedCaption
+    {
+        get => SelectedCaptionTrack?.IsSelectedForEmbedding == true;
+        set
+        {
+            if (SelectedCaptionTrack is null)
+            {
+                return;
+            }
+
+            SelectedCaptionTrack.IsSelectedForEmbedding = value && CanEmbedSelectedCaption;
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(HasSelectedCaptionEmbeds));
+        }
+    }
+
+    public bool HasSelectedCaptionEmbeds => CaptionTracks.Any(track => track.IsSelectedForEmbedding);
+
+    public bool CanEmbedChapters =>
+        HasChapters &&
+        _metadata?.Duration is { } duration && duration > TimeSpan.Zero &&
+        !IsAudioOnly &&
+        SelectedFormat is not null &&
+        IsCaptionContainerSupported(FinalMediaContainer(
+            SelectedFormat,
+            OutputProfileFor(SelectedFormat)));
+
+    public bool EmbedChapters
+    {
+        get => _embedChapters;
+        set => Set(ref _embedChapters, value && CanEmbedChapters);
+    }
+
+    public bool CanSplitChapters => CanEmbedChapters;
+
+    public bool SplitChapters
+    {
+        get => _splitChapters;
+        set => Set(ref _splitChapters, value && CanSplitChapters);
+    }
+
+    public bool CanTrim =>
+        _metadata?.Duration is { } duration && duration > TimeSpan.Zero &&
+        SelectedFormat is not null;
+
+    public bool EnableTrim
+    {
+        get => _enableTrim;
+        set => Set(ref _enableTrim, value && CanTrim);
+    }
+
+    public string TrimStartText
+    {
+        get => _trimStartText;
+        set => Set(ref _trimStartText, value ?? string.Empty);
+    }
+
+    public string TrimEndText
+    {
+        get => _trimEndText;
+        set => Set(ref _trimEndText, value ?? string.Empty);
+    }
+
+    public IReadOnlyList<FilterOption<SponsorBlockMode>> SponsorBlockModeOptions => SponsorBlockModeChoices;
+
+    public bool CanUseSponsorBlock => HasVideo && SelectedFormat is not null && !IsLiveCapture;
+
+    public bool IsLiveCapture => SelectedFormat?.Format.IsLiveHls == true;
+
+    public bool IsUpcomingLiveCapture => SelectedFormat?.Format.IsLiveManifestPending == true;
+
+    public string LiveCaptureModeNotice => IsUpcomingLiveCapture
+        ? "TubeForge will wait locally for this public stream to start, then record until either limit is reached."
+        : "TubeForge will record this public stream from now until either limit is reached.";
+
+    public string LiveDurationMinutesText
+    {
+        get => _liveDurationMinutesText;
+        set => Set(ref _liveDurationMinutesText, value ?? string.Empty);
+    }
+
+    public string LiveMaximumSizeGiBText
+    {
+        get => _liveMaximumSizeGiBText;
+        set => Set(ref _liveMaximumSizeGiBText, value ?? string.Empty);
+    }
+
+    public string LiveMaximumWaitMinutesText
+    {
+        get => _liveMaximumWaitMinutesText;
+        set => Set(ref _liveMaximumWaitMinutesText, value ?? string.Empty);
+    }
+
+    public bool EnableSponsorBlock
+    {
+        get => _enableSponsorBlock;
+        set => Set(ref _enableSponsorBlock, value && CanUseSponsorBlock);
+    }
+
+    public FilterOption<SponsorBlockMode> SelectedSponsorBlockMode
+    {
+        get => _selectedSponsorBlockMode;
+        set
+        {
+            if (value is not null && Set(ref _selectedSponsorBlockMode, value))
+            {
+                OnPropertyChanged(nameof(SponsorBlockModeNotice));
+            }
+        }
+    }
+
+    public string SponsorBlockModeNotice =>
+        SelectedSponsorBlockMode.Value == SponsorBlockMode.Remove
+            ? "Removal requires a selected audio/video conversion preset and cannot combine with embedded captions or chapters."
+            : "Chapter mode keeps media unchanged and adds local timeline markers after the opt-in lookup.";
+
+    public bool SponsorCategory
+    {
+        get => _sponsorCategory;
+        set => Set(ref _sponsorCategory, value);
+    }
+
+    public bool IntroCategory
+    {
+        get => _introCategory;
+        set => Set(ref _introCategory, value);
+    }
+
+    public bool OutroCategory
+    {
+        get => _outroCategory;
+        set => Set(ref _outroCategory, value);
+    }
+
+    public bool SelfPromotionCategory
+    {
+        get => _selfPromotionCategory;
+        set => Set(ref _selfPromotionCategory, value);
+    }
+
+    public bool InteractionCategory
+    {
+        get => _interactionCategory;
+        set => Set(ref _interactionCategory, value);
+    }
+
+    public bool PreviewCategory
+    {
+        get => _previewCategory;
+        set => Set(ref _previewCategory, value);
+    }
+
+    public bool FillerCategory
+    {
+        get => _fillerCategory;
+        set => Set(ref _fillerCategory, value);
     }
 
     public DownloadModeOption SelectedDownloadMode
@@ -681,9 +1185,26 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                 return;
             }
 
+            MarkPresetCustom();
+
             OnPropertyChanged(nameof(HasVideoFilters));
             OnPropertyChanged(nameof(IsAudioOnly));
             OnPropertyChanged(nameof(IsAudioVideo));
+            OnPropertyChanged(nameof(CanEmbedSelectedCaption));
+            OnPropertyChanged(nameof(CanEmbedChapters));
+            OnPropertyChanged(nameof(CanSplitChapters));
+            if (!CanEmbedSelectedCaption)
+            {
+                ClearEmbeddedCaptionSelections();
+            }
+            if (!CanEmbedChapters)
+            {
+                EmbedChapters = false;
+            }
+            if (!CanSplitChapters)
+            {
+                SplitChapters = false;
+            }
             OnPropertyChanged(nameof(ModeNotice));
             RebuildFormatFilters(resetSelections: true);
         }
@@ -773,13 +1294,43 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         set => SetFilterSelection(ref _selectedAudioCodec, value);
     }
 
-    public AudioProcessingOption SelectedAudioProcessing
+    public OutputProcessingOption SelectedAudioProcessing
     {
         get => _selectedAudioProcessing;
         set
         {
             if (value is not null && Set(ref _selectedAudioProcessing, value))
             {
+                MarkPresetCustom();
+                OnPropertyChanged(nameof(ModeNotice));
+            }
+        }
+    }
+
+    public OutputProcessingOption SelectedVideoProcessing
+    {
+        get => _selectedVideoProcessing;
+        set
+        {
+            var accepted = IsLiveCapture ? VideoProcessingChoices[0] : value;
+            if (accepted is not null && Set(ref _selectedVideoProcessing, accepted))
+            {
+                MarkPresetCustom();
+                OnPropertyChanged(nameof(CanEmbedSelectedCaption));
+                OnPropertyChanged(nameof(CanEmbedChapters));
+                OnPropertyChanged(nameof(CanSplitChapters));
+                if (!CanEmbedSelectedCaption)
+                {
+                    ClearEmbeddedCaptionSelections();
+                }
+                if (!CanEmbedChapters)
+                {
+                    EmbedChapters = false;
+                }
+                if (!CanSplitChapters)
+                {
+                    SplitChapters = false;
+                }
                 OnPropertyChanged(nameof(ModeNotice));
             }
         }
@@ -794,11 +1345,13 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     public string ModeNotice => SelectedDownloadMode.Value switch
     {
         DownloadMode.AudioVideo =>
-            CombinedModeNotice(),
+            SelectedVideoProcessing.Value.Kind == OutputProfileKind.Native
+                ? CombinedModeNotice()
+                : VideoProcessingNotice(SelectedVideoProcessing.Value),
         DownloadMode.AudioOnly =>
-            SelectedAudioProcessing.Value.Kind == AudioOutputKind.Native
+            SelectedAudioProcessing.Value.Kind == OutputProfileKind.Native
                 ? "Native AAC/Opus: fastest path with no re-encoding or quality loss."
-                : $"MP3 {SelectedAudioProcessing.Value.BitrateKbps} kbps: bundled FFmpeg decodes and re-encodes locally.",
+                : AudioProcessingNotice(SelectedAudioProcessing.Value),
         DownloadMode.VideoOnly =>
             VideoOnlyModeNotice(),
         _ => string.Empty
@@ -847,8 +1400,27 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             OnPropertyChanged(nameof(EnableAutomaticUpdateChecks));
             _fileNameTemplate = _settings.FileNameTemplate;
             OnPropertyChanged(nameof(FileNameTemplateText));
+            _selectedProxyMode = ProxyModeChoices.First(option => option.Value == _settings.ProxyMode);
+            OnPropertyChanged(nameof(SelectedProxyMode));
+            OnPropertyChanged(nameof(UsesManualProxy));
+            _manualProxyUri = _settings.ManualProxyUri;
+            OnPropertyChanged(nameof(ManualProxyUri));
+            _metadataTimeoutSeconds = _settings.MetadataTimeoutSeconds;
+            OnPropertyChanged(nameof(MetadataTimeoutSeconds));
+            _downloadRetryAttempts = _settings.DownloadRetryAttempts;
+            OnPropertyChanged(nameof(DownloadRetryAttempts));
+            _perHostConcurrency = _settings.PerHostConcurrency;
+            OnPropertyChanged(nameof(PerHostConcurrency));
+            ApplyNetworkSettings(_settings);
             _selectedLibrarySort = LibrarySortChoices.First(option => option.Value == _settings.LibrarySortOrder);
             OnPropertyChanged(nameof(SelectedLibrarySort));
+            _defaultDownloadPreset = DownloadPresetChoices.First(option =>
+                option.Value == DownloadPresetFromSettings(_settings.DefaultDownloadPreset));
+            _selectedDownloadPreset = _defaultDownloadPreset;
+            OnPropertyChanged(nameof(DefaultDownloadPreset));
+            OnPropertyChanged(nameof(SelectedDownloadPreset));
+            _showAdvancedDownloadOptions = _settings.ShowAdvancedDownloadOptions;
+            OnPropertyChanged(nameof(ShowAdvancedDownloadOptions));
             ShowResponsibleUseNotice = !_settings.ResponsibleUseAccepted;
         }
         else
@@ -892,6 +1464,17 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             RebuildHistoryItems();
         }
 
+        var archiveResult = await _archiveStore.LoadAsync();
+        if (!archiveResult.IsSuccess)
+        {
+            ArchiveStatus = $"{archiveResult.Error!.Message} ({archiveResult.Error.Code})";
+        }
+        else
+        {
+            _archiveSnapshot = archiveResult.Value;
+            RebuildArchiveProfiles();
+        }
+
         if (!_queueUnavailable)
         {
             PumpQueue();
@@ -920,6 +1503,15 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                 throw new ArgumentException("Download folder must be an absolute path.");
             }
 
+            var proxyMode = SelectedProxyMode.Value ?? NetworkProxyMode.System;
+            if (proxyMode == NetworkProxyMode.Manual &&
+                !NetworkProxyPolicy.TryParseManualUri(ManualProxyUri, out _))
+            {
+                ErrorMessage = "Enter an HTTP or HTTPS proxy endpoint without credentials, path, query, or fragment. (Settings.InvalidProxy)";
+                SettingsStatus = "Proxy settings were not saved.";
+                return;
+            }
+
             next = _settings with
             {
                 DownloadFolder = Path.GetFullPath(DownloadFolder),
@@ -927,7 +1519,14 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                 FileNameTemplate = FileNameTemplateText,
                 EnableAcceleratedTransfers = EnableAcceleratedTransfers,
                 EnableAutomaticUpdateChecks = EnableAutomaticUpdateChecks,
-                LibrarySortOrder = SelectedLibrarySort.Value ?? LibrarySortOrder.NewestFirst
+                ProxyMode = proxyMode,
+                ManualProxyUri = proxyMode == NetworkProxyMode.Manual ? ManualProxyUri.Trim() : string.Empty,
+                MetadataTimeoutSeconds = MetadataTimeoutSeconds,
+                DownloadRetryAttempts = DownloadRetryAttempts,
+                PerHostConcurrency = PerHostConcurrency,
+                LibrarySortOrder = SelectedLibrarySort.Value ?? LibrarySortOrder.NewestFirst,
+                DefaultDownloadPreset = DownloadPresetToSettings(DefaultDownloadPreset.Value),
+                ShowAdvancedDownloadOptions = ShowAdvancedDownloadOptions
             };
         }
         catch (Exception exception) when (exception is ArgumentException or NotSupportedException or PathTooLongException)
@@ -946,8 +1545,23 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         }
 
         _settings = next;
+        ApplyNetworkSettings(next);
         ErrorMessage = string.Empty;
-        SettingsStatus = "Settings saved locally.";
+        SettingsStatus = "Settings saved locally and applied to new requests.";
+    }
+
+    private void ApplyNetworkSettings(TubeForgeSettings settings)
+    {
+        _networkProxy.Update(NetworkProxyConfiguration.FromSettings(settings));
+        _resolver = new YouTubeMetadataResolver(
+            _httpClient,
+            TimeSpan.FromSeconds(settings.MetadataTimeoutSeconds));
+        _downloader = new DirectDownloadEngine(
+            _httpClient,
+            maximumAttempts: settings.DownloadRetryAttempts);
+        _adaptiveDownloader = new AdaptiveDownloadEngine(_downloader, _mediaProcessor);
+        _hostRequestGate = new HostRequestGate(settings.PerHostConcurrency);
+        _rateLimitedRequests = new RateLimitedRequestExecutor(_hostRequestGate);
     }
 
     private async Task AcceptResponsibleUseAsync()
@@ -974,6 +1588,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                 EnableAcceleratedTransfers = EnableAcceleratedTransfers,
                 EnableAutomaticUpdateChecks = EnableAutomaticUpdateChecks,
                 LibrarySortOrder = SelectedLibrarySort.Value ?? LibrarySortOrder.NewestFirst,
+                DefaultDownloadPreset = DownloadPresetToSettings(DefaultDownloadPreset.Value),
+                ShowAdvancedDownloadOptions = ShowAdvancedDownloadOptions,
                 ResponsibleUseAccepted = true
             };
         }
@@ -1064,19 +1680,36 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             _videoTitle = _metadata.Title;
             _videoChannel = _metadata.Channel;
             _videoDuration = _metadata.Duration;
+            _trimStartText = "00:00:00";
+            _trimEndText = _metadata.Duration is { } trimDuration
+                ? FormatTimelineInput(trimDuration)
+                : "00:00:00";
+            OnPropertyChanged(nameof(TrimStartText));
+            OnPropertyChanged(nameof(TrimEndText));
             _thumbnailUrl = _metadata.ThumbnailUrl;
             _allFormats = _metadata.Formats;
             RefreshDownloadModes();
-            var defaultMode = DownloadModes.FirstOrDefault(choice =>
-                HasFormatsForMode(choice.Value)) ??
-                DownloadModes[0];
-            if (SelectedDownloadMode != defaultMode)
+            if (_allFormats.Any(format => format.IsLiveHls) &&
+                _selectedDownloadPreset.Value != DownloadPresetKind.BestOriginal)
             {
-                SelectedDownloadMode = defaultMode;
+                _selectedDownloadPreset = DownloadPresetChoices.First(option =>
+                    option.Value == DownloadPresetKind.BestOriginal);
+                OnPropertyChanged(nameof(SelectedDownloadPreset));
             }
-            else
+            ApplyDownloadPreset(_selectedDownloadPreset);
+            if (_selectedDownloadPreset.Value == DownloadPresetKind.Custom)
             {
-                RebuildFormatFilters(resetSelections: true);
+                var defaultMode = DownloadModes.FirstOrDefault(choice =>
+                    HasFormatsForMode(choice.Value)) ??
+                    DownloadModes[0];
+                if (SelectedDownloadMode != defaultMode)
+                {
+                    SelectedDownloadMode = defaultMode;
+                }
+                else
+                {
+                    RebuildFormatFilters(resetSelections: true);
+                }
             }
 
             var extractionStatus = result.Value.Diagnostics?.Stage == "AndroidClientResolved"
@@ -1086,6 +1719,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             {
                 VideoContentKind.Short => "SHORT · " + extractionStatus,
                 VideoContentKind.LiveReplay => "LIVE REPLAY · " + extractionStatus,
+                VideoContentKind.LiveActive => "LIVE · PUBLIC HLS READY",
+                VideoContentKind.LiveUpcoming => "UPCOMING LIVE · WAIT MODE",
                 _ => extractionStatus
             };
             StatusMessage = Formats.Count > 0
@@ -1162,7 +1797,45 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         ErrorMessage = string.Empty;
         var selection = SelectedFormat;
         var format = selection.Format;
-        var output = AudioOutputFor(selection);
+        var output = OutputProfileFor(selection);
+        var caption = SelectedCaptionEmbedSelections();
+        if (HasSelectedCaptionEmbeds && caption is null)
+        {
+            ErrorMessage = $"Select no more than {CaptionEmbedSelectionSet.MaximumTracks} unique caption tracks. (Queue.InvalidCaptionSelection)";
+            StatusMessage = "Download not queued";
+            return;
+        }
+        var embedChapters = EmbedChapters && CanEmbedChapters;
+        var splitChapters = SplitChapters && CanSplitChapters;
+        if (!TryGetLiveCaptureOptions(
+                selection,
+                output,
+                caption,
+                embedChapters,
+                splitChapters,
+                out var liveCapture,
+                out var liveError))
+        {
+            ErrorMessage = $"{liveError!.Message} ({liveError.Code})";
+            StatusMessage = "Download not queued";
+            return;
+        }
+
+        MediaTrimRange? trim = null;
+        SponsorBlockSelection? sponsorBlock = null;
+        if (liveCapture is null && !TryGetSelectedTrim(out trim, out var trimError))
+        {
+            ErrorMessage = $"{trimError!.Message} ({trimError.Code})";
+            StatusMessage = "Download not queued";
+            return;
+        }
+        if (liveCapture is null &&
+            !TryGetSponsorBlockSelection(output, out sponsorBlock, out var sponsorError))
+        {
+            ErrorMessage = $"{sponsorError!.Message} ({sponsorError.Code})";
+            StatusMessage = "Download not queued";
+            return;
+        }
         try
         {
             var renderedName = RenderFileName(_metadata, selection, index: null, indexWidth: 2, output);
@@ -1179,11 +1852,21 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                 renderedName.Value,
                 OutputExtension(selection, output),
                 path => File.Exists(path) ||
+                        (splitChapters && Directory.Exists(ChapterSplitDirectoryPath(path))) ||
                         File.Exists(path + ".part") ||
                         _queueSnapshot.Items.Any(item => item.DestinationPath.Equals(path, StringComparison.OrdinalIgnoreCase)) ||
                         _historySnapshot.Entries.Any(item => item.DestinationPath.Equals(path, StringComparison.OrdinalIgnoreCase)));
             var duplicate = DownloadDuplicateDetector.Find(
-                SelectionIdentity(_metadata, selection, output),
+                SelectionIdentity(
+                    _metadata,
+                    selection,
+                    output,
+                    caption,
+                    embedChapters,
+                    splitChapters,
+                    trim,
+                    sponsorBlock,
+                    liveCapture),
                 destination,
                 _queueSnapshot.Items,
                 _historySnapshot.Entries);
@@ -1195,7 +1878,17 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                 return;
             }
 
-            var queueItem = CreateQueueItem(_metadata, selection, destination, output);
+            var queueItem = CreateQueueItem(
+                _metadata,
+                selection,
+                destination,
+                output,
+                caption,
+                embedChapters,
+                splitChapters,
+                trim,
+                sponsorBlock,
+                liveCapture);
             var queueError = await UpsertQueueItemAsync(queueItem);
             if (queueError is not null)
             {
@@ -1204,7 +1897,18 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                 return;
             }
 
-            _preparedQueueWork[queueItem.Id] = new QueuedDownloadWork(_metadata, selection, destination, output);
+            if (sponsorBlock is null && liveCapture is null)
+            {
+                _preparedQueueWork[queueItem.Id] = new QueuedDownloadWork(
+                    _metadata,
+                    selection,
+                    destination,
+                    output,
+                    caption,
+                    embedChapters,
+                    splitChapters,
+                    trim);
+            }
             StatusMessage = $"Queued: {Path.GetFileName(destination)}";
             ProgressDetail = $"Global concurrency: {SelectedMaxConcurrentDownloads}";
             PumpQueue();
@@ -1235,6 +1939,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         {
             return;
         }
+
+        var configuration = _activeCollectionQueueConfiguration ?? CurrentCollectionQueueConfiguration();
 
         await InitializeAsync();
         CancelAnalysis();
@@ -1291,18 +1997,31 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                 }
 
                 var metadata = resolved.Value.Metadata;
-                var selection = BestCompleteFileSelection(metadata.Formats);
-                if (selection is null)
+                var presetSelection = CollectionPresetSelection(metadata.Formats, configuration.OutputPreset);
+                if (presetSelection is null)
                 {
                     card.SetStatus("Failed · no complete output");
                     failed++;
                     continue;
                 }
 
+                var selection = presetSelection.Value.Selection;
+                var output = presetSelection.Value.Output.ForVideoHeight(selection.Format.Height);
+                var caption = CollectionCaptionSelection(metadata, selection, output, configuration.CaptionPreference);
+                var embedChapters = configuration.EmbedChapters &&
+                                    !output.IsAudioTranscode &&
+                                    metadata.Chapters.Count > 0;
+
                 try
                 {
                     var position = card.Item.Index ?? itemIndex + 1;
-                    var renderedName = RenderFileName(metadata, selection, position, indexWidth);
+                    var renderedName = RenderCollectionFileName(
+                        metadata,
+                        selection,
+                        position,
+                        indexWidth,
+                        output,
+                        configuration.FileNameTemplate);
                     if (!renderedName.IsSuccess)
                     {
                         card.SetStatus($"Failed · {renderedName.Error!.Code}");
@@ -1311,11 +2030,9 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                     }
 
                     var destination = FileNamePolicy.AvailablePath(
-                        DownloadFolder,
+                        configuration.DestinationPath,
                         renderedName.Value,
-                        selection.RequiresMuxing
-                            ? FormatDisplay.Extension(selection.OutputContainer)
-                            : FormatDisplay.OutputExtension(selection.Format),
+                        OutputExtension(selection, output),
                         path => File.Exists(path) ||
                                 File.Exists(path + ".part") ||
                                 _queueSnapshot.Items.Any(existing => existing.DestinationPath.Equals(
@@ -1325,7 +2042,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                                     path,
                                     StringComparison.OrdinalIgnoreCase)));
                     var duplicate = DownloadDuplicateDetector.Find(
-                        SelectionIdentity(metadata, selection),
+                        SelectionIdentity(metadata, selection, output, caption, embedChapters),
                         destination,
                         _queueSnapshot.Items,
                         _historySnapshot.Entries);
@@ -1336,7 +2053,13 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                         continue;
                     }
 
-                    var queueItem = CreateQueueItem(metadata, selection, destination);
+                    var queueItem = CreateQueueItem(
+                        metadata,
+                        selection,
+                        destination,
+                        output,
+                        caption,
+                        embedChapters);
                     var queueError = await UpsertQueueItemAsync(queueItem, cancellationToken);
                     if (queueError is not null)
                     {
@@ -1372,8 +2095,311 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         }
         finally
         {
+            _activeCollectionQueueConfiguration = null;
             IsAnalyzing = false;
         }
+    }
+
+    private CollectionQueueConfiguration CurrentCollectionQueueConfiguration() => new(
+        DownloadFolder,
+        FileNameTemplateText,
+        SelectedArchiveOutputPreset.Value,
+        SelectedArchiveCaptionPreference.Value,
+        ArchiveEmbedChapters);
+
+    private void SelectMissingCollection()
+    {
+        var present = _queueSnapshot.Items
+            .Where(item => item.Status != DownloadQueueStatus.Cancelled)
+            .Select(item => item.VideoId)
+            .Concat(_historySnapshot.Entries.Select(entry => entry.VideoId))
+            .ToHashSet(StringComparer.Ordinal);
+        foreach (var item in CollectionItems)
+        {
+            item.IsSelected = !present.Contains(item.Item.VideoId.Value);
+        }
+
+        CollectionSelectionChanged();
+        StatusMessage = $"Selected {CollectionItems.Count(item => item.IsSelected)} items missing from Queue and Library";
+    }
+
+    private async Task SaveArchiveProfileAsync()
+    {
+        if (_collection is null)
+        {
+            return;
+        }
+
+        try
+        {
+            var now = DateTimeOffset.UtcNow;
+            var sourceUrl = _collection.Source.CanonicalUrl.AbsoluteUri;
+            var existing = _archiveSnapshot.Profiles.FirstOrDefault(profile =>
+                profile.SourceUrl.Equals(sourceUrl, StringComparison.OrdinalIgnoreCase));
+            var profile = new CollectionArchiveProfile
+            {
+                Id = existing?.Id ?? Guid.NewGuid(),
+                SourceKind = _collection.Source.Kind,
+                SourceUrl = sourceUrl,
+                DisplayName = _collection.Title,
+                DestinationPath = Path.GetFullPath(DownloadFolder),
+                FileNameTemplate = FileNameTemplateText,
+                OutputPreset = SelectedArchiveOutputPreset.Value,
+                CaptionPreference = SelectedArchiveCaptionPreference.Value,
+                EmbedChapters = ArchiveEmbedChapters,
+                LastCheckedVideoIds = CollectionItems
+                    .Select(item => item.Item.VideoId.Value)
+                    .Distinct(StringComparer.Ordinal)
+                    .Take(CollectionArchiveStore.MaximumCheckedItems)
+                    .ToArray(),
+                CreatedAtUtc = existing?.CreatedAtUtc ?? now,
+                LastCheckedAtUtc = now
+            };
+            var next = new CollectionArchiveSnapshot
+            {
+                Profiles = _archiveSnapshot.Profiles
+                    .Where(candidate => candidate.Id != profile.Id)
+                    .Append(profile)
+                    .OrderBy(candidate => candidate.DisplayName, StringComparer.CurrentCultureIgnoreCase)
+                    .ToArray()
+            };
+            var result = await _archiveStore.SaveAsync(next);
+            if (!result.IsSuccess)
+            {
+                ArchiveStatus = $"{result.Error!.Message} ({result.Error.Code})";
+                return;
+            }
+
+            _archiveSnapshot = next;
+            RebuildArchiveProfiles(profile.Id);
+            ArchiveStatus = existing is null
+                ? $"Saved archive profile for {_collection.Title}."
+                : $"Updated archive profile for {_collection.Title}.";
+        }
+        catch (Exception exception) when (exception is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            ArchiveStatus = $"The archive destination is invalid. (Archive.InvalidDestination: {exception.GetType().Name})";
+        }
+    }
+
+    private async Task RemoveArchiveProfileAsync()
+    {
+        if (SelectedArchiveProfile is null)
+        {
+            return;
+        }
+
+        var removedName = SelectedArchiveProfile.DisplayName;
+        var next = new CollectionArchiveSnapshot
+        {
+            Profiles = _archiveSnapshot.Profiles
+                .Where(profile => profile.Id != SelectedArchiveProfile.Id)
+                .ToArray()
+        };
+        var result = await _archiveStore.SaveAsync(next);
+        if (!result.IsSuccess)
+        {
+            ArchiveStatus = $"{result.Error!.Message} ({result.Error.Code})";
+            return;
+        }
+
+        _archiveSnapshot = next;
+        RebuildArchiveProfiles();
+        ArchiveStatus = $"Removed archive profile for {removedName}. Downloaded media and Library records were unchanged.";
+    }
+
+    private async Task CheckArchiveProfilesAsync()
+    {
+        var profiles = _archiveSnapshot.Profiles.ToArray();
+        var updated = _archiveSnapshot.Profiles.ToDictionary(profile => profile.Id);
+        var totalQueued = 0;
+        var checkedProfiles = 0;
+        foreach (var profile in profiles)
+        {
+            var parsed = YouTubeCollectionUrlParser.Parse(profile.SourceUrl);
+            if (!parsed.IsSuccess)
+            {
+                ArchiveStatus = $"Could not parse saved source for {profile.DisplayName}. ({parsed.Error!.Code})";
+                continue;
+            }
+
+            CancelAnalysis();
+            _analysisCancellation = new CancellationTokenSource();
+            IsAnalyzing = true;
+            ArchiveStatus = $"Checking {profile.DisplayName} for new items…";
+            Result<YouTubeCollectionResult> result;
+            try
+            {
+                result = await _rateLimitedRequests.ExecuteAsync(
+                    YouTubeOrigin,
+                    token => _collectionResolver.ResolveAsync(parsed.Value, maximumItems: 1_000, token),
+                    delay => ArchiveStatus = $"Rate limited · retrying in {FormatRateLimitDelay(delay)}",
+                    _analysisCancellation.Token);
+            }
+            finally
+            {
+                IsAnalyzing = false;
+            }
+            if (!result.IsSuccess)
+            {
+                ArchiveStatus = $"{result.Error!.Message} ({result.Error.Code})";
+                if (result.Error.Code == "Network.RateLimited")
+                {
+                    break;
+                }
+
+                continue;
+            }
+
+            var known = profile.LastCheckedVideoIds.ToHashSet(StringComparer.Ordinal);
+            var candidates = result.Value.Items.Where(item => !known.Contains(item.VideoId.Value)).ToArray();
+            _collection = result.Value;
+            CollectionItems.Clear();
+            foreach (var item in candidates)
+            {
+                CollectionItems.Add(new CollectionItemViewModel(item, CollectionSelectionChanged));
+            }
+            NotifyCollectionProperties();
+            checkedProfiles++;
+            if (candidates.Length == 0)
+            {
+                updated[profile.Id] = profile with { LastCheckedAtUtc = DateTimeOffset.UtcNow };
+                continue;
+            }
+
+            _activeCollectionQueueConfiguration = new CollectionQueueConfiguration(
+                profile.DestinationPath,
+                profile.FileNameTemplate,
+                profile.OutputPreset,
+                profile.CaptionPreference,
+                profile.EmbedChapters);
+            await QueueSelectedCollectionAsync();
+            var handled = CollectionItems
+                .Where(item => item.Status.StartsWith("Queued", StringComparison.Ordinal) ||
+                               item.Status.StartsWith("Skipped", StringComparison.Ordinal))
+                .Select(item => item.Item.VideoId.Value)
+                .ToArray();
+            totalQueued += CollectionItems.Count(item => item.Status.StartsWith("Queued", StringComparison.Ordinal));
+            updated[profile.Id] = profile with
+            {
+                LastCheckedVideoIds = profile.LastCheckedVideoIds
+                    .Concat(handled)
+                    .Distinct(StringComparer.Ordinal)
+                    .TakeLast(CollectionArchiveStore.MaximumCheckedItems)
+                    .ToArray(),
+                LastCheckedAtUtc = DateTimeOffset.UtcNow
+            };
+        }
+
+        var next = new CollectionArchiveSnapshot
+        {
+            Profiles = updated.Values
+                .OrderBy(profile => profile.DisplayName, StringComparer.CurrentCultureIgnoreCase)
+                .ToArray()
+        };
+        var saved = await _archiveStore.SaveAsync(next);
+        if (!saved.IsSuccess)
+        {
+            ArchiveStatus = $"Queue preparation finished, but profile checkpoints could not be saved. ({saved.Error!.Code})";
+            return;
+        }
+
+        _archiveSnapshot = next;
+        RebuildArchiveProfiles(SelectedArchiveProfile?.Id);
+        ArchiveStatus = $"Checked {checkedProfiles} archive profiles; queued {totalQueued} new items.";
+    }
+
+    private void RebuildArchiveProfiles(Guid? selectedId = null)
+    {
+        ArchiveProfiles.Clear();
+        foreach (var profile in _archiveSnapshot.Profiles)
+        {
+            ArchiveProfiles.Add(profile);
+        }
+
+        SelectedArchiveProfile = ArchiveProfiles.FirstOrDefault(profile => profile.Id == selectedId) ??
+                                 ArchiveProfiles.FirstOrDefault();
+        CheckArchiveProfilesCommand.RaiseCanExecuteChanged();
+        RemoveArchiveProfileCommand.RaiseCanExecuteChanged();
+    }
+
+    private void NotifyCollectionProperties()
+    {
+        OnPropertyChanged(nameof(HasCollection));
+        OnPropertyChanged(nameof(CollectionTitle));
+        OnPropertyChanged(nameof(CollectionSummary));
+        OnPropertyChanged(nameof(CollectionSelectionSummary));
+        RefreshCommands();
+    }
+
+    private static (FormatItemViewModel Selection, OutputProfile Output)? CollectionPresetSelection(
+        IReadOnlyList<StreamFormat> formats,
+        ArchiveOutputPreset preset)
+    {
+        if (preset == ArchiveOutputPreset.Mp3_320)
+        {
+            var audio = formats
+                .Where(format => format.Kind == StreamKind.AudioOnly)
+                .OrderByDescending(format => format.Bitrate ?? 0)
+                .ThenByDescending(format => format.AudioSampleRate ?? 0)
+                .ThenBy(format => format.FormatId)
+                .FirstOrDefault();
+            return audio is null ? null : (new FormatItemViewModel(audio), OutputProfile.Mp3(320));
+        }
+
+        var eligible = formats;
+        if (preset == ArchiveOutputPreset.SmallFile)
+        {
+            var bounded = formats
+                .Where(format => !format.HasVideo || format.Height is > 0 and <= 720)
+                .ToArray();
+            if (bounded.Any(format => format.HasVideo))
+            {
+                eligible = bounded;
+            }
+        }
+
+        var selection = BestCompleteFileSelection(eligible);
+        if (selection is null)
+        {
+            return null;
+        }
+
+        var output = preset switch
+        {
+            ArchiveOutputPreset.WindowsCompatibleMp4 => OutputProfile.H264AacMp4,
+            ArchiveOutputPreset.SmallFile => OutputProfile.H265AacMp4,
+            _ => OutputProfile.Native
+        };
+        return (selection, output);
+    }
+
+    private static CaptionEmbedSelectionSet? CollectionCaptionSelection(
+        VideoMetadata metadata,
+        FormatItemViewModel selection,
+        OutputProfile output,
+        ArchiveCaptionPreference preference)
+    {
+        if (preference == ArchiveCaptionPreference.None || output.IsAudioTranscode ||
+            !IsCaptionContainerSupported(FinalMediaContainer(selection, output)))
+        {
+            return null;
+        }
+
+        var tracks = metadata.CaptionTracks
+            .Where(candidate => preference == ArchiveCaptionPreference.ManualOrAutomatic ||
+                                !candidate.IsAutoGenerated)
+            .Select(track => new CaptionEmbedSelection(track.LanguageCode, track.IsAutoGenerated))
+            .Where(track => track.IsValid)
+            .DistinctBy(track => track.Identity, StringComparer.Ordinal)
+            .Take(CaptionEmbedSelectionSet.MaximumTracks)
+            .ToArray();
+        if (!CaptionEmbedSelectionSet.TryCreate(tracks, out var captions))
+        {
+            return null;
+        }
+
+        return captions;
     }
 
     private static FormatItemViewModel? BestCompleteFileSelection(IReadOnlyList<StreamFormat> formats)
@@ -1562,7 +2588,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         PausedQueueItems = _queueSnapshot.Items.Count(item => item.Status == DownloadQueueStatus.Paused),
         CompletedQueueItems = _queueSnapshot.Items.Count(item => item.Status == DownloadQueueStatus.Completed),
         FailedQueueItems = _queueSnapshot.Items.Count(item => item.Status == DownloadQueueStatus.Failed),
-        CancelledQueueItems = _queueSnapshot.Items.Count(item => item.Status == DownloadQueueStatus.Cancelled)
+        CancelledQueueItems = _queueSnapshot.Items.Count(item => item.Status == DownloadQueueStatus.Cancelled),
+        ProxyMode = _settings.ProxyMode.ToString()
     });
 
     public void SetDiagnosticsStatus(string status) => DiagnosticsStatus = status;
@@ -1751,7 +2778,90 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                 return;
             }
 
-            var work = prepared.Work;
+            var finalWork = prepared.Work;
+            if (finalWork.LiveCapture is { } liveCapture)
+            {
+                await RunLiveCaptureAsync(itemId, finalWork, liveCapture, cancellation.Token);
+                return;
+            }
+
+            var mediaDestination = finalWork.RequiresMetadataFinalization
+                ? PostProcessMediaSourcePath(
+                    finalWork.Destination,
+                    finalWork.EmbedChapters || finalWork.SponsorBlock is { Mode: SponsorBlockMode.Chapters })
+                : finalWork.Destination;
+            var downloadDestination = finalWork.RequiresNativeTrim
+                ? TrimSourcePath(mediaDestination)
+                : mediaDestination;
+            var work = finalWork with
+            {
+                Destination = downloadDestination,
+                Captions = null,
+                EmbedChapters = false
+            };
+            if ((finalWork.RequiresMetadataFinalization || finalWork.RequiresNativeTrim || finalWork.SplitChapters) &&
+                File.Exists(finalWork.Destination))
+            {
+                var recoveredBytes = new FileInfo(finalWork.Destination).Length;
+                if (finalWork.RequiresMetadataFinalization)
+                {
+                    var recovered = await FinalizeMetadataAsync(finalWork, mediaDestination, cancellation.Token);
+                    if (recovered.Error is not null)
+                    {
+                        await CompleteQueueRunAsync(
+                            itemId,
+                            DownloadQueueStatus.Failed,
+                            recovered.Error,
+                            recovered.BytesWritten);
+                        return;
+                    }
+
+                    recoveredBytes = recovered.BytesWritten;
+                }
+                else if (finalWork.RequiresNativeTrim)
+                {
+                    var recovered = await FinalizeNativeTrimAsync(
+                        finalWork,
+                        downloadDestination,
+                        mediaDestination,
+                        cancellation.Token);
+                    if (recovered.Error is not null)
+                    {
+                        await CompleteQueueRunAsync(
+                            itemId,
+                            DownloadQueueStatus.Failed,
+                            recovered.Error,
+                            recovered.BytesWritten);
+                        return;
+                    }
+
+                    recoveredBytes = recovered.BytesWritten;
+                }
+
+                if (finalWork.SplitChapters)
+                {
+                    var splitError = await SplitChaptersAsync(finalWork, cancellation.Token);
+                    if (splitError is not null)
+                    {
+                        await CompleteQueueRunAsync(
+                            itemId,
+                            DownloadQueueStatus.Failed,
+                            splitError,
+                            recoveredBytes);
+                        return;
+                    }
+                }
+
+                await CompleteQueueRunAsync(
+                    itemId,
+                    DownloadQueueStatus.Completed,
+                    error: null,
+                    recoveredBytes);
+                await RecordHistoryAsync(finalWork, recoveredBytes, CancellationToken.None);
+                StatusMessage = "Completed: " + Path.GetFileName(finalWork.Destination);
+                return;
+            }
+
             var existingBytes = SelectionPartialLength(work.Destination, work.Selection, work.Output);
             var reservedBytes = SelectionReservedLength(work.Destination, work.Selection, work.Output);
             var diskForecast = DiskSpacePolicy.Check(
@@ -1761,7 +2871,10 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                 !File.Exists(work.Destination) &&
                 (work.Selection.RequiresMuxing ||
                  RequiresMp4Normalization(work.Selection) ||
-                 work.Output.Kind == AudioOutputKind.Mp3));
+                 work.Output.RequiresTranscode ||
+                 finalWork.RequiresNativeTrim ||
+                 finalWork.RequiresMetadataFinalization),
+                finalWork.SplitChapters ? 1 : 0);
             if (!diskForecast.IsSuccess)
             {
                 await CompleteQueueRunAsync(
@@ -1778,7 +2891,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             using var mediaLease = await _hostRequestGate.EnterAsync(
                 work.Selection.Format.Url,
                 cancellation.Token);
-            if (work.Output.Kind == AudioOutputKind.Mp3)
+            if (work.Output.IsAudioTranscode)
             {
                 var sourcePath = AudioSourcePath(work.Destination, work.Selection.Format);
                 var sourceResult = await EnsureTrackDownloadedAsync(
@@ -1792,12 +2905,16 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                 }
                 else
                 {
-                    StatusMessage = $"Converting to MP3 · {work.Output.BitrateKbps} kbps";
+                    StatusMessage = work.Output.BitrateKbps > 0
+                        ? $"Converting to {work.Output.DisplayName} · {work.Output.BitrateKbps} kbps"
+                        : $"Converting to {work.Output.DisplayName}";
                     var transcodeResult = await _audioTranscoder.TranscodeAsync(new AudioTranscodeRequest
                     {
                         SourcePath = sourcePath,
                         DestinationPath = work.Destination,
                         Output = work.Output,
+                        Trim = finalWork.Trim,
+                        RemovedSegments = finalWork.RemovedSponsorSegments,
                         AllowExistingValidatedOutput = true
                     }, cancellation.Token);
                     downloadError = transcodeResult.Error;
@@ -1805,6 +2922,47 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                         ? transcodeResult.Value.BytesWritten
                         : SelectionPartialLength(work.Destination, work.Selection, work.Output);
                     if (transcodeResult.IsSuccess)
+                    {
+                        File.Delete(sourcePath);
+                    }
+                }
+            }
+            else if (work.Output.IsVideoTranscode)
+            {
+                var sourcePath = VideoSourcePath(work.Destination, work.Selection);
+                TubeForgeError? sourceError = null;
+                if (!File.Exists(work.Destination))
+                {
+                    StatusMessage = "Preparing source tracks for video conversion";
+                    sourceError = await EnsureVideoTranscodeSourceAsync(
+                        work,
+                        sourcePath,
+                        progress,
+                        cancellation.Token);
+                }
+
+                if (sourceError is not null)
+                {
+                    downloadError = sourceError;
+                    completedBytes = SelectionPartialLength(work.Destination, work.Selection, work.Output);
+                }
+                else
+                {
+                    StatusMessage = $"Transcoding to {work.Output.DisplayName} · local FFmpeg";
+                    var transcodeResult = await _videoTranscoder.TranscodeAsync(new VideoTranscodeRequest
+                    {
+                        SourcePath = sourcePath,
+                        DestinationPath = work.Destination,
+                        Output = work.Output,
+                        Trim = finalWork.Trim,
+                        RemovedSegments = finalWork.RemovedSponsorSegments,
+                        AllowExistingValidatedOutput = true
+                    }, cancellation.Token);
+                    downloadError = transcodeResult.Error;
+                    completedBytes = transcodeResult.IsSuccess
+                        ? transcodeResult.Value.BytesWritten
+                        : SelectionPartialLength(work.Destination, work.Selection, work.Output);
+                    if (transcodeResult.IsSuccess && File.Exists(sourcePath))
                     {
                         File.Delete(sourcePath);
                     }
@@ -1895,10 +3053,10 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             }
             else
             {
-                var result = await _downloader.DownloadAsync(
-                    TrackRequest(work.Metadata, work.Selection.Format, work.Destination),
-                    progress,
-                    cancellation.Token);
+                var request = TrackRequest(work.Metadata, work.Selection.Format, work.Destination);
+                var result = !finalWork.RequiresMetadataFinalization
+                    ? await _downloader.DownloadAsync(request, progress, cancellation.Token)
+                    : await EnsureTrackDownloadedAsync(request, progress, cancellation.Token);
                 downloadError = result.Error;
                 completedBytes = result.IsSuccess
                     ? result.Value.BytesWritten
@@ -1919,13 +3077,60 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                 return;
             }
 
+            if (finalWork.RequiresNativeTrim)
+            {
+                var trimmed = await FinalizeNativeTrimAsync(
+                    finalWork,
+                    work.Destination,
+                    mediaDestination,
+                    cancellation.Token);
+                downloadError = trimmed.Error;
+                completedBytes = trimmed.BytesWritten;
+                if (downloadError is not null)
+                {
+                    var status = downloadError.Code == "Operation.Cancelled"
+                        ? CancellationStatus(itemId)
+                        : DownloadQueueStatus.Failed;
+                    await CompleteQueueRunAsync(itemId, status, downloadError, completedBytes);
+                    return;
+                }
+            }
+
+            if (finalWork.RequiresMetadataFinalization)
+            {
+                var embedded = await FinalizeMetadataAsync(finalWork, mediaDestination, cancellation.Token);
+                downloadError = embedded.Error;
+                completedBytes = embedded.BytesWritten;
+                if (downloadError is not null)
+                {
+                    var status = downloadError.Code == "Operation.Cancelled"
+                        ? CancellationStatus(itemId)
+                        : DownloadQueueStatus.Failed;
+                    await CompleteQueueRunAsync(itemId, status, downloadError, completedBytes);
+                    return;
+                }
+            }
+
+            if (finalWork.SplitChapters)
+            {
+                var splitError = await SplitChaptersAsync(finalWork, cancellation.Token);
+                if (splitError is not null)
+                {
+                    var status = splitError.Code == "Operation.Cancelled"
+                        ? CancellationStatus(itemId)
+                        : DownloadQueueStatus.Failed;
+                    await CompleteQueueRunAsync(itemId, status, splitError, completedBytes);
+                    return;
+                }
+            }
+
             await CompleteQueueRunAsync(
                 itemId,
                 DownloadQueueStatus.Completed,
                 error: null,
                 completedBytes);
-            await RecordHistoryAsync(work, completedBytes, CancellationToken.None);
-            StatusMessage = "Completed: " + Path.GetFileName(work.Destination);
+            await RecordHistoryAsync(finalWork, completedBytes, CancellationToken.None);
+            StatusMessage = "Completed: " + Path.GetFileName(finalWork.Destination);
         }
         catch (OperationCanceledException)
         {
@@ -2007,11 +3212,88 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             return (null, new TubeForgeError("Queue.InvalidSourceIdentity", "The queued source identity is invalid."));
         }
 
-        if (sourceIdentity.Output.Kind == AudioOutputKind.Mp3 && primary.Kind != StreamKind.AudioOnly)
+        if (sourceIdentity.Output.IsAudioTranscode && primary.Kind != StreamKind.AudioOnly)
         {
             return (null, new TubeForgeError(
                 "Queue.InvalidOutputProfile",
-                "The queued MP3 profile is valid only for audio-only media."));
+                "The queued audio conversion profile is valid only for audio-only media."));
+        }
+
+        if (sourceIdentity.Output.IsVideoTranscode && primary.Kind == StreamKind.AudioOnly)
+        {
+            return (null, new TubeForgeError(
+                "Queue.InvalidOutputProfile",
+                "The queued video conversion profile requires video and audio media."));
+        }
+
+        if (sourceIdentity.LiveCapture is { } liveCapture &&
+            (!liveCapture.IsValid || !primary.IsLiveHls ||
+             sourceIdentity.Output != OutputProfile.Native || sourceIdentity.AudioFormatId is not null ||
+             sourceIdentity.Captions is not null || sourceIdentity.EmbedChapters ||
+             sourceIdentity.SplitChapters || sourceIdentity.Trim is not null ||
+             sourceIdentity.SponsorBlock is not null) ||
+            sourceIdentity.LiveCapture is null && primary.IsLiveHls)
+        {
+            return (null, new TubeForgeError(
+                "Queue.InvalidLiveCapture",
+                "The queued live capture settings are invalid or no longer available."));
+        }
+
+        if (sourceIdentity.Captions is not null && primary.Kind == StreamKind.AudioOnly)
+        {
+            return (null, new TubeForgeError(
+                "Queue.InvalidCaptionSelection",
+                "Embedded captions require a video output."));
+        }
+
+        if (sourceIdentity.Captions is { } captions && captions.Selections.Any(caption =>
+                !resolved.Value.Metadata.CaptionTracks.Any(track => CaptionMatches(track, caption))))
+        {
+            return (null, new TubeForgeError(
+                "Queue.CaptionUnavailable",
+                "The selected caption track is no longer available. Analyze the video again."));
+        }
+
+        if ((sourceIdentity.EmbedChapters || sourceIdentity.SplitChapters) && primary.Kind == StreamKind.AudioOnly)
+        {
+            return (null, new TubeForgeError(
+                "Queue.InvalidChapterSelection",
+                "Chapter media workflows require a video output."));
+        }
+
+        if ((sourceIdentity.EmbedChapters || sourceIdentity.SplitChapters) &&
+            (resolved.Value.Metadata.Chapters.Count == 0 ||
+             resolved.Value.Metadata.Duration is not { } duration || duration <= TimeSpan.Zero))
+        {
+            return (null, new TubeForgeError(
+                "Queue.ChaptersUnavailable",
+                "Chapter metadata is no longer available. Analyze the video again."));
+        }
+
+        if (sourceIdentity.Trim is { } trim &&
+            (resolved.Value.Metadata.Duration is not { } mediaDuration || trim.End > mediaDuration))
+        {
+            return (null, new TubeForgeError(
+                "Queue.InvalidTrim",
+                "The queued trim range is outside the current media duration."));
+        }
+
+        if (sourceIdentity.SponsorBlock is { Mode: SponsorBlockMode.Remove } &&
+            (!sourceIdentity.Output.RequiresTranscode || sourceIdentity.Captions is not null ||
+             sourceIdentity.EmbedChapters || sourceIdentity.SplitChapters))
+        {
+            return (null, new TubeForgeError(
+                "Queue.InvalidSponsorBlockSelection",
+                "SponsorBlock removal requires conversion without embedded captions or chapter workflows."));
+        }
+
+        if (sourceIdentity.SponsorBlock is { Mode: SponsorBlockMode.Chapters } &&
+            (primary.Kind == StreamKind.AudioOnly ||
+             resolved.Value.Metadata.Duration is not { } sponsorDuration || sponsorDuration <= TimeSpan.Zero))
+        {
+            return (null, new TubeForgeError(
+                "Queue.InvalidSponsorBlockSelection",
+                "SponsorBlock chapter markers require a timed video output."));
         }
 
         StreamFormat? audio = null;
@@ -2028,12 +3310,69 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             }
         }
 
+        if (sourceIdentity.Output.IsVideoTranscode &&
+            primary.Kind == StreamKind.VideoOnly &&
+            audio is null)
+        {
+            return (null, new TubeForgeError(
+                "Queue.AudioFormatUnavailable",
+                "The queued video conversion requires a companion audio format."));
+        }
+
         var selection = new FormatItemViewModel(primary, audio);
+        IReadOnlyList<SponsorBlockSegment> sponsorSegments = [];
+        if (sourceIdentity.SponsorBlock is { } sponsorBlock)
+        {
+            var sponsorResult = await _rateLimitedRequests.ExecuteAsync(
+                SponsorBlockOrigin,
+                token => _sponsorBlockClient.GetSegmentsAsync(videoId, sponsorBlock, token),
+                cancellationToken: cancellationToken);
+            if (!sponsorResult.IsSuccess)
+            {
+                return (null, sponsorResult.Error);
+            }
+
+            try
+            {
+                sponsorSegments = MediaTimelineEditor.NormalizeSponsorSegments(
+                    sponsorResult.Value,
+                    resolved.Value.Metadata.Duration ?? TimeSpan.Zero,
+                    sourceIdentity.Trim);
+                if (sponsorBlock.Mode == SponsorBlockMode.Remove && sponsorSegments.Count > 0)
+                {
+                    var removed = MediaTimelineEditor.MergeRemovalRanges(sponsorSegments)
+                        .Aggregate(TimeSpan.Zero, (total, range) => total + range.Duration);
+                    var outputDuration = sourceIdentity.Trim?.Duration ??
+                        resolved.Value.Metadata.Duration ?? TimeSpan.Zero;
+                    if (removed >= outputDuration)
+                    {
+                        return (null, new TubeForgeError(
+                            "SponsorBlock.NoMediaRemaining",
+                            "The selected SponsorBlock categories would remove the entire output."));
+                    }
+                }
+            }
+            catch (ArgumentException exception)
+            {
+                return (null, new TubeForgeError(
+                    "SponsorBlock.InvalidTimeline",
+                    "SponsorBlock returned segments outside the current media timeline.",
+                    exception.GetType().Name));
+            }
+        }
+
         var work = new QueuedDownloadWork(
             resolved.Value.Metadata,
             selection,
             item.DestinationPath,
-            sourceIdentity.Output);
+            sourceIdentity.Output,
+            sourceIdentity.Captions,
+            sourceIdentity.EmbedChapters,
+            sourceIdentity.SplitChapters,
+            sourceIdentity.Trim,
+            sourceIdentity.SponsorBlock,
+            sponsorSegments,
+            sourceIdentity.LiveCapture);
         _preparedQueueWork[itemId] = work;
         return (work, null);
     }
@@ -2066,14 +3405,24 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         var card = QueueItems.FirstOrDefault(item => item.Id == itemId);
         card?.UpdateProgress(progress);
         DownloadFraction = progress.Fraction ?? 0;
-        ProgressDetail = $"{_queueDispatcher.ActiveCount} active · global limit {SelectedMaxConcurrentDownloads} · host limit {MaximumConcurrentRequestsPerHost}";
+        ProgressDetail = $"{_queueDispatcher.ActiveCount} active · global limit {SelectedMaxConcurrentDownloads} · host limit {PerHostConcurrency}";
     }
 
     private long? QueuePartialLength(Guid itemId)
     {
         if (_preparedQueueWork.TryGetValue(itemId, out var work))
         {
-            return SelectionPartialLength(work.Destination, work.Selection, work.Output);
+            var mediaDestination = !work.RequiresMetadataFinalization
+                ? work.Destination
+                : PostProcessMediaSourcePath(
+                    work.Destination,
+                    work.EmbedChapters || work.SponsorBlock is { Mode: SponsorBlockMode.Chapters });
+            var downloadDestination = work.RequiresNativeTrim
+                ? TrimSourcePath(mediaDestination)
+                : mediaDestination;
+            return File.Exists(work.Destination)
+                ? CompletedOrPartialLength(work.Destination)
+                : SelectionPartialLength(downloadDestination, work.Selection, work.Output);
         }
 
         return _queueSnapshot.Items.FirstOrDefault(item => item.Id == itemId)?.BytesReceived;
@@ -2165,7 +3514,15 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         {
             Id = Guid.NewGuid(),
             VideoId = work.Metadata.Id.Value,
-            SourceIdentity = SelectionIdentity(work.Metadata, work.Selection, work.Output),
+            SourceIdentity = SelectionIdentity(
+                work.Metadata,
+                work.Selection,
+                work.Output,
+                work.Captions,
+                work.EmbedChapters,
+                work.SplitChapters,
+                work.Trim,
+                work.SponsorBlock),
             DisplayTitle = work.Metadata.Title,
             DestinationPath = work.Destination,
             BytesWritten = bytesWritten,
@@ -2212,6 +3569,92 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             .Where(entry => File.Exists(entry.DestinationPath))
             .ToArray();
         await SaveHistoryEntriesAsync(existing);
+    }
+
+    public async Task ExportLibraryAsync(string path)
+    {
+        var result = await _libraryTransferService.ExportAsync(_historySnapshot, path);
+        if (!result.IsSuccess)
+        {
+            LibraryStatus = $"{result.Error!.Message} ({result.Error.Code})";
+            return;
+        }
+
+        LibraryStatus = $"Exported {_historySnapshot.Entries.Count} Library records.";
+    }
+
+    public async Task ImportLibraryAsync(string path)
+    {
+        var imported = await _libraryTransferService.ImportAsync(path);
+        if (!imported.IsSuccess)
+        {
+            LibraryStatus = $"{imported.Error!.Message} ({imported.Error.Code})";
+            return;
+        }
+
+        await _historyMutationLock.WaitAsync();
+        try
+        {
+            var merged = LibraryTransferService.Merge(_historySnapshot, imported.Value);
+            if (!merged.IsSuccess)
+            {
+                LibraryStatus = $"{merged.Error!.Message} ({merged.Error.Code})";
+                return;
+            }
+
+            var result = await _historyStore.SaveAsync(merged.Value);
+            if (!result.IsSuccess)
+            {
+                LibraryStatus = $"{result.Error!.Message} ({result.Error.Code})";
+                return;
+            }
+
+            var added = merged.Value.Entries.Count - _historySnapshot.Entries.Count;
+            _historySnapshot = merged.Value;
+            _historyUnavailable = false;
+            RebuildHistoryItems();
+            LibraryStatus = added > 0
+                ? $"Imported {added} new Library records; duplicates were merged."
+                : "Import complete; no new Library records were found.";
+        }
+        finally
+        {
+            _historyMutationLock.Release();
+        }
+    }
+
+    public async Task RescanLibraryAsync(string rootPath)
+    {
+        await _historyMutationLock.WaitAsync();
+        try
+        {
+            LibraryStatus = "Scanning for moved files…";
+            var rescanned = await Task.Run(() => LibraryRescanner.Rescan(_historySnapshot, rootPath));
+            if (!rescanned.IsSuccess)
+            {
+                LibraryStatus = $"{rescanned.Error!.Message} ({rescanned.Error.Code})";
+                return;
+            }
+
+            var result = await _historyStore.SaveAsync(rescanned.Value.Snapshot);
+            if (!result.IsSuccess)
+            {
+                LibraryStatus = $"{result.Error!.Message} ({result.Error.Code})";
+                return;
+            }
+
+            _historySnapshot = rescanned.Value.Snapshot;
+            _historyUnavailable = false;
+            RebuildHistoryItems();
+            LibraryStatus = $"Scanned {rescanned.Value.FilesScanned} files; repaired {rescanned.Value.RecordsRepaired} records" +
+                            (rescanned.Value.AmbiguousMatches > 0
+                                ? $"; left {rescanned.Value.AmbiguousMatches} ambiguous matches unchanged."
+                                : ".");
+        }
+        finally
+        {
+            _historyMutationLock.Release();
+        }
     }
 
     private async Task SaveLibrarySortOrderAsync(LibrarySortOrder order)
@@ -2412,13 +3855,38 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         VideoMetadata metadata,
         FormatItemViewModel selection,
         string destination,
-        AudioOutputProfile output = default)
+        OutputProfile output = default,
+        CaptionEmbedSelectionSet? caption = null,
+        bool embedChapters = false,
+        bool splitChapters = false,
+        MediaTrimRange? trim = null,
+        SponsorBlockSelection? sponsorBlock = null,
+        LiveCaptureOptions? liveCapture = null)
     {
         var now = DateTimeOffset.UtcNow;
         var format = selection.Format;
-        var sourceIdentity = SelectionIdentity(metadata, selection, output);
-        var expectedLength = CombinedLength(selection);
-        var partialLength = SelectionPartialLength(destination, selection, output);
+        var sourceIdentity = SelectionIdentity(
+            metadata,
+            selection,
+            output,
+            caption,
+            embedChapters,
+            splitChapters,
+            trim,
+            sponsorBlock,
+            liveCapture);
+        var expectedLength = liveCapture is null ? CombinedLength(selection) : null;
+        var embedsTimeline = embedChapters || sponsorBlock is { Mode: SponsorBlockMode.Chapters };
+        var mediaDestination = caption is null && !embedsTimeline
+            ? destination
+            : PostProcessMediaSourcePath(destination, embedsTimeline);
+        var downloadDestination = trim is not null && !output.RequiresTranscode
+            ? TrimSourcePath(mediaDestination)
+            : mediaDestination;
+        var partialLength = SelectionPartialLength(
+            downloadDestination,
+            selection,
+            output);
 
         return new DownloadQueueItem
         {
@@ -2465,7 +3933,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         {
             return Result<DownloadReceipt>.Failure(new TubeForgeError(
                 "Media.IntermediateConflict",
-                "A completed source audio track has an unexpected size."));
+                "A completed source media track has an unexpected size."));
         }
 
         var validation = MediaContainerValidator.Validate(request.DestinationPath, request.ExpectedContainer);
@@ -2478,6 +3946,454 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         return Result<DownloadReceipt>.Success(new DownloadReceipt(request.DestinationPath, length, Resumed: true));
     }
 
+    private async Task<TubeForgeError?> EnsureVideoTranscodeSourceAsync(
+        QueuedDownloadWork work,
+        string sourcePath,
+        IProgress<DownloadProgress>? progress,
+        CancellationToken cancellationToken)
+    {
+        if (work.Selection.AudioFormat is not StreamFormat audioFormat)
+        {
+            var result = await EnsureTrackDownloadedAsync(
+                TrackRequest(work.Metadata, work.Selection.Format, sourcePath),
+                progress,
+                cancellationToken);
+            return result.Error;
+        }
+
+        var adaptive = await _adaptiveDownloader.DownloadAsync(new AdaptiveDownloadRequest
+        {
+            Video = TrackRequest(
+                work.Metadata,
+                work.Selection.Format,
+                IntermediateTrackPath(sourcePath, "video", work.Selection.Format)),
+            Audio = TrackRequest(
+                work.Metadata,
+                audioFormat,
+                IntermediateTrackPath(sourcePath, "audio", audioFormat)),
+            DestinationPath = sourcePath,
+            OutputContainer = work.Selection.OutputContainer,
+            AllowExistingValidatedOutput = true
+        }, progress, cancellationToken);
+        return adaptive.Error;
+    }
+
+    private async Task<TubeForgeError?> SplitChaptersAsync(
+        QueuedDownloadWork work,
+        CancellationToken cancellationToken)
+    {
+        if (!work.SplitChapters || work.Metadata.Duration is not { } duration)
+        {
+            return new TubeForgeError(
+                "Queue.InvalidChapterSplit",
+                "The queued chapter split selection is invalid.");
+        }
+
+        var timeline = TimelineChapters(work);
+        if (timeline.Count == 0)
+        {
+            return new TubeForgeError(
+                "Queue.InvalidChapterSplit",
+                "No chapter overlaps the selected trim range.");
+        }
+
+        var outputDuration = work.Trim?.Duration ?? duration;
+        var format = work.Selection.Format;
+        var quality = work.Output.IsAudioTranscode
+            ? work.Output.BitrateKbps > 0 ? $"{work.Output.BitrateKbps}kbps" : "lossless"
+            : format.HasVideo
+                ? format.Height is > 0 ? $"{format.Height}p" : "video"
+                : format.Bitrate is > 0 ? $"{Math.Round(format.Bitrate.Value / 1000d):0}kbps" : "audio";
+        var extension = OutputExtension(work.Selection, work.Output);
+        StatusMessage = $"Creating {timeline.Count} lossless chapter files";
+        var result = await _chapterSplitter.SplitAsync(new ChapterSplitRequest
+        {
+            SourcePath = work.Destination,
+            DestinationDirectory = ChapterSplitDirectoryPath(work.Destination),
+            OutputContainer = FinalMediaContainer(work.Selection, work.Output),
+            Chapters = timeline,
+            Duration = outputDuration,
+            FileNameContext = new FileNameTemplateContext
+            {
+                Title = work.Metadata.Title,
+                Channel = work.Metadata.Channel,
+                VideoId = work.Metadata.Id.Value,
+                Quality = quality,
+                Container = extension.TrimStart('.'),
+                IndexWidth = Math.Max(2, timeline.Count.ToString().Length)
+            },
+            AllowExistingValidatedOutput = true
+        }, cancellationToken);
+        return result.Error;
+    }
+
+    private async Task<(TubeForgeError? Error, long BytesWritten)> FinalizeNativeTrimAsync(
+        QueuedDownloadWork work,
+        string sourcePath,
+        string destinationPath,
+        CancellationToken cancellationToken)
+    {
+        if (!work.RequiresNativeTrim || work.Trim is not { } trim)
+        {
+            return (new TubeForgeError(
+                "Queue.InvalidTrim",
+                "The queued trim selection is invalid."), 0);
+        }
+
+        StatusMessage = "Trimming with lossless stream copy · start may align to a keyframe";
+        var result = await _mediaProcessor.TrimStreamCopyAsync(
+            sourcePath,
+            destinationPath,
+            FinalMediaContainer(work.Selection, work.Output),
+            trim,
+            cancellationToken,
+            allowExistingValidatedOutput: true);
+        if (!result.IsSuccess)
+        {
+            return (result.Error, CompletedOrPartialLength(sourcePath));
+        }
+
+        TryDeleteIntermediate(sourcePath);
+        return (null, result.Value.BytesWritten);
+    }
+
+    private async Task<(TubeForgeError? Error, long BytesWritten)> FinalizeMetadataAsync(
+        QueuedDownloadWork work,
+        string mediaPath,
+        CancellationToken cancellationToken)
+    {
+        if (!work.RequiresMetadataFinalization)
+        {
+            return (new TubeForgeError(
+                "Queue.InvalidMetadataSelection",
+                "The queued media metadata selection is invalid."), 0);
+        }
+
+        var container = FinalMediaContainer(work.Selection, work.Output);
+        var captionPaths = work.Captions?.Selections
+            .Select((_, index) => CaptionSubtitlePath(work.Destination, index))
+            .ToArray() ?? [];
+        if (File.Exists(work.Destination))
+        {
+            var recovered = await FinalizeWithMetadataProcessorAsync(
+                work,
+                mediaPath,
+                captionPaths,
+                container,
+                cancellationToken);
+            if (!recovered.IsSuccess)
+            {
+                return (recovered.Error, CompletedOrPartialLength(work.Destination));
+            }
+
+            TryDeleteIntermediate(mediaPath);
+            foreach (var captionPath in captionPaths)
+            {
+                TryDeleteIntermediate(captionPath);
+            }
+            return (null, recovered.Value.BytesWritten);
+        }
+
+        if (work.Captions is { } captions)
+        {
+            var selections = captions.Selections;
+            for (var index = 0; index < selections.Count; index++)
+            {
+                var caption = selections[index];
+                var captionPath = captionPaths[index];
+                var track = work.Metadata.CaptionTracks.FirstOrDefault(candidate => CaptionMatches(candidate, caption));
+                if (track is null)
+                {
+                    return (new TubeForgeError(
+                        "Queue.CaptionUnavailable",
+                        "A selected caption track is no longer available. Analyze the video again."),
+                        CompletedOrPartialLength(mediaPath));
+                }
+
+                try
+                {
+                    File.Delete(captionPath);
+                }
+                catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+                {
+                    return (new TubeForgeError(
+                        "Caption.WriteFailed",
+                        "TubeForge could not prepare an embedded caption file.",
+                        exception.GetType().Name),
+                        CompletedOrPartialLength(mediaPath));
+                }
+
+                StatusMessage = $"Downloading caption {index + 1} of {selections.Count} · {track.LanguageCode.ToUpperInvariant()}";
+                var downloaded = await _captionDownloader.DownloadAsync(new CaptionDownloadRequest
+                {
+                    SourceUrl = track.Url,
+                    DestinationPath = captionPath,
+                    OutputFormat = CaptionOutputFormat.SubRip
+                }, cancellationToken);
+                if (!downloaded.IsSuccess)
+                {
+                    return (downloaded.Error, CompletedOrPartialLength(mediaPath));
+                }
+
+                if (work.Trim is { } trim)
+                {
+                    try
+                    {
+                        var captionContent = await File.ReadAllTextAsync(captionPath, cancellationToken)
+                            .ConfigureAwait(false);
+                        var trimmedCaption = SubRipTimelineTrimmer.Trim(captionContent, trim);
+                        if (!trimmedCaption.IsSuccess)
+                        {
+                            return (trimmedCaption.Error, CompletedOrPartialLength(mediaPath));
+                        }
+
+                        await File.WriteAllTextAsync(
+                            captionPath,
+                            trimmedCaption.Value,
+                            new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: false),
+                            cancellationToken).ConfigureAwait(false);
+                    }
+                    catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+                    {
+                        return (new TubeForgeError(
+                            "Caption.WriteFailed",
+                            "TubeForge could not align an embedded subtitle track to the trim range.",
+                            exception.GetType().Name), CompletedOrPartialLength(mediaPath));
+                    }
+                }
+            }
+        }
+
+        StatusMessage = work.Captions is not null && work.EmbedChapters
+            ? "Embedding soft subtitles and chapters"
+            : work.EmbedChapters
+                ? "Embedding chapters"
+                : work.RequiresSponsorChapters
+                    ? "Writing SponsorBlock timeline chapters"
+                    : $"Embedding {captionPaths.Length} soft-subtitle track(s)";
+        var embedded = await FinalizeWithMetadataProcessorAsync(
+            work,
+            mediaPath,
+            captionPaths,
+            container,
+            cancellationToken);
+        if (!embedded.IsSuccess)
+        {
+            return (embedded.Error, CompletedOrPartialLength(mediaPath));
+        }
+
+        TryDeleteIntermediate(mediaPath);
+        foreach (var captionPath in captionPaths)
+        {
+            TryDeleteIntermediate(captionPath);
+        }
+        return (null, embedded.Value.BytesWritten);
+    }
+
+    private Task<Result<MediaProcessReceipt>> FinalizeWithMetadataProcessorAsync(
+        QueuedDownloadWork work,
+        string mediaPath,
+        IReadOnlyList<string> captionPaths,
+        MediaContainer container,
+        CancellationToken cancellationToken)
+    {
+        if (!work.EmbedChapters && !work.RequiresSponsorChapters &&
+            work.Captions is { } captions)
+        {
+            return _mediaProcessor.EmbedSubtitlesAsync(
+                mediaPath,
+                captionPaths,
+                work.Destination,
+                container,
+                captions,
+                cancellationToken,
+                allowExistingValidatedOutput: true);
+        }
+
+        var chapters = TimelineChapters(work);
+        return _mediaProcessor.EmbedMetadataTracksAsync(
+            mediaPath,
+            work.Destination,
+            container,
+            chapters,
+            work.Trim?.Duration ?? work.Metadata.Duration ?? TimeSpan.Zero,
+            captionPaths,
+            work.Captions,
+            cancellationToken,
+            allowExistingValidatedOutput: true);
+    }
+
+    private static IReadOnlyList<VideoChapter> TimelineChapters(QueuedDownloadWork work)
+    {
+        var duration = work.Trim?.Duration ?? work.Metadata.Duration ?? TimeSpan.Zero;
+        IReadOnlyList<VideoChapter> chapters;
+        if (work.Trim is not { } trim || work.Metadata.Duration is not { } sourceDuration)
+        {
+            chapters = work.Metadata.Chapters;
+        }
+        else
+        {
+            chapters = MediaTimelineEditor.TrimChapters(
+                work.Metadata.Chapters,
+                sourceDuration,
+                trim);
+        }
+
+        return work.RequiresSponsorChapters
+            ? MediaTimelineEditor.AddSponsorBlockChapters(
+                chapters,
+                work.SafeSponsorSegments,
+                duration)
+            : chapters;
+    }
+
+    private static void TryDeleteIntermediate(string path)
+    {
+        try
+        {
+            File.Delete(path);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+        }
+    }
+
+    private async Task RunLiveCaptureAsync(
+        Guid itemId,
+        QueuedDownloadWork work,
+        LiveCaptureOptions options,
+        CancellationToken cancellationToken)
+    {
+        var sourcePath = LiveCaptureSourcePath(work.Destination);
+        var reservedBytes = HlsReservedLength(sourcePath);
+        var diskForecast = DiskSpacePolicy.Check(
+            work.Destination,
+            options.MaximumBytes,
+            reservedBytes,
+            requiresMuxing: true);
+        if (!diskForecast.IsSuccess)
+        {
+            await CompleteQueueRunAsync(
+                itemId,
+                DownloadQueueStatus.Failed,
+                diskForecast.Error,
+                reservedBytes);
+            return;
+        }
+
+        TubeForgeError? error = null;
+        long completedBytes = reservedBytes;
+        if (!File.Exists(sourcePath))
+        {
+            var manifest = await ResolveLiveManifestAsync(work, options, cancellationToken);
+            if (!manifest.IsSuccess)
+            {
+                var status = manifest.Error?.Code == "Operation.Cancelled"
+                    ? CancellationStatus(itemId)
+                    : DownloadQueueStatus.Failed;
+                await CompleteQueueRunAsync(itemId, status, manifest.Error, reservedBytes);
+                return;
+            }
+
+            StatusMessage = "Recording public HLS stream · pause preserves downloaded segments";
+            var progress = new Progress<DownloadProgress>(value => UpdateQueueProgress(itemId, value));
+            var capture = await new HlsCaptureEngine(_httpClient, _hostRequestGate).CaptureAsync(
+                new HlsCaptureRequest
+                {
+                    ManifestUri = manifest.Value.Url,
+                    DestinationPath = sourcePath,
+                    Options = options,
+                    HttpUserAgent = manifest.Value.HttpUserAgent
+                },
+                progress,
+                cancellationToken);
+            error = capture.Error;
+            completedBytes = capture.IsSuccess ? capture.Value.BytesWritten : HlsReservedLength(sourcePath);
+        }
+
+        if (error is null)
+        {
+            StatusMessage = "Finalizing live capture to MKV · stream copy";
+            var remux = await _mediaProcessor.RemuxHlsCaptureAsync(
+                sourcePath,
+                work.Destination,
+                cancellationToken,
+                allowExistingValidatedOutput: true);
+            error = remux.Error;
+            completedBytes = remux.IsSuccess ? remux.Value.BytesWritten : HlsReservedLength(sourcePath);
+            if (remux.IsSuccess)
+            {
+                File.Delete(sourcePath);
+                HlsCaptureEngine.Cleanup(sourcePath);
+            }
+        }
+
+        if (error is not null)
+        {
+            var status = error.Code == "Operation.Cancelled"
+                ? CancellationStatus(itemId)
+                : DownloadQueueStatus.Failed;
+            await CompleteQueueRunAsync(itemId, status, error, completedBytes);
+            return;
+        }
+
+        await CompleteQueueRunAsync(
+            itemId,
+            DownloadQueueStatus.Completed,
+            error: null,
+            completedBytes);
+        await RecordHistoryAsync(work, completedBytes, CancellationToken.None);
+        StatusMessage = "Completed: " + Path.GetFileName(work.Destination);
+    }
+
+    private async Task<Result<StreamFormat>> ResolveLiveManifestAsync(
+        QueuedDownloadWork work,
+        LiveCaptureOptions options,
+        CancellationToken cancellationToken)
+    {
+        var current = work.Selection.Format;
+        if (!current.IsLiveManifestPending)
+        {
+            return Result<StreamFormat>.Success(current);
+        }
+
+        var deadline = DateTimeOffset.UtcNow + options.MaximumWaitForStart;
+        while (DateTimeOffset.UtcNow < deadline)
+        {
+            StatusMessage = $"Waiting for public live stream · up to {FormatDuration(options.MaximumWaitForStart)}";
+            try
+            {
+                await Task.Delay(TimeSpan.FromSeconds(15), cancellationToken);
+            }
+            catch (OperationCanceledException)
+            {
+                return Result<StreamFormat>.Failure(new TubeForgeError(
+                    "Operation.Cancelled",
+                    "Waiting for the live stream was paused or cancelled."));
+            }
+
+            var resolved = await _rateLimitedRequests.ExecuteAsync(
+                YouTubeOrigin,
+                token => _resolver.ResolveAsync(work.Metadata.Id, token),
+                cancellationToken: cancellationToken);
+            if (!resolved.IsSuccess)
+            {
+                return Result<StreamFormat>.Failure(resolved.Error!);
+            }
+
+            var live = resolved.Value.Metadata.Formats.FirstOrDefault(format =>
+                format.IsLiveHls && !format.IsLiveManifestPending);
+            if (live is not null)
+            {
+                return Result<StreamFormat>.Success(live);
+            }
+        }
+
+        return Result<StreamFormat>.Failure(new TubeForgeError(
+            "Hls.StartWaitExpired",
+            "The upcoming public stream did not start before the configured wait limit."));
+    }
+
     private static string IntermediateTrackPath(
         string destination,
         string role,
@@ -2487,38 +4403,122 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     private static string AudioSourcePath(string destination, StreamFormat format) =>
         destination + ".source" + FormatDisplay.OutputExtension(format);
 
+    private static string VideoSourcePath(string destination, FormatItemViewModel selection) =>
+        destination + ".source" + NativeOutputExtension(selection);
+
+    private static string PostProcessMediaSourcePath(string destination, bool embedChapters) =>
+        destination + (embedChapters ? ".chapter-source" : ".caption-source") + Path.GetExtension(destination);
+
+    private static string TrimSourcePath(string destination) =>
+        destination + ".trim-source" + Path.GetExtension(destination);
+
+    private static string LiveCaptureSourcePath(string destination) =>
+        destination + ".hls-source";
+
+    private static long HlsReservedLength(string sourcePath)
+    {
+        if (File.Exists(sourcePath))
+        {
+            return new FileInfo(sourcePath).Length;
+        }
+
+        var partsDirectory = sourcePath + ".hls.parts";
+        if (!Directory.Exists(partsDirectory))
+        {
+            return 0;
+        }
+
+        try
+        {
+            return Directory.EnumerateFiles(partsDirectory, "*.bin", SearchOption.TopDirectoryOnly)
+                .Sum(path => new FileInfo(path).Length);
+        }
+        catch (OverflowException)
+        {
+            return long.MaxValue;
+        }
+    }
+
+    private static string CaptionSubtitlePath(string destination, int index) =>
+        index == 0
+            ? destination + ".caption-source.srt"
+            : destination + $".caption-{index + 1}-source.srt";
+
+    private static string ChapterSplitDirectoryPath(string destination) =>
+        Path.Combine(
+            Path.GetDirectoryName(destination)!,
+            Path.GetFileNameWithoutExtension(destination) + " - chapters");
+
+    private static string NativeOutputExtension(FormatItemViewModel selection) =>
+        selection.RequiresMuxing
+            ? FormatDisplay.Extension(selection.OutputContainer)
+            : FormatDisplay.OutputExtension(selection.Format);
+
     private static bool RequiresMp4Normalization(FormatItemViewModel selection) =>
         selection.AudioFormat is null &&
         selection.Format.Container == MediaContainer.Mp4 &&
         selection.Format.Kind != StreamKind.AudioOnly;
 
+    private static MediaContainer FinalMediaContainer(
+        FormatItemViewModel selection,
+        OutputProfile output) => output.Kind switch
+        {
+            OutputProfileKind.H264AacMp4 or OutputProfileKind.H265AacMp4 => MediaContainer.Mp4,
+            OutputProfileKind.Vp9OpusWebM => MediaContainer.WebM,
+            _ => selection.RequiresMuxing ? selection.OutputContainer : selection.Format.Container
+        };
+
+    private static bool IsCaptionContainerSupported(MediaContainer container) =>
+        container is MediaContainer.Mp4 or MediaContainer.Mkv or MediaContainer.WebM;
+
     private static string SelectionIdentity(
         VideoMetadata metadata,
         FormatItemViewModel selection,
-        AudioOutputProfile output = default) =>
+        OutputProfile output = default,
+        CaptionEmbedSelectionSet? caption = null,
+        bool embedChapters = false,
+        bool splitChapters = false,
+        MediaTrimRange? trim = null,
+        SponsorBlockSelection? sponsorBlock = null,
+        LiveCaptureOptions? liveCapture = null) =>
         DownloadSourceIdentity.Create(
             metadata.Id,
             selection.Format.FormatId,
             selection.AudioFormat?.FormatId,
-            output);
+            output,
+            caption,
+            embedChapters,
+            splitChapters,
+            trim,
+            sponsorBlock,
+            liveCapture);
 
     private Result<string> RenderFileName(
         VideoMetadata metadata,
         FormatItemViewModel selection,
         int? index,
         int indexWidth,
-        AudioOutputProfile output = default)
+        OutputProfile output = default) =>
+        RenderCollectionFileName(metadata, selection, index, indexWidth, output, FileNameTemplateText);
+
+    private static Result<string> RenderCollectionFileName(
+        VideoMetadata metadata,
+        FormatItemViewModel selection,
+        int? index,
+        int indexWidth,
+        OutputProfile output,
+        string fileNameTemplate)
     {
         var format = selection.Format;
-        var quality = output.Kind == AudioOutputKind.Mp3
-            ? $"{output.BitrateKbps}kbps"
+        var quality = output.IsAudioTranscode
+            ? output.BitrateKbps > 0 ? $"{output.BitrateKbps}kbps" : "lossless"
             : format.HasVideo
                 ? format.Height is > 0 ? $"{format.Height}p" : "video"
                 : format.Bitrate is > 0 ? $"{Math.Round(format.Bitrate.Value / 1000d):0}kbps" : "audio";
         var extension = OutputExtension(selection, output);
-        var template = index is not null && FileNameTemplateText == FileNameTemplate.Default
+        var template = index is not null && fileNameTemplate == FileNameTemplate.Default
             ? "{index} - {title}"
-            : FileNameTemplateText;
+            : fileNameTemplate;
         return FileNameTemplate.Render(template, new FileNameTemplateContext
         {
             Title = metadata.Title,
@@ -2540,15 +4540,55 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         _ => "duplicate output"
     };
 
-    private AudioOutputProfile AudioOutputFor(FormatItemViewModel selection) =>
-        SelectedDownloadMode.Value == DownloadMode.AudioOnly && selection.Format.Kind == StreamKind.AudioOnly
-            ? SelectedAudioProcessing.Value
-            : AudioOutputProfile.Native;
+    private OutputProfile OutputProfileFor(FormatItemViewModel selection) =>
+        SelectedDownloadMode.Value switch
+        {
+            DownloadMode.AudioOnly when selection.Format.Kind == StreamKind.AudioOnly =>
+                SelectedAudioProcessing.Value,
+            DownloadMode.AudioVideo when selection.Format.Kind is StreamKind.Progressive or StreamKind.VideoOnly =>
+                SelectedVideoProcessing.Value.ForVideoHeight(selection.Format.Height),
+            _ => OutputProfile.Native
+        };
+
+    private CaptionEmbedSelectionSet? SelectedCaptionEmbedSelections()
+    {
+        var selections = CaptionTracks
+            .Where(track => track.IsSelectedForEmbedding)
+            .Select(track => new CaptionEmbedSelection(
+                track.Track.LanguageCode,
+                track.Track.IsAutoGenerated))
+            .ToArray();
+        if (!CaptionEmbedSelectionSet.TryCreate(selections, out var set))
+        {
+            return null;
+        }
+
+        return set;
+    }
+
+    private void ClearEmbeddedCaptionSelections()
+    {
+        foreach (var track in CaptionTracks)
+        {
+            track.IsSelectedForEmbedding = false;
+        }
+        if (SelectedCaptionTrack is not null)
+        {
+            SelectedCaptionTrack.IsSelectedForEmbedding = false;
+        }
+
+        OnPropertyChanged(nameof(EmbedSelectedCaption));
+        OnPropertyChanged(nameof(HasSelectedCaptionEmbeds));
+    }
+
+    private static bool CaptionMatches(CaptionTrack track, CaptionEmbedSelection selection) =>
+        track.IsAutoGenerated == selection.IsAutoGenerated &&
+        track.LanguageCode.Equals(selection.LanguageCode, StringComparison.OrdinalIgnoreCase);
 
     private static string OutputExtension(
         FormatItemViewModel selection,
-        AudioOutputProfile output) =>
-        output.Kind == AudioOutputKind.Mp3
+        OutputProfile output) =>
+        output.RequiresTranscode
             ? output.Extension
             : selection.RequiresMuxing
                 ? FormatDisplay.Extension(selection.OutputContainer)
@@ -2557,21 +4597,18 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     private static long? ForecastLength(QueuedDownloadWork work)
     {
         var sourceLength = CombinedLength(work.Selection);
-        if (work.Output.Kind != AudioOutputKind.Mp3 || work.Metadata.Duration is null)
+        if (!work.Output.RequiresTranscode || work.Metadata.Duration is null)
         {
             return sourceLength;
         }
 
-        try
-        {
-            var mp3Length = checked((long)Math.Ceiling(
-                work.Metadata.Duration.Value.TotalSeconds * work.Output.BitrateKbps * 1000d / 8d) + 64 * 1024);
-            return sourceLength is null ? mp3Length : Math.Max(sourceLength.Value, mp3Length);
-        }
-        catch (OverflowException)
+        var convertedLength = work.Output.EstimateTranscodedBytes(work.Metadata.Duration);
+        if (convertedLength is null)
         {
             return null;
         }
+
+        return sourceLength is null ? convertedLength : Math.Max(sourceLength.Value, convertedLength.Value);
     }
 
     private static long? CombinedLength(FormatItemViewModel selection)
@@ -2594,16 +4631,24 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     private static long SelectionPartialLength(
         string destination,
         FormatItemViewModel selection,
-        AudioOutputProfile output = default)
+        OutputProfile output = default)
     {
         if (File.Exists(destination))
         {
             return CompletedOrReservedLength(destination);
         }
 
-        if (output.Kind == AudioOutputKind.Mp3)
+        if (output.IsAudioTranscode)
         {
             return CompletedOrPartialLength(AudioSourcePath(destination, selection.Format));
+        }
+
+        if (output.IsVideoTranscode)
+        {
+            return SelectionPartialLength(
+                VideoSourcePath(destination, selection),
+                selection,
+                OutputProfile.Native);
         }
 
         if (selection.AudioFormat is null && !RequiresMp4Normalization(selection))
@@ -2632,16 +4677,24 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     private static long SelectionReservedLength(
         string destination,
         FormatItemViewModel selection,
-        AudioOutputProfile output = default)
+        OutputProfile output = default)
     {
         if (File.Exists(destination))
         {
             return CompletedOrReservedLength(destination);
         }
 
-        if (output.Kind == AudioOutputKind.Mp3)
+        if (output.IsAudioTranscode)
         {
             return CompletedOrReservedLength(AudioSourcePath(destination, selection.Format));
+        }
+
+        if (output.IsVideoTranscode)
+        {
+            return SelectionReservedLength(
+                VideoSourcePath(destination, selection),
+                selection,
+                OutputProfile.Native);
         }
 
         if (selection.AudioFormat is null && !RequiresMp4Normalization(selection))
@@ -2793,6 +4846,14 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         CollectionItems.Clear();
         CaptionTracks = [];
         SelectedCaptionTrack = null;
+        EmbedChapters = false;
+        SplitChapters = false;
+        EnableTrim = false;
+        EnableSponsorBlock = false;
+        _trimStartText = "00:00:00";
+        _trimEndText = "00:00:00";
+        OnPropertyChanged(nameof(TrimStartText));
+        OnPropertyChanged(nameof(TrimEndText));
         _videoTitle = string.Empty;
         _videoChannel = string.Empty;
         _videoDuration = null;
@@ -2831,6 +4892,10 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         SelectAllCollectionCommand.RaiseCanExecuteChanged();
         SelectNoneCollectionCommand.RaiseCanExecuteChanged();
         QueueCollectionCommand.RaiseCanExecuteChanged();
+        SelectMissingCollectionCommand.RaiseCanExecuteChanged();
+        SaveArchiveProfileCommand.RaiseCanExecuteChanged();
+        CheckArchiveProfilesCommand.RaiseCanExecuteChanged();
+        RemoveArchiveProfileCommand.RaiseCanExecuteChanged();
     }
 
     private void RebuildFormatFilters(bool resetSelections)
@@ -3082,6 +5147,15 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         return $"Up to {MaximumVideoQuality(combined)} with audio. TubeForge downloads the selected video and highest-quality compatible audio separately, then muxes both locally without re-encoding.";
     }
 
+    private static string AudioProcessingNotice(OutputProfile output) =>
+        output.BitrateKbps > 0
+            ? $"{output.DisplayName} {output.BitrateKbps} kbps: bundled FFmpeg decodes and re-encodes locally."
+            : $"{output.DisplayName}: bundled FFmpeg decodes and re-encodes locally.";
+
+    private static string VideoProcessingNotice(OutputProfile output) =>
+        $"{output.DisplayName}: selected source is downloaded first, then video and audio are re-encoded locally. " +
+        "Slower than Original quality; requires additional temporary disk space.";
+
     private string VideoOnlyModeNotice() =>
         $"Up to {MaximumVideoQuality(FormatsForMode(DownloadMode.VideoOnly))}. " +
         "Video track only: no audio. Choose Audio + video for a locally muxed file with both tracks.";
@@ -3171,7 +5245,88 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             return;
         }
 
+        MarkPresetCustom();
         RebuildFormatFilters(resetSelections: false);
+    }
+
+    private void ApplyDownloadPreset(DownloadPresetOption preset)
+    {
+        if (preset.Value == DownloadPresetKind.Custom)
+        {
+            return;
+        }
+
+        var targetMode = preset.Value == DownloadPresetKind.Mp3_320
+            ? DownloadMode.AudioOnly
+            : DownloadMode.AudioVideo;
+        var mode = DownloadModes.FirstOrDefault(option => option.Value == targetMode);
+        if (mode is null)
+        {
+            MarkPresetCustom(force: true);
+            return;
+        }
+
+        _applyingDownloadPreset = true;
+        try
+        {
+            SelectedDownloadMode = mode;
+            RebuildFormatFilters(resetSelections: true);
+            switch (preset.Value)
+            {
+                case DownloadPresetKind.BestOriginal:
+                    SelectedVideoProcessing = VideoProcessingChoices[0];
+                    break;
+                case DownloadPresetKind.WindowsCompatibleMp4:
+                    SelectedVideoProcessing = VideoProcessingChoices.First(option =>
+                        option.Value.Kind == OutputProfileKind.H264AacMp4);
+                    break;
+                case DownloadPresetKind.SmallFile:
+                    SelectedVideoProcessing = VideoProcessingChoices.First(option =>
+                        option.Value.Kind == OutputProfileKind.H265AacMp4);
+                    SelectedResolution = ResolutionOptions
+                        .Where(option => option.Value is > 0 and <= 720)
+                        .OrderByDescending(option => option.Value)
+                        .FirstOrDefault() ?? ResolutionOptions.FirstOrDefault();
+                    break;
+                case DownloadPresetKind.Mp3_320:
+                    SelectedAudioProcessing = AudioProcessingChoices.First(option =>
+                        option.Value == OutputProfile.Mp3(320));
+                    break;
+            }
+        }
+        finally
+        {
+            _applyingDownloadPreset = false;
+        }
+    }
+
+    private static DownloadPresetKind DownloadPresetFromSettings(PreferredDownloadPreset preset) => preset switch
+    {
+        PreferredDownloadPreset.WindowsCompatibleMp4 => DownloadPresetKind.WindowsCompatibleMp4,
+        PreferredDownloadPreset.SmallFile => DownloadPresetKind.SmallFile,
+        PreferredDownloadPreset.Mp3_320 => DownloadPresetKind.Mp3_320,
+        _ => DownloadPresetKind.BestOriginal
+    };
+
+    private static PreferredDownloadPreset DownloadPresetToSettings(DownloadPresetKind preset) => preset switch
+    {
+        DownloadPresetKind.WindowsCompatibleMp4 => PreferredDownloadPreset.WindowsCompatibleMp4,
+        DownloadPresetKind.SmallFile => PreferredDownloadPreset.SmallFile,
+        DownloadPresetKind.Mp3_320 => PreferredDownloadPreset.Mp3_320,
+        _ => PreferredDownloadPreset.BestOriginal
+    };
+
+    private void MarkPresetCustom(bool force = false)
+    {
+        if ((!force && (_applyingDownloadPreset || _updatingFormatFilters)) ||
+            _selectedDownloadPreset.Value == DownloadPresetKind.Custom)
+        {
+            return;
+        }
+
+        _selectedDownloadPreset = DownloadPresetChoices.First(option =>
+            option.Value == DownloadPresetKind.Custom);
+        OnPropertyChanged(nameof(SelectedDownloadPreset));
     }
 
     private void NotifyVideoProperties()
@@ -3181,6 +5336,15 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         OnPropertyChanged(nameof(VideoMetaLine));
         OnPropertyChanged(nameof(ThumbnailUrl));
         OnPropertyChanged(nameof(HasCaptions));
+        OnPropertyChanged(nameof(HasChapters));
+        OnPropertyChanged(nameof(CanEmbedSelectedCaption));
+        OnPropertyChanged(nameof(CanEmbedChapters));
+        OnPropertyChanged(nameof(CanSplitChapters));
+        OnPropertyChanged(nameof(CanTrim));
+        OnPropertyChanged(nameof(CanUseSponsorBlock));
+        OnPropertyChanged(nameof(IsLiveCapture));
+        OnPropertyChanged(nameof(IsUpcomingLiveCapture));
+        OnPropertyChanged(nameof(LiveCaptureModeNotice));
         OnPropertyChanged(nameof(FormatCountLabel));
         RefreshCommands();
     }
@@ -3198,6 +5362,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         DownloadCaptionCommand.RaiseCanExecuteChanged();
         SaveThumbnailCommand.RaiseCanExecuteChanged();
         SaveMetadataCommand.RaiseCanExecuteChanged();
+        SaveSettingsCommand.RaiseCanExecuteChanged();
         SelectAllCollectionCommand.RaiseCanExecuteChanged();
         SelectNoneCollectionCommand.RaiseCanExecuteChanged();
         QueueCollectionCommand.RaiseCanExecuteChanged();
@@ -3226,6 +5391,157 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
 
     private void OnPropertyChanged([CallerMemberName] string? propertyName = null) =>
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
+
+    private bool TryGetLiveCaptureOptions(
+        FormatItemViewModel selection,
+        OutputProfile output,
+        CaptionEmbedSelectionSet? caption,
+        bool embedChapters,
+        bool splitChapters,
+        out LiveCaptureOptions? options,
+        out TubeForgeError? error)
+    {
+        options = null;
+        error = null;
+        if (!selection.Format.IsLiveHls)
+        {
+            return true;
+        }
+
+        if (output != OutputProfile.Native || caption is not null || embedChapters || splitChapters ||
+            EnableTrim || EnableSponsorBlock)
+        {
+            error = new TubeForgeError(
+                "Hls.IncompatibleProcessing",
+                "Live capture currently requires original-quality MKV without trim, captions, chapters, SponsorBlock, or conversion.");
+            return false;
+        }
+
+        if (!int.TryParse(LiveDurationMinutesText, NumberStyles.None, CultureInfo.InvariantCulture,
+                out var durationMinutes) || durationMinutes is < 1 or > 1_440 ||
+            !int.TryParse(LiveMaximumSizeGiBText, NumberStyles.None, CultureInfo.InvariantCulture,
+                out var maximumGiB) || maximumGiB is < 1 or > 100 ||
+            !int.TryParse(LiveMaximumWaitMinutesText, NumberStyles.None, CultureInfo.InvariantCulture,
+                out var waitMinutes) || waitMinutes is < 0 or > 1_440 ||
+            selection.Format.IsLiveManifestPending && waitMinutes == 0)
+        {
+            error = new TubeForgeError(
+                "Hls.InvalidLimits",
+                "Choose 1–1440 capture minutes, 1–100 GiB, and up to 1440 wait minutes (at least 1 for an upcoming stream).");
+            return false;
+        }
+
+        var selected = new LiveCaptureOptions(
+            TimeSpan.FromMinutes(durationMinutes),
+            maximumGiB * 1024L * 1024 * 1024,
+            selection.Format.IsLiveManifestPending ? TimeSpan.FromMinutes(waitMinutes) : TimeSpan.Zero);
+        if (!selected.IsValid)
+        {
+            error = new TubeForgeError("Hls.InvalidLimits", "The live capture limits are invalid.");
+            return false;
+        }
+
+        options = selected;
+        return true;
+    }
+
+    private bool TryGetSelectedTrim(
+        out MediaTrimRange? trim,
+        out TubeForgeError? error)
+    {
+        trim = null;
+        error = null;
+        if (!EnableTrim)
+        {
+            return true;
+        }
+
+        if (_metadata?.Duration is not { } duration || duration <= TimeSpan.Zero ||
+            !TimeSpan.TryParse(TrimStartText.Trim(), CultureInfo.InvariantCulture, out var start) ||
+            !TimeSpan.TryParse(TrimEndText.Trim(), CultureInfo.InvariantCulture, out var end))
+        {
+            error = new TubeForgeError(
+                "Timeline.InvalidTrim",
+                "Enter trim times as HH:MM:SS, for example 00:01:30.");
+            return false;
+        }
+
+        start = TimeSpan.FromMilliseconds(Math.Floor(start.TotalMilliseconds));
+        end = TimeSpan.FromMilliseconds(Math.Floor(end.TotalMilliseconds));
+        if (!MediaTrimRange.TryCreate(start, end, out var selected) || end > duration)
+        {
+            error = new TubeForgeError(
+                "Timeline.InvalidTrim",
+                "Choose a trim end after its start and within the video duration.");
+            return false;
+        }
+
+        trim = selected;
+        return true;
+    }
+
+    private bool TryGetSponsorBlockSelection(
+        OutputProfile output,
+        out SponsorBlockSelection? selection,
+        out TubeForgeError? error)
+    {
+        selection = null;
+        error = null;
+        if (!EnableSponsorBlock)
+        {
+            return true;
+        }
+
+        var categories = SponsorBlockCategories.None;
+        categories |= SponsorCategory ? SponsorBlockCategories.Sponsor : SponsorBlockCategories.None;
+        categories |= IntroCategory ? SponsorBlockCategories.Intro : SponsorBlockCategories.None;
+        categories |= OutroCategory ? SponsorBlockCategories.Outro : SponsorBlockCategories.None;
+        categories |= SelfPromotionCategory ? SponsorBlockCategories.SelfPromotion : SponsorBlockCategories.None;
+        categories |= InteractionCategory ? SponsorBlockCategories.Interaction : SponsorBlockCategories.None;
+        categories |= PreviewCategory ? SponsorBlockCategories.Preview : SponsorBlockCategories.None;
+        categories |= FillerCategory ? SponsorBlockCategories.Filler : SponsorBlockCategories.None;
+        if (categories == SponsorBlockCategories.None)
+        {
+            error = new TubeForgeError(
+                "SponsorBlock.InvalidSelection",
+                "Choose at least one SponsorBlock category.");
+            return false;
+        }
+
+        var mode = SelectedSponsorBlockMode.Value ?? SponsorBlockMode.Chapters;
+        if (mode == SponsorBlockMode.Remove && !output.RequiresTranscode)
+        {
+            error = new TubeForgeError(
+                "SponsorBlock.TranscodeRequired",
+                "Select an audio or video conversion preset before removing SponsorBlock segments.");
+            return false;
+        }
+
+        if (mode == SponsorBlockMode.Remove &&
+            (HasSelectedCaptionEmbeds || EmbedChapters || SplitChapters))
+        {
+            error = new TubeForgeError(
+                "SponsorBlock.IncompatibleTimelineMetadata",
+                "SponsorBlock removal cannot combine with embedded captions or chapter workflows.");
+            return false;
+        }
+
+        if (mode == SponsorBlockMode.Chapters &&
+            (SelectedFormat is null || IsAudioOnly ||
+             !IsCaptionContainerSupported(FinalMediaContainer(SelectedFormat, output))))
+        {
+            error = new TubeForgeError(
+                "SponsorBlock.VideoRequired",
+                "SponsorBlock chapter markers require an MP4, MKV, or WebM video output.");
+            return false;
+        }
+
+        selection = new SponsorBlockSelection(mode, categories);
+        return true;
+    }
+
+    private static string FormatTimelineInput(TimeSpan value) =>
+        value.ToString("c", CultureInfo.InvariantCulture);
 
     private static string FormatDuration(TimeSpan value) => value.TotalHours >= 1
         ? value.ToString(@"h\:mm\:ss")
@@ -3356,9 +5672,38 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         Diagnostics
     }
 
+    private sealed record CollectionQueueConfiguration(
+        string DestinationPath,
+        string FileNameTemplate,
+        ArchiveOutputPreset OutputPreset,
+        ArchiveCaptionPreference CaptionPreference,
+        bool EmbedChapters);
+
     private sealed record QueuedDownloadWork(
         VideoMetadata Metadata,
         FormatItemViewModel Selection,
         string Destination,
-        AudioOutputProfile Output = default);
+        OutputProfile Output = default,
+        CaptionEmbedSelectionSet? Captions = null,
+        bool EmbedChapters = false,
+        bool SplitChapters = false,
+        MediaTrimRange? Trim = null,
+        SponsorBlockSelection? SponsorBlock = null,
+        IReadOnlyList<SponsorBlockSegment>? SponsorSegments = null,
+        LiveCaptureOptions? LiveCapture = null)
+    {
+        public IReadOnlyList<SponsorBlockSegment> SafeSponsorSegments => SponsorSegments ?? [];
+
+        public bool RequiresSponsorChapters =>
+            SponsorBlock is { Mode: SponsorBlockMode.Chapters } && SafeSponsorSegments.Count > 0;
+
+        public bool RequiresMetadataFinalization => Captions is not null || EmbedChapters || RequiresSponsorChapters;
+
+        public bool RequiresNativeTrim => Trim is not null && !Output.RequiresTranscode;
+
+        public IReadOnlyList<MediaTrimRange> RemovedSponsorSegments =>
+            SponsorBlock is { Mode: SponsorBlockMode.Remove }
+                ? MediaTimelineEditor.MergeRemovalRanges(SafeSponsorSegments)
+                : [];
+    }
 }

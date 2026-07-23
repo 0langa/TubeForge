@@ -21,7 +21,8 @@ public static class RedactedDiagnosticReportBuilderTests
             WaitingQueueItems = 2,
             PausedQueueItems = 3,
             CompletedQueueItems = 4,
-            FailedQueueItems = 5
+            FailedQueueItems = 5,
+            ProxyMode = "Manual"
         });
 
         Assert.True(report.Contains("\"thirdPartyDependencies\": true", StringComparison.Ordinal));
@@ -29,6 +30,7 @@ public static class RedactedDiagnosticReportBuilderTests
         Assert.True(report.Contains("\"bundledFfmpeg\": true", StringComparison.Ordinal));
         Assert.True(report.Contains("\"stage\": \"AndroidClientResolved\"", StringComparison.Ordinal));
         Assert.True(report.Contains("\"totalFormats\": 27", StringComparison.Ordinal));
+        Assert.True(report.Contains("\"proxyMode\": \"Manual\"", StringComparison.Ordinal));
         Assert.False(report.Contains("http", StringComparison.OrdinalIgnoreCase));
         Assert.False(report.Contains("C:\\", StringComparison.Ordinal));
         Assert.False(report.Contains("dQw4w9WgXcQ", StringComparison.Ordinal));

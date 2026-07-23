@@ -1,5 +1,26 @@
 # Changelog
 
+## Unreleased
+
+- Generalize persisted output profiles across native, audio-conversion, and video-conversion paths.
+- Add resolution-aware H.264/AAC MP4, H.265/AAC MP4, and VP9/Opus WebM presets using encoders present in the pinned LGPL FFmpeg build.
+- Preserve original-quality stream copy as default; stage native source media before optional video conversion and recover validated outputs after an interrupted queue checkpoint.
+- Add fail-closed video output validation, cancellation/temporary-file cleanup, bounded disk forecasts, queue identity round-trips, UI selection coverage, and real synthetic encode/decode smoke proof.
+- Add a preset-first download selector for Best original, Windows MP4, Small file, MP3 320, and Custom; detailed manual changes return the selector to Custom.
+- Add opt-in single-video soft-subtitle embedding for MP4, MKV, and WebM with queue-safe language identity, recoverable intermediates, atomic publication, and FFmpeg subtitle-stream validation.
+- Add opt-in chapter embedding for single-video MP4, MKV, and WebM outputs, including combined subtitle/chapter finalization, queue persistence, extracted chapter-count validation, and a reusable bundled-FFmpeg smoke gate.
+- Add recoverable lossless chapter splitting that keeps the full media file and atomically publishes sanitized `{chapterIndex}` / `{chapterTitle}` outputs in a sibling folder.
+- Add unified system/manual/off proxy settings across metadata, collections, captions, thumbnails, media, and updates, plus bounded metadata timeout, media retries, and per-host concurrency.
+- Reject credential-bearing proxy endpoints, migrate older settings to safe system-proxy defaults, and keep endpoint data out of diagnostics.
+- Add loopback end-to-end proxy proof for metadata alongside the existing media transfer proxy gate.
+- Add bounded start/end trimming with recoverable keyframe-aligned stream copy for original outputs and precise cuts during an explicitly selected transcode.
+- Rebase and clip embedded SRT captions and chapter timelines when trimming so supported timed metadata stays synchronized.
+- Add disabled-by-default SponsorBlock category selection with privacy-prefix requests, local candidate matching, chapter-marker mode, and transcode-only segment removal.
+- Keep SponsorBlock response payloads out of persisted queue state and diagnostics, and add deterministic plus real bundled-FFmpeg timeline-editing proof.
+- Record v2.0 as public-only: do not collect cookies or account credentials, and return a stable typed failure for login-required or access-controlled media.
+- Add public active-live record-now and upcoming wait modes with bounded unencrypted HLS parsing, duration/size/wait limits, trusted-host enforcement, retries, and queue pause/resume.
+- Persist recoverable live segment journals without remote URLs, reject encryption/DRM and expired gaps, and finalize captures atomically to validated MKV using bundled FFmpeg stream copy.
+
 ## 1.2.5 - 2026-07-21
 
 - Replace latency-bound 1 MiB sequential Googlevideo reads with validated 8 MiB query ranges and up to four bounded workers, while retaining automatic sequential fallback for incompatible servers.

@@ -50,9 +50,13 @@ public static class RedactedDiagnosticReportBuilder
                 failed = input.FailedQueueItems,
                 cancelled = input.CancelledQueueItems
             },
+            network = new
+            {
+                proxyMode = SafeValue(input.ProxyMode, 16)
+            },
             persistence = new
             {
-                settingsSchemaVersion = 1,
+                settingsSchemaVersion = TubeForge.Core.Settings.TubeForgeSettings.CurrentSchemaVersion,
                 queueSchemaVersion = 1
             },
             exclusions = new[]

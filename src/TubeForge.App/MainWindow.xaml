@@ -5,6 +5,13 @@
         MinHeight="680" MinWidth="980"
         UseLayoutRounding="True" SnapsToDevicePixels="True"
         WindowStartupLocation="CenterScreen">
+    <Window.Resources>
+        <Geometry x:Key="DownloadNavIcon">M2,10 L8,16 L14,10 M8,2 L8,16 M2,20 L14,20</Geometry>
+        <Geometry x:Key="QueueNavIcon">M3,4 L15,4 M3,10 L15,10 M3,16 L15,16</Geometry>
+        <Geometry x:Key="LibraryNavIcon">M2,3 L16,3 L16,17 L2,17 Z M5,7 L13,7 M5,11 L13,11</Geometry>
+        <Geometry x:Key="SettingsNavIcon">M9,2 A7,7 0 1 1 8.99,2 M9,6 A3,3 0 1 1 8.99,6</Geometry>
+        <Geometry x:Key="DiagnosticsNavIcon">M9,2 L16,9 L9,16 L2,9 Z M9,6 L9,10 M9,13 L9,13.1</Geometry>
+    </Window.Resources>
     <Grid Background="{StaticResource WindowBrush}">
         <Grid.ColumnDefinitions>
             <ColumnDefinition Width="226" />
@@ -40,7 +47,7 @@
                 </StackPanel>
 
                 <StackPanel Grid.Row="2">
-                    <Button Content="↓   Download" Command="{Binding ShowDownloadCommand}"
+                    <Button Command="{Binding ShowDownloadCommand}"
                             AutomationProperties.Name="Download page">
                         <Button.Style>
                             <Style TargetType="Button" BasedOn="{StaticResource NavButton}">
@@ -52,8 +59,12 @@
                                 </Style.Triggers>
                             </Style>
                         </Button.Style>
+                        <StackPanel Orientation="Horizontal">
+                            <Viewbox Width="18" Height="18"><Path Data="{StaticResource DownloadNavIcon}" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType={x:Type Button}}}" StrokeThickness="1.7" StrokeStartLineCap="Round" StrokeEndLineCap="Round" /></Viewbox>
+                            <TextBlock Text="Download" Margin="12,0,0,0" VerticalAlignment="Center" />
+                        </StackPanel>
                     </Button>
-                    <Button Content="≡   Queue" Command="{Binding ShowQueueCommand}"
+                    <Button Command="{Binding ShowQueueCommand}"
                             AutomationProperties.Name="Download queue page">
                         <Button.Style>
                             <Style TargetType="Button" BasedOn="{StaticResource NavButton}">
@@ -65,8 +76,12 @@
                                 </Style.Triggers>
                             </Style>
                         </Button.Style>
+                        <StackPanel Orientation="Horizontal">
+                            <Viewbox Width="18" Height="18"><Path Data="{StaticResource QueueNavIcon}" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType={x:Type Button}}}" StrokeThickness="1.7" StrokeStartLineCap="Round" StrokeEndLineCap="Round" /></Viewbox>
+                            <TextBlock Text="Queue" Margin="12,0,0,0" VerticalAlignment="Center" />
+                        </StackPanel>
                     </Button>
-                    <Button Content="□   Library" Command="{Binding ShowLibraryCommand}"
+                    <Button Command="{Binding ShowLibraryCommand}"
                             AutomationProperties.Name="Download library page">
                         <Button.Style>
                             <Style TargetType="Button" BasedOn="{StaticResource NavButton}">
@@ -78,8 +93,12 @@
                                 </Style.Triggers>
                             </Style>
                         </Button.Style>
+                        <StackPanel Orientation="Horizontal">
+                            <Viewbox Width="18" Height="18"><Path Data="{StaticResource LibraryNavIcon}" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType={x:Type Button}}}" StrokeThickness="1.7" StrokeStartLineCap="Round" StrokeEndLineCap="Round" /></Viewbox>
+                            <TextBlock Text="Library" Margin="12,0,0,0" VerticalAlignment="Center" />
+                        </StackPanel>
                     </Button>
-                    <Button Content="⚙   Settings" Command="{Binding ShowSettingsCommand}"
+                    <Button Command="{Binding ShowSettingsCommand}"
                             AutomationProperties.Name="Settings page">
                         <Button.Style>
                             <Style TargetType="Button" BasedOn="{StaticResource NavButton}">
@@ -91,8 +110,12 @@
                                 </Style.Triggers>
                             </Style>
                         </Button.Style>
+                        <StackPanel Orientation="Horizontal">
+                            <Viewbox Width="18" Height="18"><Path Data="{StaticResource SettingsNavIcon}" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType={x:Type Button}}}" StrokeThickness="1.7" /></Viewbox>
+                            <TextBlock Text="Settings" Margin="12,0,0,0" VerticalAlignment="Center" />
+                        </StackPanel>
                     </Button>
-                    <Button Content="◇   Diagnostics" Command="{Binding ShowDiagnosticsCommand}"
+                    <Button Command="{Binding ShowDiagnosticsCommand}"
                             AutomationProperties.Name="Diagnostics page">
                         <Button.Style>
                             <Style TargetType="Button" BasedOn="{StaticResource NavButton}">
@@ -104,6 +127,10 @@
                                 </Style.Triggers>
                             </Style>
                         </Button.Style>
+                        <StackPanel Orientation="Horizontal">
+                            <Viewbox Width="18" Height="18"><Path Data="{StaticResource DiagnosticsNavIcon}" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType={x:Type Button}}}" StrokeThickness="1.7" StrokeStartLineCap="Round" StrokeEndLineCap="Round" /></Viewbox>
+                            <TextBlock Text="Diagnostics" Margin="12,0,0,0" VerticalAlignment="Center" />
+                        </StackPanel>
                     </Button>
                 </StackPanel>
 
@@ -168,10 +195,22 @@
                 <Border Grid.Row="4" Style="{StaticResource Card}" BorderBrush="#613143"
                         AutomationProperties.LiveSetting="Assertive"
                         Visibility="{Binding HasError, Converter={StaticResource BooleanToVisibilityConverter}}">
-                    <StackPanel Orientation="Horizontal">
-                        <TextBlock Text="!" Foreground="{StaticResource ErrorBrush}" FontSize="18" FontWeight="Bold" />
-                        <TextBlock Text="{Binding ErrorMessage}" Margin="12,1,0,0" TextWrapping="Wrap"
-                                   Foreground="#FFC4CE" />
+                    <StackPanel>
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Text="!" Foreground="{StaticResource ErrorBrush}" FontSize="18" FontWeight="Bold" />
+                            <TextBlock Text="{Binding ErrorMessage}" Margin="12,1,0,0" TextWrapping="Wrap"
+                                       Foreground="#FFC4CE" />
+                        </StackPanel>
+                        <WrapPanel Margin="30,12,0,0">
+                            <Button Style="{StaticResource SecondaryButton}" Content="Change destination"
+                                    Click="BrowseButton_OnClick" Padding="11,7" />
+                            <Button Style="{StaticResource SecondaryButton}" Content="Open settings"
+                                    Command="{Binding ShowSettingsCommand}" Padding="11,7" Margin="8,0,0,0" />
+                            <Button Style="{StaticResource SecondaryButton}" Content="Open diagnostics"
+                                    Command="{Binding ShowDiagnosticsCommand}" Padding="11,7" Margin="8,0,0,0" />
+                            <Button Style="{StaticResource SecondaryButton}" Content="Copy report"
+                                    Click="CopyDiagnosticsButton_OnClick" Padding="11,7" Margin="8,0,0,0" />
+                        </WrapPanel>
                     </StackPanel>
                 </Border>
 
@@ -236,9 +275,163 @@
                                 <TextBlock Text="CAPTION FORMAT" Style="{StaticResource FieldLabel}" Margin="0,12,0,5" />
                                 <ComboBox ItemsSource="{Binding CaptionFormats}" SelectedItem="{Binding SelectedCaptionFormat}"
                                           AutomationProperties.Name="Caption output format" />
+                                <TextBlock Text="EMBED TRACKS IN NEXT MEDIA DOWNLOAD" Style="{StaticResource FieldLabel}" Margin="0,12,0,5" />
+                                <ItemsControl ItemsSource="{Binding CaptionTracks}">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <CheckBox Content="{Binding Label}"
+                                                      IsChecked="{Binding IsSelectedForEmbedding}"
+                                                      IsEnabled="{Binding DataContext.CanEmbedSelectedCaption, RelativeSource={RelativeSource AncestorType={x:Type Window}}}"
+                                                      Margin="0,3,0,0"
+                                                      AutomationProperties.Name="{Binding Label, StringFormat=Embed caption track {0}}" />
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                                <TextBlock Text="Choose up to eight soft-subtitle tracks. Single-video Audio + video outputs only. Media stays stream-copy unless its selected output preset requires conversion."
+                                           Margin="24,4,0,0" FontSize="10" TextWrapping="Wrap"
+                                           Foreground="{StaticResource MutedTextBrush}" />
                                 <Button Style="{StaticResource SecondaryButton}" Content="Save caption" Margin="0,12,0,0"
                                         Command="{Binding DownloadCaptionCommand}"
                                         AutomationProperties.Name="Save selected caption" />
+                            </StackPanel>
+                        </Border>
+
+                        <Border Style="{StaticResource Card}" Margin="0,14,0,0"
+                                Visibility="{Binding HasChapters, Converter={StaticResource BooleanToVisibilityConverter}}">
+                            <StackPanel>
+                                <TextBlock Text="Chapters" FontSize="13" FontWeight="SemiBold" />
+                                <TextBlock Text="Keep the video's named timeline markers in the downloaded media."
+                                           Margin="0,5,0,0" FontSize="10" TextWrapping="Wrap"
+                                           Foreground="{StaticResource MutedTextBrush}" />
+                                <CheckBox Content="Embed chapters in next media download"
+                                          IsChecked="{Binding EmbedChapters}"
+                                          IsEnabled="{Binding CanEmbedChapters}"
+                                          Margin="0,12,0,0"
+                                          AutomationProperties.Name="Embed video chapters in media" />
+                                <TextBlock Text="Single-video outputs only. MP4, MKV, and WebM are finalized atomically with bundled FFmpeg."
+                                           Margin="24,4,0,0" FontSize="10" TextWrapping="Wrap"
+                                           Foreground="{StaticResource MutedTextBrush}" />
+                                <CheckBox Content="Create separate chapter files after download"
+                                          IsChecked="{Binding SplitChapters}"
+                                          IsEnabled="{Binding CanSplitChapters}"
+                                          Margin="0,12,0,0"
+                                          AutomationProperties.Name="Create separate media files for video chapters" />
+                                <TextBlock Text="Keeps the full media file and atomically adds a sibling chapters folder using lossless stream copy; starts align to decodable keyframes."
+                                           Margin="24,4,0,0" FontSize="10" TextWrapping="Wrap"
+                                           Foreground="{StaticResource MutedTextBrush}" />
+                            </StackPanel>
+                        </Border>
+
+                        <Border Style="{StaticResource Card}" Margin="0,14,0,0"
+                                Visibility="{Binding IsLiveCapture, Converter={StaticResource BooleanToVisibilityConverter}}">
+                            <StackPanel>
+                                <TextBlock Text="Public live capture" FontSize="13" FontWeight="SemiBold" />
+                                <TextBlock Text="{Binding LiveCaptureModeNotice}"
+                                           Margin="0,5,0,0" FontSize="10" TextWrapping="Wrap"
+                                           Foreground="{StaticResource MutedTextBrush}" />
+                                <Grid Margin="0,12,0,0">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="10" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="10" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel>
+                                        <TextBlock Text="CAPTURE MINUTES" Style="{StaticResource FieldLabel}" />
+                                        <TextBox Text="{Binding LiveDurationMinutesText, UpdateSourceTrigger=PropertyChanged}"
+                                                 Margin="0,6,0,0"
+                                                 AutomationProperties.Name="Maximum live capture minutes" />
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="2">
+                                        <TextBlock Text="MAXIMUM GIB" Style="{StaticResource FieldLabel}" />
+                                        <TextBox Text="{Binding LiveMaximumSizeGiBText, UpdateSourceTrigger=PropertyChanged}"
+                                                 Margin="0,6,0,0"
+                                                 AutomationProperties.Name="Maximum live capture size in GiB" />
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="4">
+                                        <TextBlock Text="WAIT MINUTES" Style="{StaticResource FieldLabel}" />
+                                        <TextBox Text="{Binding LiveMaximumWaitMinutesText, UpdateSourceTrigger=PropertyChanged}"
+                                                 Margin="0,6,0,0"
+                                                 IsEnabled="{Binding IsUpcomingLiveCapture}"
+                                                 AutomationProperties.Name="Maximum minutes to wait for upcoming live stream" />
+                                    </StackPanel>
+                                </Grid>
+                                <TextBlock Text="Public, unencrypted HLS only. Output is recoverable MKV stream copy. Pause preserves the local segment journal; missing, expired, encrypted, DRM, or login-required streams fail closed."
+                                           Margin="0,9,0,0" FontSize="10" TextWrapping="Wrap"
+                                           Foreground="{StaticResource MutedTextBrush}" />
+                            </StackPanel>
+                        </Border>
+
+                        <Border Style="{StaticResource Card}" Margin="0,14,0,0"
+                                Visibility="{Binding HasVideo, Converter={StaticResource BooleanToVisibilityConverter}}">
+                            <StackPanel>
+                                <TextBlock Text="SponsorBlock" FontSize="13" FontWeight="SemiBold" />
+                                <TextBlock Text="Optional third-party community timeline data. No request is made until you enable this for a download."
+                                           Margin="0,5,0,0" FontSize="10" TextWrapping="Wrap"
+                                           Foreground="{StaticResource MutedTextBrush}" />
+                                <CheckBox Content="Use SponsorBlock for next media download"
+                                          IsChecked="{Binding EnableSponsorBlock}"
+                                          IsEnabled="{Binding CanUseSponsorBlock}"
+                                          Margin="0,12,0,0"
+                                          AutomationProperties.Name="Use SponsorBlock for next media download" />
+                                <TextBlock Text="MODE" Style="{StaticResource FieldLabel}" Margin="0,12,0,5" />
+                                <ComboBox ItemsSource="{Binding SponsorBlockModeOptions}"
+                                          SelectedItem="{Binding SelectedSponsorBlockMode}"
+                                          IsEnabled="{Binding EnableSponsorBlock}"
+                                          AutomationProperties.Name="SponsorBlock processing mode" />
+                                <WrapPanel Margin="0,10,0,0" IsEnabled="{Binding EnableSponsorBlock}">
+                                    <CheckBox Content="Sponsor" IsChecked="{Binding SponsorCategory}" Margin="0,0,14,6" />
+                                    <CheckBox Content="Intro" IsChecked="{Binding IntroCategory}" Margin="0,0,14,6" />
+                                    <CheckBox Content="Outro" IsChecked="{Binding OutroCategory}" Margin="0,0,14,6" />
+                                    <CheckBox Content="Self-promo" IsChecked="{Binding SelfPromotionCategory}" Margin="0,0,14,6" />
+                                    <CheckBox Content="Interaction" IsChecked="{Binding InteractionCategory}" Margin="0,0,14,6" />
+                                    <CheckBox Content="Preview" IsChecked="{Binding PreviewCategory}" Margin="0,0,14,6" />
+                                    <CheckBox Content="Filler" IsChecked="{Binding FillerCategory}" Margin="0,0,14,6" />
+                                </WrapPanel>
+                                <TextBlock Text="{Binding SponsorBlockModeNotice}"
+                                           Margin="0,4,0,0" FontSize="10" TextWrapping="Wrap"
+                                           Foreground="{StaticResource MutedTextBrush}" />
+                                <TextBlock Text="Privacy: TubeForge sends SponsorBlock a four-character SHA-256 prefix, not the full video ID. The response can include multiple candidates and is matched locally; payloads and IDs are never logged."
+                                           Margin="0,8,0,0" FontSize="10" TextWrapping="Wrap"
+                                           Foreground="{StaticResource MutedTextBrush}" />
+                            </StackPanel>
+                        </Border>
+
+                        <Border Style="{StaticResource Card}" Margin="0,14,0,0"
+                                Visibility="{Binding HasVideo, Converter={StaticResource BooleanToVisibilityConverter}}">
+                            <StackPanel>
+                                <TextBlock Text="Trim" FontSize="13" FontWeight="SemiBold" />
+                                <TextBlock Text="Keep only a selected part of the next single-video download."
+                                           Margin="0,5,0,0" FontSize="10" TextWrapping="Wrap"
+                                           Foreground="{StaticResource MutedTextBrush}" />
+                                <CheckBox Content="Trim next media download"
+                                          IsChecked="{Binding EnableTrim}"
+                                          IsEnabled="{Binding CanTrim}"
+                                          Margin="0,12,0,0"
+                                          AutomationProperties.Name="Trim next media download" />
+                                <Grid Margin="0,12,0,0" IsEnabled="{Binding EnableTrim}">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="12" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel>
+                                        <TextBlock Text="START (HH:MM:SS)" Style="{StaticResource FieldLabel}" />
+                                        <TextBox Text="{Binding TrimStartText, UpdateSourceTrigger=PropertyChanged}"
+                                                 Margin="0,6,0,0"
+                                                 AutomationProperties.Name="Trim start time" />
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="2">
+                                        <TextBlock Text="END (HH:MM:SS)" Style="{StaticResource FieldLabel}" />
+                                        <TextBox Text="{Binding TrimEndText, UpdateSourceTrigger=PropertyChanged}"
+                                                 Margin="0,6,0,0"
+                                                 AutomationProperties.Name="Trim end time" />
+                                    </StackPanel>
+                                </Grid>
+                                <TextBlock Text="Original-quality outputs use lossless stream copy and may align the start to a nearby keyframe. A selected conversion preset re-encodes the chosen range for a precise cut."
+                                           Margin="0,8,0,0" FontSize="10" TextWrapping="Wrap"
+                                           Foreground="{StaticResource MutedTextBrush}" />
                             </StackPanel>
                         </Border>
 
@@ -264,14 +457,35 @@
                             <Grid>
                                 <StackPanel>
                                     <TextBlock Text="Build your download" FontSize="17" FontWeight="SemiBold" />
-                                    <TextBlock Text="Choose a use case first; only relevant controls stay visible."
+                                    <TextBlock Text="Start with a practical preset, then refine any detail."
                                                Margin="0,4,0,0" FontSize="11" Foreground="{StaticResource MutedTextBrush}" />
                                 </StackPanel>
                                 <TextBlock Text="{Binding FormatCountLabel}" HorizontalAlignment="Right" VerticalAlignment="Center"
                                            Foreground="{StaticResource MutedTextBrush}" FontSize="11" />
                             </Grid>
 
-                            <TextBlock Text="DOWNLOAD TYPE" Style="{StaticResource FieldLabel}" Margin="0,18,0,6" />
+                            <TextBlock Text="QUICK PRESET" Style="{StaticResource FieldLabel}" Margin="0,18,0,6" />
+                            <ComboBox ItemsSource="{Binding DownloadPresets}"
+                                      SelectedItem="{Binding SelectedDownloadPreset}"
+                                      AutomationProperties.Name="Quick download preset" MinHeight="48">
+                                <ComboBox.ItemTemplate>
+                                    <DataTemplate>
+                                        <StackPanel>
+                                            <TextBlock Text="{Binding Label}" FontWeight="SemiBold" FontSize="13" />
+                                            <TextBlock Text="{Binding Description}" Margin="0,3,0,0" FontSize="10"
+                                                       Foreground="{StaticResource MutedTextBrush}" />
+                                        </StackPanel>
+                                    </DataTemplate>
+                                </ComboBox.ItemTemplate>
+                            </ComboBox>
+
+                            <CheckBox Content="Show advanced format controls"
+                                      IsChecked="{Binding ShowAdvancedDownloadOptions}"
+                                      Margin="0,14,0,0"
+                                      AutomationProperties.Name="Show advanced download format controls" />
+
+                            <StackPanel Visibility="{Binding ShowAdvancedDownloadOptions, Converter={StaticResource BooleanToVisibilityConverter}}">
+                            <TextBlock Text="DOWNLOAD TYPE" Style="{StaticResource FieldLabel}" Margin="0,16,0,6" />
                             <ComboBox ItemsSource="{Binding DownloadModes}" SelectedItem="{Binding SelectedDownloadMode}"
                                       AutomationProperties.Name="Download type">
                                 <ComboBox.ItemTemplate>
@@ -353,6 +567,24 @@
                                 </StackPanel>
                             </Grid>
 
+                            <StackPanel Margin="0,16,0,0"
+                                        Visibility="{Binding IsAudioVideo, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                <TextBlock Text="OUTPUT PRESET" Style="{StaticResource FieldLabel}" />
+                                <ComboBox ItemsSource="{Binding VideoProcessingOptions}"
+                                          SelectedItem="{Binding SelectedVideoProcessing}"
+                                          AutomationProperties.Name="Video output preset" MinHeight="48">
+                                    <ComboBox.ItemTemplate>
+                                        <DataTemplate>
+                                            <StackPanel>
+                                                <TextBlock Text="{Binding Label}" />
+                                                <TextBlock Text="{Binding Description}" FontSize="10"
+                                                           Foreground="{StaticResource MutedTextBrush}" />
+                                            </StackPanel>
+                                        </DataTemplate>
+                                    </ComboBox.ItemTemplate>
+                                </ComboBox>
+                            </StackPanel>
+
                             <Grid Margin="0,16,0,0"
                                   Visibility="{Binding IsAudioOnly, Converter={StaticResource BooleanToVisibilityConverter}}">
                                 <Grid.ColumnDefinitions>
@@ -421,6 +653,7 @@
                                     </DataTemplate>
                                 </ComboBox.ItemTemplate>
                             </ComboBox>
+                            </StackPanel>
 
                             <ProgressBar Minimum="0" Maximum="1" Value="{Binding DownloadFraction, Mode=OneWay}"
                                          Margin="0,16,0,0"
@@ -479,12 +712,20 @@
                                         Command="{Binding SelectAllCollectionCommand}" />
                                 <Button Style="{StaticResource SecondaryButton}" Content="Select none" Padding="13,8"
                                         Margin="8,0,0,0" Command="{Binding SelectNoneCollectionCommand}" />
+                                <Button Style="{StaticResource SecondaryButton}" Content="Select missing" Padding="13,8"
+                                        Margin="8,0,0,0" Command="{Binding SelectMissingCollectionCommand}"
+                                        ToolTip="Select videos absent from both Queue and Library" />
                             </StackPanel>
                         </Grid>
 
                         <Border Grid.Row="2" Background="#0E1A2B" BorderBrush="#29405F" BorderThickness="1"
                                 CornerRadius="8" Padding="12,10">
                             <Grid>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="12" />
+                                    <RowDefinition Height="Auto" />
+                                </Grid.RowDefinitions>
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="Auto" />
                                     <ColumnDefinition Width="14" />
@@ -497,6 +738,36 @@
                                          AutomationProperties.Name="Collection download folder" />
                                 <Button Grid.Column="4" Style="{StaticResource SecondaryButton}" Content="Browse"
                                         Click="BrowseButton_OnClick" />
+
+                                <Grid Grid.Row="2" Grid.ColumnSpan="5">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="180" />
+                                        <ColumnDefinition Width="12" />
+                                        <ColumnDefinition Width="220" />
+                                        <ColumnDefinition Width="16" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="16" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel>
+                                        <TextBlock Text="ARCHIVE OUTPUT" Style="{StaticResource FieldLabel}" />
+                                        <ComboBox ItemsSource="{Binding ArchiveOutputPresets}"
+                                                  SelectedItem="{Binding SelectedArchiveOutputPreset}"
+                                                  Margin="0,5,0,0" />
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="2">
+                                        <TextBlock Text="CAPTIONS" Style="{StaticResource FieldLabel}" />
+                                        <ComboBox ItemsSource="{Binding ArchiveCaptionPreferences}"
+                                                  SelectedItem="{Binding SelectedArchiveCaptionPreference}"
+                                                  Margin="0,5,0,0" />
+                                    </StackPanel>
+                                    <CheckBox Grid.Column="4" IsChecked="{Binding ArchiveEmbedChapters}"
+                                              Content="Embed chapters when available" VerticalAlignment="Bottom"
+                                              Margin="0,0,0,8" />
+                                    <Button Grid.Column="6" Style="{StaticResource SecondaryButton}"
+                                            Content="Save archive profile" Padding="13,9" VerticalAlignment="Bottom"
+                                            Command="{Binding SaveArchiveProfileCommand}" />
+                                </Grid>
                             </Grid>
                         </Border>
 
@@ -532,7 +803,7 @@
                         </ListBox>
 
                         <Border Grid.Row="6" Background="#111A2A" CornerRadius="8" Padding="12,9">
-                            <TextBlock Text="Best complete file per video: highest-quality compatible video + audio, MP4 preferred only when quality is equal. Use {index} in the filename template to include collection positions."
+                            <TextBlock Text="Archive output uses the selected preset and current filename template. Saving a profile marks the currently listed videos as checked; use Select missing, then Add selected to queue for existing gaps. Use {index} in the filename template to include collection positions."
                                        TextWrapping="Wrap" FontSize="10" Foreground="#A8B7CE" />
                         </Border>
 
@@ -579,6 +850,8 @@
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="24" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="14" />
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="14" />
                     <RowDefinition Height="Auto" />
@@ -631,15 +904,68 @@
                                     Content="Remove missing" Command="{Binding RemoveMissingHistoryCommand}"
                                     Padding="13,9" VerticalAlignment="Bottom" />
                         </Grid>
-                        <StackPanel Grid.Row="2">
-                            <TextBlock Text="HISTORY STORAGE" Style="{StaticResource FieldLabel}" />
-                            <TextBlock Text="{Binding HistoryStoragePath}" Margin="0,6,0,0" FontSize="10"
-                                       Foreground="{StaticResource MutedTextBrush}" TextWrapping="Wrap" />
-                        </StackPanel>
+                        <Grid Grid.Row="2">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="16" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <StackPanel>
+                                <TextBlock Text="HISTORY STORAGE" Style="{StaticResource FieldLabel}" />
+                                <TextBlock Text="{Binding HistoryStoragePath}" Margin="0,6,0,0" FontSize="10"
+                                           Foreground="{StaticResource MutedTextBrush}" TextWrapping="Wrap" />
+                                <TextBlock Text="{Binding LibraryStatus}" Margin="0,7,0,0" FontSize="10"
+                                           Foreground="{StaticResource MutedTextBrush}" TextWrapping="Wrap"
+                                           AutomationProperties.LiveSetting="Polite" />
+                                <TextBlock Text="Exports contain Library metadata and local file paths, but no media URLs or credentials. Imports merge without deleting current records."
+                                           Margin="0,5,0,0" FontSize="9" Foreground="{StaticResource MutedTextBrush}"
+                                           TextWrapping="Wrap" />
+                            </StackPanel>
+                            <WrapPanel Grid.Column="2" VerticalAlignment="Bottom">
+                                <Button Style="{StaticResource SecondaryButton}" Content="Export" Padding="13,9"
+                                        Click="ExportLibraryButton_OnClick" />
+                                <Button Style="{StaticResource SecondaryButton}" Content="Import" Padding="13,9"
+                                        Margin="8,0,0,0" Click="ImportLibraryButton_OnClick" />
+                                <Button Style="{StaticResource SecondaryButton}" Content="Rescan folder" Padding="13,9"
+                                        Margin="8,0,0,0" Click="RescanLibraryButton_OnClick" />
+                            </WrapPanel>
+                        </Grid>
                     </Grid>
                 </Border>
 
-                <Border Grid.Row="4">
+                <Border Grid.Row="4" Style="{StaticResource Card}">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="16" />
+                            <ColumnDefinition Width="280" />
+                            <ColumnDefinition Width="10" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="8" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <StackPanel>
+                            <TextBlock Text="PLAYLIST AND CHANNEL ARCHIVES" FontSize="15" FontWeight="SemiBold" />
+                            <TextBlock Text="{Binding ArchiveStatus}" Margin="0,6,0,0" FontSize="10"
+                                       Foreground="{StaticResource MutedTextBrush}" TextWrapping="Wrap"
+                                       AutomationProperties.LiveSetting="Polite" />
+                            <TextBlock Text="{Binding ArchiveStoragePath}" Margin="0,4,0,0" FontSize="9"
+                                       Foreground="{StaticResource MutedTextBrush}" TextWrapping="Wrap" />
+                        </StackPanel>
+                        <ComboBox Grid.Column="2" ItemsSource="{Binding ArchiveProfiles}"
+                                  SelectedItem="{Binding SelectedArchiveProfile}"
+                                  DisplayMemberPath="DisplayName" VerticalAlignment="Center"
+                                  AutomationProperties.Name="Saved collection archive profile" />
+                        <Button Grid.Column="4" Style="{StaticResource PrimaryButton}" Content="Check all new"
+                                Padding="13,9" VerticalAlignment="Center"
+                                Command="{Binding CheckArchiveProfilesCommand}" />
+                        <Button Grid.Column="6" Style="{StaticResource SecondaryButton}" Content="Remove profile"
+                                Padding="13,9" VerticalAlignment="Center"
+                                Command="{Binding RemoveArchiveProfileCommand}" />
+                    </Grid>
+                </Border>
+
+                <Border Grid.Row="6">
                     <Border.Style>
                         <Style TargetType="Border" BasedOn="{StaticResource Card}">
                             <Style.Triggers>
@@ -656,7 +982,7 @@
                     </StackPanel>
                 </Border>
 
-                <ListBox Grid.Row="6" ItemsSource="{Binding HistoryItems}" Height="600"
+                <ListBox Grid.Row="8" ItemsSource="{Binding HistoryItems}" Height="600"
                          ScrollViewer.VerticalScrollBarVisibility="Auto"
                          VirtualizingPanel.IsVirtualizing="True"
                          VirtualizingPanel.VirtualizationMode="Recycling"
@@ -856,6 +1182,8 @@
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="14" />
                     <RowDefinition Height="Auto" />
+                    <RowDefinition Height="14" />
+                    <RowDefinition Height="Auto" />
                 </Grid.RowDefinitions>
 
                 <StackPanel Grid.Row="0">
@@ -895,6 +1223,16 @@
                                    Margin="0,6,0,0" FontSize="10" TextWrapping="Wrap"
                                    Foreground="{StaticResource MutedTextBrush}" />
 
+                        <TextBlock Text="DEFAULT QUICK PRESET" Style="{StaticResource FieldLabel}" Margin="0,18,0,6" />
+                        <ComboBox ItemsSource="{Binding DefaultDownloadPresets}"
+                                  SelectedItem="{Binding DefaultDownloadPreset}"
+                                  Width="320" HorizontalAlignment="Left"
+                                  AutomationProperties.Name="Default quick download preset" />
+                        <CheckBox Content="Show advanced format controls after analysis"
+                                  IsChecked="{Binding ShowAdvancedDownloadOptions}"
+                                  Margin="0,14,0,0"
+                                  AutomationProperties.Name="Show advanced download controls by default" />
+
                         <TextBlock Text="MAXIMUM CONCURRENT DOWNLOADS" Style="{StaticResource FieldLabel}" Margin="0,18,0,6" />
                         <ComboBox ItemsSource="{Binding MaxConcurrentDownloadOptions}"
                                   SelectedItem="{Binding SelectedMaxConcurrentDownloads}" Width="160"
@@ -919,7 +1257,7 @@
                                 <TextBlock Text="OUTPUT PREFERENCE" Style="{StaticResource FieldLabel}" />
                                 <TextBlock Text="MP4 preferred when video quality is equal; higher-quality WebM remains available."
                                            Margin="0,6,0,0" TextWrapping="Wrap" Foreground="#A8B7CE" />
-                                <TextBlock Text="FFmpeg stream-copies video/audio tracks into indexed MP4 or validated WebM/MKV; MP3 output re-encodes audio only. No yt-dlp."
+                                <TextBlock Text="Original-quality MP4/WebM/MKV uses FFmpeg stream copy. Optional H.264, H.265, VP9, MP3, AAC, Opus, WAV, and FLAC profiles re-encode locally. No yt-dlp."
                                            Margin="0,4,0,0" FontSize="10" Foreground="{StaticResource MutedTextBrush}" />
                             </StackPanel>
                         </Border>
@@ -938,6 +1276,56 @@
                 </Border>
 
                 <Border Grid.Row="6" Style="{StaticResource Card}">
+                    <StackPanel>
+                        <TextBlock Text="Network" FontSize="17" FontWeight="SemiBold" />
+                        <TextBlock Text="One policy is applied to metadata, collections, captions, thumbnails, media, and update requests."
+                                   Margin="0,7,0,0" TextWrapping="Wrap" Foreground="{StaticResource MutedTextBrush}" />
+
+                        <TextBlock Text="PROXY MODE" Style="{StaticResource FieldLabel}" Margin="0,18,0,6" />
+                        <ComboBox ItemsSource="{Binding ProxyModeOptions}" SelectedItem="{Binding SelectedProxyMode}"
+                                  Width="260" HorizontalAlignment="Left"
+                                  AutomationProperties.Name="Network proxy mode" />
+                        <TextBlock Text="MANUAL PROXY ENDPOINT" Style="{StaticResource FieldLabel}" Margin="0,14,0,6" />
+                        <TextBox Text="{Binding ManualProxyUri, UpdateSourceTrigger=PropertyChanged}"
+                                 IsEnabled="{Binding UsesManualProxy}"
+                                 AutomationProperties.Name="Manual HTTP or HTTPS proxy endpoint" />
+                        <TextBlock Text="Example: http://127.0.0.1:8080/. Credentials are rejected and never stored."
+                                   Margin="0,5,0,0" FontSize="10" Foreground="{StaticResource MutedTextBrush}" />
+
+                        <Grid Margin="0,18,0,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="14" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="14" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <StackPanel>
+                                <TextBlock Text="METADATA TIMEOUT (SECONDS)" Style="{StaticResource FieldLabel}" />
+                                <ComboBox ItemsSource="{Binding MetadataTimeoutOptions}"
+                                          SelectedItem="{Binding MetadataTimeoutSeconds}" Margin="0,6,0,0"
+                                          AutomationProperties.Name="Metadata request timeout seconds" />
+                            </StackPanel>
+                            <StackPanel Grid.Column="2">
+                                <TextBlock Text="MEDIA RETRY ATTEMPTS" Style="{StaticResource FieldLabel}" />
+                                <ComboBox ItemsSource="{Binding DownloadRetryOptions}"
+                                          SelectedItem="{Binding DownloadRetryAttempts}" Margin="0,6,0,0"
+                                          AutomationProperties.Name="Media retry attempts" />
+                            </StackPanel>
+                            <StackPanel Grid.Column="4">
+                                <TextBlock Text="REQUESTS PER HOST" Style="{StaticResource FieldLabel}" />
+                                <ComboBox ItemsSource="{Binding PerHostConcurrencyOptions}"
+                                          SelectedItem="{Binding PerHostConcurrency}" Margin="0,6,0,0"
+                                          AutomationProperties.Name="Maximum concurrent requests per provider host" />
+                            </StackPanel>
+                        </Grid>
+                        <TextBlock Text="Provider subdomains share this host limit and honor bounded server Retry-After guidance. Changes apply to new requests after Save settings."
+                                   Margin="0,10,0,0" FontSize="10" TextWrapping="Wrap"
+                                   Foreground="{StaticResource MutedTextBrush}" />
+                    </StackPanel>
+                </Border>
+
+                <Border Grid.Row="8" Style="{StaticResource Card}">
                     <StackPanel>
                         <TextBlock Text="Updates" FontSize="17" FontWeight="SemiBold" />
                         <TextBlock Text="Stable releases are downloaded from the official GitHub repository and verified with two matching SHA-256 records before they can run."
@@ -971,7 +1359,7 @@
                     </StackPanel>
                 </Border>
 
-                <Border Grid.Row="8" Style="{StaticResource Card}">
+                <Border Grid.Row="10" Style="{StaticResource Card}">
                     <StackPanel>
                         <TextBlock Text="Privacy and responsibility" FontSize="17" FontWeight="SemiBold" />
                         <TextBlock Text="Settings, queue state, and completed-output history stay in local application data. Media URLs, cookies, signatures, visitor data, and telemetry are not persisted."
@@ -1103,6 +1491,34 @@
                                Margin="0,8,0,0" TextWrapping="Wrap" />
                     <TextBlock Text="• TubeForge does not bypass DRM, payments, membership, or access controls."
                                Margin="0,8,0,0" TextWrapping="Wrap" />
+
+                    <Border Background="#0E1A2B" BorderBrush="#29405F" BorderThickness="1"
+                            CornerRadius="8" Padding="12" Margin="0,18,0,0">
+                        <StackPanel>
+                            <TextBlock Text="QUICK START" Style="{StaticResource FieldLabel}" />
+                            <Grid Margin="0,7,0,0">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="8" />
+                                    <ColumnDefinition Width="76" />
+                                </Grid.ColumnDefinitions>
+                                <TextBox Text="{Binding DownloadFolder, UpdateSourceTrigger=PropertyChanged}"
+                                         AutomationProperties.Name="First run download folder" />
+                                <Button Grid.Column="2" Style="{StaticResource SecondaryButton}" Content="Browse"
+                                        Click="BrowseButton_OnClick" Padding="9,7" />
+                            </Grid>
+                            <ComboBox ItemsSource="{Binding DefaultDownloadPresets}"
+                                      SelectedItem="{Binding DefaultDownloadPreset}"
+                                      Margin="0,9,0,0"
+                                      AutomationProperties.Name="First run default download preset" />
+                            <CheckBox Content="Check for verified updates at startup"
+                                      IsChecked="{Binding EnableAutomaticUpdateChecks}"
+                                      Margin="0,9,0,0" />
+                            <CheckBox Content="Show advanced format controls"
+                                      IsChecked="{Binding ShowAdvancedDownloadOptions}"
+                                      Margin="0,7,0,0" />
+                        </StackPanel>
+                    </Border>
                     <TextBlock Text="Acknowledgement is stored only on this device."
                                Margin="0,18,0,0" FontSize="10" Foreground="{StaticResource MutedTextBrush}" />
                     <TextBlock Text="{Binding ErrorMessage}" Margin="0,12,0,0" TextWrapping="Wrap"

@@ -1,5 +1,6 @@
 using TubeForge.Downloads.Queue;
 using TubeForge.Tests.Framework;
+using TubeForge.Core.Media;
 using System.Text.Json;
 
 namespace TubeForge.Tests.Downloads;
@@ -152,24 +153,45 @@ public static class DownloadQueueStoreTests
     }
 
     [Test]
-    public static async Task PersistsMp3OutputProfileAcrossRestart()
+    public static async Task PersistsEveryConvertedOutputProfileAcrossRestart()
     {
         using var directory = new TestDirectory();
         var path = Path.Combine(directory.Path, "queue.json");
         var store = new DownloadQueueStore(path);
-        var item = Item(Guid.NewGuid(), DownloadQueueStatus.Queued, DateTimeOffset.UtcNow) with
+        var profiles = new[]
+        {
+            OutputProfile.Mp3(320),
+            OutputProfile.Aac(256),
+            OutputProfile.Opus(160),
+            OutputProfile.Wav,
+            OutputProfile.Flac,
+            OutputProfile.H264AacMp4,
+            OutputProfile.H265AacMp4,
+            OutputProfile.Vp9OpusWebM
+        };
+        var items = profiles.Select(profile => Item(
+                Guid.NewGuid(),
+                DownloadQueueStatus.Queued,
+                DateTimeOffset.UtcNow) with
         {
             FormatId = 140,
-            SourceIdentity = "Fixture123_:140@mp3-320",
-            DestinationPath = Path.Combine(Path.GetTempPath(), "TubeForge.Tests", "fixture.mp3")
-        };
+            SourceIdentity = $"Fixture123_:140@{profile.Identity}",
+            DestinationPath = Path.Combine(
+                    Path.GetTempPath(),
+                    "TubeForge.Tests",
+                    "fixture-" + profile.Identity + profile.Extension)
+        }).ToArray();
 
-        var save = await store.SaveAsync(new DownloadQueueSnapshot { Items = [item] });
+        var save = await store.SaveAsync(new DownloadQueueSnapshot { Items = items });
         Assert.True(save.IsSuccess, save.Error?.Message);
 
         var load = await new DownloadQueueStore(path).LoadAsync();
         Assert.True(load.IsSuccess, load.Error?.Message);
-        Assert.Equal("Fixture123_:140@mp3-320", load.Value.Items[0].SourceIdentity);
+        Assert.Equal(profiles.Length, load.Value.Items.Count);
+        for (var index = 0; index < profiles.Length; index++)
+        {
+            Assert.Equal($"Fixture123_:140@{profiles[index].Identity}", load.Value.Items[index].SourceIdentity);
+        }
     }
 
     [Test]
@@ -194,6 +216,127 @@ public static class DownloadQueueStoreTests
         Assert.True(load.IsSuccess, load.Error?.Message);
         Assert.Equal(1_536L, load.Value.Items[0].BytesReceived);
         Assert.Equal(1_536L, load.Value.Items[0].ExpectedLength);
+    }
+
+    [Test]
+    public static async Task PersistsMultiLanguageCaptionEmbedAndAcceptsLargerCompletedMedia()
+    {
+        using var directory = new TestDirectory();
+        var store = new DownloadQueueStore(Path.Combine(directory.Path, "queue.json"));
+        var now = DateTimeOffset.UtcNow;
+        var captionIdentity = string.Join(',', Enumerable.Range(0, CaptionEmbedSelectionSet.MaximumTracks)
+            .Select(index => $"m.x{index}{new string('a', 33)}"));
+        var sourceIdentity = $"Fixture123_:18~{captionIdentity}";
+        Assert.True(sourceIdentity.Length > 256);
+        Assert.True(sourceIdentity.Length <= DownloadSourceIdentity.MaximumIdentityLength);
+        var completed = Item(Guid.NewGuid(), DownloadQueueStatus.Completed, now) with
+        {
+            FormatId = 18,
+            SourceIdentity = sourceIdentity,
+            ExpectedLength = 1_024,
+            BytesReceived = 1_536
+        };
+
+        var save = await store.SaveAsync(new DownloadQueueSnapshot { Items = [completed] });
+
+        Assert.True(save.IsSuccess, save.Error?.Message);
+        var load = await new DownloadQueueStore(store.StoragePath).LoadAsync();
+        Assert.True(load.IsSuccess, load.Error?.Message);
+        Assert.Equal(sourceIdentity, load.Value.Items[0].SourceIdentity);
+        Assert.Equal(1_536L, load.Value.Items[0].ExpectedLength);
+    }
+
+    [Test]
+    public static async Task PersistsChapterEmbedAndAcceptsLargerCompletedMedia()
+    {
+        using var directory = new TestDirectory();
+        var store = new DownloadQueueStore(Path.Combine(directory.Path, "queue.json"));
+        var now = DateTimeOffset.UtcNow;
+        var completed = Item(Guid.NewGuid(), DownloadQueueStatus.Completed, now) with
+        {
+            FormatId = 18,
+            SourceIdentity = "Fixture123_:18^chapters",
+            ExpectedLength = 1_024,
+            BytesReceived = 1_536
+        };
+
+        var save = await store.SaveAsync(new DownloadQueueSnapshot { Items = [completed] });
+
+        Assert.True(save.IsSuccess, save.Error?.Message);
+        var load = await new DownloadQueueStore(store.StoragePath).LoadAsync();
+        Assert.True(load.IsSuccess, load.Error?.Message);
+        Assert.Equal("Fixture123_:18^chapters", load.Value.Items[0].SourceIdentity);
+        Assert.Equal(1_536L, load.Value.Items[0].ExpectedLength);
+    }
+
+    [Test]
+    public static async Task PersistsTrimRangeAcrossQueueRestart()
+    {
+        using var directory = new TestDirectory();
+        var store = new DownloadQueueStore(Path.Combine(directory.Path, "queue.json"));
+        var queued = Item(Guid.NewGuid(), DownloadQueueStatus.Queued, DateTimeOffset.UtcNow) with
+        {
+            FormatId = 18,
+            SourceIdentity = "Fixture123_:18%5000-60000"
+        };
+
+        var save = await store.SaveAsync(new DownloadQueueSnapshot { Items = [queued] });
+
+        Assert.True(save.IsSuccess, save.Error?.Message);
+        var load = await new DownloadQueueStore(store.StoragePath).LoadAsync();
+        Assert.True(load.IsSuccess, load.Error?.Message);
+        Assert.Equal("Fixture123_:18%5000-60000", load.Value.Items[0].SourceIdentity);
+    }
+
+    [Test]
+    public static async Task PersistsSponsorBlockSelectionWithoutSegmentPayloads()
+    {
+        using var directory = new TestDirectory();
+        var store = new DownloadQueueStore(Path.Combine(directory.Path, "queue.json"));
+        var identity = "Fixture123_:18&chapters.sponsor,intro";
+        var queued = Item(Guid.NewGuid(), DownloadQueueStatus.Completed, DateTimeOffset.UtcNow) with
+        {
+            FormatId = 18,
+            SourceIdentity = identity,
+            ExpectedLength = 1_024,
+            BytesReceived = 1_536
+        };
+
+        var save = await store.SaveAsync(new DownloadQueueSnapshot { Items = [queued] });
+
+        Assert.True(save.IsSuccess, save.Error?.Message);
+        var load = await new DownloadQueueStore(store.StoragePath).LoadAsync();
+        Assert.True(load.IsSuccess, load.Error?.Message);
+        Assert.Equal(identity, load.Value.Items[0].SourceIdentity);
+        Assert.Equal(1_536L, load.Value.Items[0].ExpectedLength);
+        var json = await File.ReadAllTextAsync(store.StoragePath);
+        Assert.False(json.Contains("segment", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Test]
+    public static async Task PersistsLiveCaptureLimitsWithoutManifestUrls()
+    {
+        using var directory = new TestDirectory();
+        var store = new DownloadQueueStore(Path.Combine(directory.Path, "queue.json"));
+        var identity = "Fixture123_:1000001!3600-4294967296-21600";
+        var completed = Item(Guid.NewGuid(), DownloadQueueStatus.Completed, DateTimeOffset.UtcNow) with
+        {
+            FormatId = 1_000_001,
+            SourceIdentity = identity,
+            ExpectedLength = null,
+            BytesReceived = 8_192
+        };
+
+        var save = await store.SaveAsync(new DownloadQueueSnapshot { Items = [completed] });
+
+        Assert.True(save.IsSuccess, save.Error?.Message);
+        var load = await new DownloadQueueStore(store.StoragePath).LoadAsync();
+        Assert.True(load.IsSuccess, load.Error?.Message);
+        Assert.Equal(identity, load.Value.Items[0].SourceIdentity);
+        Assert.Equal(8_192L, load.Value.Items[0].ExpectedLength);
+        var json = await File.ReadAllTextAsync(store.StoragePath);
+        Assert.False(json.Contains("http", StringComparison.OrdinalIgnoreCase));
+        Assert.False(json.Contains("manifest", StringComparison.OrdinalIgnoreCase));
     }
 
     [Test]

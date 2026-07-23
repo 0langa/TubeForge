@@ -16,16 +16,18 @@ public static class FileNameTemplateTests
             Quality = "2160p",
             Container = "mp4",
             Index = 7,
+            ChapterIndex = 2,
+            ChapterTitle = "Main section",
             IndexWidth = 3
         };
 
         var result = FileNameTemplate.Render(
-            "{index} - {title} [{quality} {container}] by {channel} {{id {videoId}}}",
+            "{index} - {title} [{quality} {container}] by {channel} {{id {videoId}}} - {chapterIndex} {chapterTitle}",
             context);
 
         Assert.True(result.IsSuccess, result.Error?.TechnicalDetail);
         Assert.Equal(
-            "007 - Fixture title [2160p mp4] by Fixture channel {id Video000001}",
+            "007 - Fixture title [2160p mp4] by Fixture channel {id Video000001} - 002 Main section",
             result.Value);
     }
 

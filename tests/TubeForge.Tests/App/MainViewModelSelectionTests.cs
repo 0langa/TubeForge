@@ -3,6 +3,7 @@ using TubeForge.App.ViewModels;
 using TubeForge.Core.Media;
 using TubeForge.Core.Results;
 using TubeForge.Core.YouTube;
+using TubeForge.Downloads.Archives;
 using TubeForge.Tests.Framework;
 
 namespace TubeForge.Tests.App;
@@ -81,10 +82,351 @@ public static class MainViewModelSelectionTests
             ?? throw new MissingMethodException(typeof(MainViewModel).FullName, "RenderFileName");
 
         var result = (Result<string>)render.Invoke(viewModel,
-            [metadata, new FormatItemViewModel(source), null, 2, AudioOutputProfile.Mp3(192)])!;
+            [metadata, new FormatItemViewModel(source), null, 2, OutputProfile.Mp3(192)])!;
 
         Assert.True(result.IsSuccess);
         Assert.Equal("192kbps mp3", result.Value);
+    }
+
+    [Test]
+    public static void ConvertedAudioFilenamesUseSelectedProfileExtensionAndQuality()
+    {
+        using var viewModel = new MainViewModel
+        {
+            FileNameTemplateText = "{quality} {container}"
+        };
+        Assert.True(YouTubeVideoId.TryCreate("Fixture123_", out var videoId));
+        var metadata = new VideoMetadata { Id = videoId, Title = "Fixture", Formats = [] };
+        var source = new FormatItemViewModel(Audio(140, MediaContainer.WebM, AudioCodec.Opus, 143_000, 48_000));
+        var render = typeof(MainViewModel).GetMethod(
+            "RenderFileName",
+            BindingFlags.Instance | BindingFlags.NonPublic)
+            ?? throw new MissingMethodException(typeof(MainViewModel).FullName, "RenderFileName");
+
+        foreach (var testCase in new[]
+                 {
+                     (OutputProfile.Aac(256), "256kbps m4a"),
+                     (OutputProfile.Opus(160), "160kbps ogg"),
+                     (OutputProfile.Wav, "lossless wav"),
+                     (OutputProfile.Flac, "lossless flac")
+                 })
+        {
+            var result = (Result<string>)render.Invoke(
+                viewModel,
+                [metadata, source, null, 2, testCase.Item1])!;
+            Assert.True(result.IsSuccess);
+            Assert.Equal(testCase.Item2, result.Value);
+        }
+    }
+
+    [Test]
+    public static void VideoPresetSelectionUsesPersistableProfileAndTruthfulFilename()
+    {
+        using var viewModel = new MainViewModel
+        {
+            FileNameTemplateText = "{quality} {container}"
+        };
+        Assert.True(YouTubeVideoId.TryCreate("Fixture123_", out var videoId));
+        var metadata = new VideoMetadata { Id = videoId, Title = "Fixture", Formats = [] };
+        var selection = new FormatItemViewModel(Progressive(18, 1080, 30));
+        var profileFor = typeof(MainViewModel).GetMethod(
+            "OutputProfileFor",
+            BindingFlags.Instance | BindingFlags.NonPublic)
+            ?? throw new MissingMethodException(typeof(MainViewModel).FullName, "OutputProfileFor");
+        var render = typeof(MainViewModel).GetMethod(
+            "RenderFileName",
+            BindingFlags.Instance | BindingFlags.NonPublic)
+            ?? throw new MissingMethodException(typeof(MainViewModel).FullName, "RenderFileName");
+
+        foreach (var option in viewModel.VideoProcessingOptions)
+        {
+            viewModel.SelectedVideoProcessing = option;
+            var selected = (OutputProfile)profileFor.Invoke(viewModel, [selection])!;
+            Assert.Equal(option.Value.ForVideoHeight(1080), selected);
+            Assert.True(OutputProfile.TryParseIdentity(selected.Identity, out var parsed));
+            Assert.Equal(selected, parsed);
+        }
+
+        var filename = (Result<string>)render.Invoke(
+            viewModel,
+            [metadata, selection, null, 2, OutputProfile.H264AacMp4])!;
+        Assert.True(filename.IsSuccess);
+        Assert.Equal("1080p mp4", filename.Value);
+    }
+
+    [Test]
+    public static void QuickPresetsApplyTruthfulStateAndManualChangesBecomeCustom()
+    {
+        using var viewModel = new MainViewModel();
+        SetFormats(viewModel, BuildCompleteCatalog());
+
+        Assert.Equal(5, viewModel.DownloadPresets.Count);
+        foreach (var preset in viewModel.DownloadPresets.Where(option =>
+                     option.Value != DownloadPresetKind.Custom))
+        {
+            viewModel.SelectedDownloadPreset = preset;
+
+            Assert.Equal(preset, viewModel.SelectedDownloadPreset);
+            Assert.True(viewModel.SelectedFormat is not null);
+            switch (preset.Value)
+            {
+                case DownloadPresetKind.BestOriginal:
+                    Assert.Equal(DownloadMode.AudioVideo, viewModel.SelectedDownloadMode.Value);
+                    Assert.Equal(OutputProfileKind.Native, viewModel.SelectedVideoProcessing.Value.Kind);
+                    break;
+                case DownloadPresetKind.WindowsCompatibleMp4:
+                    Assert.Equal(DownloadMode.AudioVideo, viewModel.SelectedDownloadMode.Value);
+                    Assert.Equal(OutputProfileKind.H264AacMp4, viewModel.SelectedVideoProcessing.Value.Kind);
+                    break;
+                case DownloadPresetKind.SmallFile:
+                    Assert.Equal(DownloadMode.AudioVideo, viewModel.SelectedDownloadMode.Value);
+                    Assert.Equal(OutputProfileKind.H265AacMp4, viewModel.SelectedVideoProcessing.Value.Kind);
+                    Assert.Equal(720, viewModel.SelectedResolution?.Value);
+                    break;
+                case DownloadPresetKind.Mp3_320:
+                    Assert.Equal(DownloadMode.AudioOnly, viewModel.SelectedDownloadMode.Value);
+                    Assert.Equal(OutputProfile.Mp3(320), viewModel.SelectedAudioProcessing.Value);
+                    break;
+            }
+        }
+
+        viewModel.SelectedDownloadPreset = viewModel.DownloadPresets.First(option =>
+            option.Value == DownloadPresetKind.WindowsCompatibleMp4);
+        viewModel.SelectedVideoProcessing = viewModel.VideoProcessingOptions.First(option =>
+            option.Value.Kind == OutputProfileKind.Native);
+        Assert.Equal(DownloadPresetKind.Custom, viewModel.SelectedDownloadPreset.Value);
+
+        viewModel.ShowAdvancedDownloadOptions = false;
+        viewModel.SelectedDownloadPreset = viewModel.DownloadPresets.First(option =>
+            option.Value == DownloadPresetKind.Custom);
+        Assert.True(viewModel.ShowAdvancedDownloadOptions);
+    }
+
+    [Test]
+    public static void ArchivePresetsChoosePersistableOutputsAndBoundSmallVideo()
+    {
+        var select = typeof(MainViewModel).GetMethod(
+            "CollectionPresetSelection",
+            BindingFlags.Static | BindingFlags.NonPublic)
+            ?? throw new MissingMethodException(typeof(MainViewModel).FullName, "CollectionPresetSelection");
+        var formats = BuildCompleteCatalog();
+
+        foreach (var testCase in new[]
+                 {
+                     (ArchiveOutputPreset.BestOriginal, OutputProfileKind.Native),
+                     (ArchiveOutputPreset.WindowsCompatibleMp4, OutputProfileKind.H264AacMp4),
+                     (ArchiveOutputPreset.SmallFile, OutputProfileKind.H265AacMp4),
+                     (ArchiveOutputPreset.Mp3_320, OutputProfileKind.Mp3)
+                 })
+        {
+            var value = ((FormatItemViewModel Selection, OutputProfile Output))select.Invoke(
+                null,
+                [formats, testCase.Item1])!;
+            Assert.Equal(testCase.Item2, value.Output.Kind);
+            Assert.True(value.Output.ForVideoHeight(value.Selection.Format.Height).IsValid);
+            if (testCase.Item1 == ArchiveOutputPreset.SmallFile)
+            {
+                Assert.True(value.Selection.Format.Height is > 0 and <= 720);
+            }
+            if (testCase.Item1 == ArchiveOutputPreset.Mp3_320)
+            {
+                Assert.Equal(StreamKind.AudioOnly, value.Selection.Format.Kind);
+                Assert.Equal(320, value.Output.BitrateKbps);
+            }
+        }
+    }
+
+    [Test]
+    public static void SoftSubtitleSelectionRequiresSupportedVideoOutputAndResetsForAudioOnly()
+    {
+        using var viewModel = new MainViewModel();
+        SetFormats(viewModel, BuildCompleteCatalog());
+        viewModel.SelectedCaptionTrack = new CaptionTrackOption(new CaptionTrack
+        {
+            Url = new Uri("https://www.youtube.com/api/timedtext?v=Fixture123_&lang=en"),
+            LanguageCode = "en",
+            Name = "English"
+        });
+
+        Assert.True(viewModel.CanEmbedSelectedCaption);
+        viewModel.EmbedSelectedCaption = true;
+        Assert.True(viewModel.EmbedSelectedCaption);
+
+        viewModel.SelectedDownloadMode = viewModel.DownloadModes.First(option =>
+            option.Value == DownloadMode.AudioOnly);
+
+        Assert.False(viewModel.CanEmbedSelectedCaption);
+        Assert.False(viewModel.EmbedSelectedCaption);
+    }
+
+    [Test]
+    public static void BuildsOrderedMultiLanguageCaptionSelectionFromCheckedTracks()
+    {
+        using var viewModel = new MainViewModel();
+        var options = new[]
+        {
+            new CaptionTrackOption(new CaptionTrack
+            {
+                Url = new Uri("https://www.youtube.com/api/timedtext?v=Fixture123_&lang=en"),
+                LanguageCode = "en",
+                Name = "English"
+            }),
+            new CaptionTrackOption(new CaptionTrack
+            {
+                Url = new Uri("https://www.youtube.com/api/timedtext?v=Fixture123_&lang=de"),
+                LanguageCode = "de",
+                Name = "German",
+                IsAutoGenerated = true
+            })
+        };
+        options[0].IsSelectedForEmbedding = true;
+        options[1].IsSelectedForEmbedding = true;
+        var property = typeof(MainViewModel).GetProperty(nameof(MainViewModel.CaptionTracks))
+            ?? throw new MissingMemberException(typeof(MainViewModel).FullName, nameof(MainViewModel.CaptionTracks));
+        property.GetSetMethod(nonPublic: true)!.Invoke(viewModel, [options]);
+        var method = typeof(MainViewModel).GetMethod(
+            "SelectedCaptionEmbedSelections",
+            BindingFlags.Instance | BindingFlags.NonPublic)
+            ?? throw new MissingMethodException(typeof(MainViewModel).FullName, "SelectedCaptionEmbedSelections");
+
+        var selected = (CaptionEmbedSelectionSet?)method.Invoke(viewModel, null);
+
+        Assert.True(selected is not null);
+        Assert.Equal("m.en,a.de", selected!.Value.Identity);
+    }
+
+    [Test]
+    public static void ChapterEmbeddingRequiresTimedChaptersAndResetsForAudioOnly()
+    {
+        using var viewModel = new MainViewModel();
+        SetFormats(viewModel, BuildCompleteCatalog());
+        Assert.True(YouTubeVideoId.TryCreate("Fixture123_", out var videoId));
+        SetMetadata(viewModel, new VideoMetadata
+        {
+            Id = videoId,
+            Title = "Fixture",
+            Duration = TimeSpan.FromMinutes(2),
+            Formats = BuildCompleteCatalog(),
+            Chapters =
+            [
+                new VideoChapter { Title = "Intro", StartTime = TimeSpan.Zero },
+                new VideoChapter { Title = "Main", StartTime = TimeSpan.FromMinutes(1) }
+            ]
+        });
+
+        Assert.True(viewModel.HasChapters);
+        Assert.True(viewModel.CanEmbedChapters);
+        Assert.True(viewModel.CanSplitChapters);
+        viewModel.EmbedChapters = true;
+        viewModel.SplitChapters = true;
+        Assert.True(viewModel.EmbedChapters);
+        Assert.True(viewModel.SplitChapters);
+
+        viewModel.SelectedDownloadMode = viewModel.DownloadModes.First(option =>
+            option.Value == DownloadMode.VideoOnly);
+        Assert.True(viewModel.CanEmbedChapters);
+        Assert.True(viewModel.CanSplitChapters);
+        Assert.True(viewModel.EmbedChapters);
+        Assert.True(viewModel.SplitChapters);
+
+        viewModel.SelectedDownloadMode = viewModel.DownloadModes.First(option =>
+            option.Value == DownloadMode.AudioOnly);
+
+        Assert.False(viewModel.CanEmbedChapters);
+        Assert.False(viewModel.CanSplitChapters);
+        Assert.False(viewModel.EmbedChapters);
+        Assert.False(viewModel.SplitChapters);
+    }
+
+    [Test]
+    public static void TrimControlsValidateAgainstAnalyzedDuration()
+    {
+        using var viewModel = new MainViewModel();
+        SetFormats(viewModel, BuildCompleteCatalog());
+        Assert.True(YouTubeVideoId.TryCreate("Fixture123_", out var videoId));
+        SetMetadata(viewModel, new VideoMetadata
+        {
+            Id = videoId,
+            Title = "Fixture",
+            Duration = TimeSpan.FromMinutes(2),
+            Formats = BuildCompleteCatalog()
+        });
+
+        Assert.True(viewModel.CanTrim);
+        viewModel.EnableTrim = true;
+        viewModel.TrimStartText = "00:00:05.500";
+        viewModel.TrimEndText = "00:01:00";
+        var valid = InvokeSelectedTrim(viewModel);
+        Assert.True(valid.Success);
+        Assert.Equal(new MediaTrimRange(
+            TimeSpan.FromSeconds(5.5),
+            TimeSpan.FromMinutes(1)), valid.Range);
+
+        viewModel.TrimEndText = "00:03:00";
+        var invalid = InvokeSelectedTrim(viewModel);
+        Assert.False(invalid.Success);
+        Assert.Equal("Timeline.InvalidTrim", invalid.Error?.Code);
+    }
+
+    [Test]
+    public static void SponsorBlockRemovalRequiresExplicitTranscodeProfile()
+    {
+        using var viewModel = new MainViewModel();
+        SetFormats(viewModel, BuildCompleteCatalog());
+        Assert.True(YouTubeVideoId.TryCreate("Fixture123_", out var videoId));
+        SetMetadata(viewModel, new VideoMetadata
+        {
+            Id = videoId,
+            Title = "Fixture",
+            Duration = TimeSpan.FromMinutes(2),
+            Formats = BuildCompleteCatalog()
+        });
+        viewModel.EnableSponsorBlock = true;
+        viewModel.SelectedSponsorBlockMode = viewModel.SponsorBlockModeOptions.First(option =>
+            option.Value == SponsorBlockMode.Remove);
+
+        var native = InvokeSponsorBlockSelection(viewModel, OutputProfile.Native);
+        Assert.False(native.Success);
+        Assert.Equal("SponsorBlock.TranscodeRequired", native.Error?.Code);
+
+        var converted = InvokeSponsorBlockSelection(viewModel, OutputProfile.H264AacMp4);
+        Assert.True(converted.Success);
+        Assert.Equal(SponsorBlockMode.Remove, converted.Selection?.Mode);
+        Assert.Equal(SponsorBlockCategories.Sponsor, converted.Selection?.Categories);
+    }
+
+    [Test]
+    public static void LiveCaptureUsesBoundedOriginalMkvSettings()
+    {
+        using var viewModel = new MainViewModel();
+        var live = Progressive(1_000_001, 1080, 30) with
+        {
+            Url = new Uri("https://manifest.googlevideo.com/live/master.m3u8"),
+            Container = MediaContainer.Mkv,
+            IsLiveHls = true,
+            IsLiveManifestPending = true
+        };
+        SetFormats(viewModel, [live]);
+
+        Assert.True(viewModel.IsLiveCapture);
+        Assert.True(viewModel.IsUpcomingLiveCapture);
+        viewModel.SelectedVideoProcessing = viewModel.VideoProcessingOptions.First(option =>
+            option.Value.Kind == OutputProfileKind.H264AacMp4);
+        Assert.Equal(OutputProfile.Native, viewModel.SelectedVideoProcessing.Value);
+        viewModel.SelectedDownloadPreset = viewModel.DownloadPresets.First(option =>
+            option.Value == DownloadPresetKind.WindowsCompatibleMp4);
+        Assert.Equal(DownloadPresetKind.BestOriginal, viewModel.SelectedDownloadPreset.Value);
+
+        var selected = InvokeLiveCapture(viewModel, viewModel.SelectedFormat!, OutputProfile.Native);
+        Assert.True(selected.Success, selected.Error?.Message);
+        Assert.Equal(TimeSpan.FromMinutes(60), selected.Options?.MaximumDuration);
+        Assert.Equal(4L * 1024 * 1024 * 1024, selected.Options?.MaximumBytes);
+        Assert.Equal(TimeSpan.FromMinutes(360), selected.Options?.MaximumWaitForStart);
+
+        viewModel.LiveMaximumWaitMinutesText = "0";
+        var invalid = InvokeLiveCapture(viewModel, viewModel.SelectedFormat!, OutputProfile.Native);
+        Assert.False(invalid.Success);
+        Assert.Equal("Hls.InvalidLimits", invalid.Error?.Code);
     }
 
     private static void ExerciseAudioOnly(MainViewModel viewModel, ref int terminalCombinations)
@@ -153,8 +495,12 @@ public static class MainViewModelSelectionTests
             foreach (var codec in viewModel.AudioCodecOptions.ToArray())
             {
                 viewModel.SelectedAudioCodec = codec;
-                AssertTerminalOutputs(viewModel, DownloadMode.AudioVideo);
-                terminalCombinations++;
+                foreach (var processing in viewModel.VideoProcessingOptions)
+                {
+                    viewModel.SelectedVideoProcessing = processing;
+                    AssertTerminalOutputs(viewModel, DownloadMode.AudioVideo);
+                    terminalCombinations++;
+                }
             }
         }
     }
@@ -200,6 +546,67 @@ public static class MainViewModelSelectionTests
         refresh.Invoke(viewModel, null);
         viewModel.SelectedDownloadMode = viewModel.DownloadModes[1];
         viewModel.SelectedDownloadMode = viewModel.DownloadModes[0];
+    }
+
+    private static void SetMetadata(MainViewModel viewModel, VideoMetadata metadata)
+    {
+        var field = typeof(MainViewModel).GetField("_metadata", BindingFlags.Instance | BindingFlags.NonPublic)
+            ?? throw new MissingFieldException(typeof(MainViewModel).FullName, "_metadata");
+        field.SetValue(viewModel, metadata);
+    }
+
+    private static (bool Success, MediaTrimRange? Range, TubeForge.Core.Errors.TubeForgeError? Error)
+        InvokeSelectedTrim(MainViewModel viewModel)
+    {
+        var method = typeof(MainViewModel).GetMethod(
+            "TryGetSelectedTrim",
+            BindingFlags.Instance | BindingFlags.NonPublic)
+            ?? throw new MissingMethodException(typeof(MainViewModel).FullName, "TryGetSelectedTrim");
+        object?[] arguments = [null, null];
+        var success = (bool)method.Invoke(viewModel, arguments)!;
+        return (
+            success,
+            (MediaTrimRange?)arguments[0],
+            (TubeForge.Core.Errors.TubeForgeError?)arguments[1]);
+    }
+
+    private static (bool Success, LiveCaptureOptions? Options, TubeForge.Core.Errors.TubeForgeError? Error)
+        InvokeLiveCapture(
+            MainViewModel viewModel,
+            FormatItemViewModel selection,
+            OutputProfile output)
+    {
+        var method = typeof(MainViewModel).GetMethod(
+            "TryGetLiveCaptureOptions",
+            BindingFlags.Instance | BindingFlags.NonPublic)
+            ?? throw new MissingMethodException(typeof(MainViewModel).FullName, "TryGetLiveCaptureOptions");
+        object?[] arguments = [selection, output, null, false, false, null, null];
+        var success = (bool)method.Invoke(viewModel, arguments)!;
+        return (
+            success,
+            (LiveCaptureOptions?)arguments[5],
+            (TubeForge.Core.Errors.TubeForgeError?)arguments[6]);
+    }
+
+    private static (
+        bool Success,
+        SponsorBlockSelection? Selection,
+        TubeForge.Core.Errors.TubeForgeError? Error) InvokeSponsorBlockSelection(
+            MainViewModel viewModel,
+            OutputProfile output)
+    {
+        var method = typeof(MainViewModel).GetMethod(
+            "TryGetSponsorBlockSelection",
+            BindingFlags.Instance | BindingFlags.NonPublic)
+            ?? throw new MissingMethodException(
+                typeof(MainViewModel).FullName,
+                "TryGetSponsorBlockSelection");
+        object?[] arguments = [output, null, null];
+        var success = (bool)method.Invoke(viewModel, arguments)!;
+        return (
+            success,
+            (SponsorBlockSelection?)arguments[1],
+            (TubeForge.Core.Errors.TubeForgeError?)arguments[2]);
     }
 
     private static IReadOnlyList<StreamFormat> BuildCompleteCatalog()

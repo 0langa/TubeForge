@@ -47,13 +47,14 @@ gh attestation verify ".\$name" -R 0langa/TubeForge
 
 Portable users should verify and extract the new archive to a sibling directory. Keep the prior portable directory until the new version has completed an analyze/download smoke test.
 
-Portable rollback uses the previous version directory. Installer rollback requires reinstalling a previously verified setup asset. Settings schema v1/v2 files migrate in memory to schema v3 and are written as v3 on the next save; queue and Library history remain at their existing schemas. Downgrading after TubeForge writes schema v3 settings is unsupported, so keep the newer installer available.
+Portable rollback uses the previous version directory. Installer rollback requires reinstalling a previously verified setup asset. Settings schema v1-v4 files migrate in memory to schema v5 and are written as v5 on the next save; queue, Library history, and archive profiles retain their own schemas. Downgrading after TubeForge writes schema v5 settings is unsupported, so keep the newer installer available.
 
 ## Local data and retention
 
 TubeForge stores application state in `%LOCALAPPDATA%\TubeForge`:
 
-- `settings.json`: download directory, filename template, concurrency, accelerated-transfer preference, Library sort preference, responsible-use acknowledgement;
+- `settings.json`: download directory, filename template, default preset, simple/advanced disclosure, concurrency, accelerated-transfer preference, update preference, Library sort preference, responsible-use acknowledgement;
+- `archives.json`: user-created playlist/channel archive sources, local destination/template/output preferences, and bounded checked video identifiers; no signed media URLs or credentials;
 - `queue.json`: video IDs, display titles, format identities, destination paths, byte counts, attempt counts, timestamps, and failure codes;
 - `history.json`: completed video IDs, display titles, format identities, destination paths, sizes, and timestamps;
 - `.bak` and `.pending` siblings: crash-recovery copies of those stores.

@@ -32,6 +32,10 @@ public sealed record StreamFormat
 
     public string QualityLabel { get; init; } = string.Empty;
 
+    public bool IsLiveHls { get; init; }
+
+    public bool IsLiveManifestPending { get; init; }
+
     public bool HasVideo => Kind is StreamKind.Progressive or StreamKind.VideoOnly;
 
     public bool HasAudio => Kind is StreamKind.Progressive or StreamKind.AudioOnly;

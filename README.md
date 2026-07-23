@@ -2,7 +2,7 @@
 
 # TubeForge
 
-TubeForge is an experimental, ad-free Windows desktop downloader built from scratch for media you are authorized to save from YouTube. It does not use `yt-dlp`, hosted conversion services, or third-party NuGet packages. Releases bundle a pinned LGPL FFmpeg executable for reliable MP4, WebM, and MKV stream-copy finalization plus MP3 audio conversion.
+TubeForge is an experimental, ad-free Windows desktop downloader built from scratch for media you are authorized to save from YouTube. It does not use `yt-dlp`, hosted conversion services, or third-party NuGet packages. Releases bundle a pinned LGPL FFmpeg executable for local stream-copy finalization and optional media conversion.
 
 > [!IMPORTANT]
 > You are responsible for complying with YouTube's terms, copyright, privacy, and local law. Download only content you own or have permission to save. TubeForge is not intended to bypass DRM, payment, membership, or other access controls.
@@ -10,6 +10,8 @@ TubeForge is an experimental, ad-free Windows desktop downloader built from scra
 ## Status
 
 TubeForge v1.2.5 is the current public stable release.
+
+Current `main` also contains unreleased v2 work. Public v1.2.5 behavior remains documented in release notes and v1 support policy.
 
 Working now:
 
@@ -19,14 +21,22 @@ Working now:
 - type-first stream selection with resolution, container, codec, FPS/HDR, bitrate, and exact-stream filters;
 - highest-quality video + audio selection with separate resumable track downloads and FFmpeg stream-copy MP4, WebM, or MKV finalization;
 - automatic validated multi-worker transfers for large media, with bounded resume state and safe sequential fallback;
-- native M4A/WebM audio saves plus bundled-FFmpeg MP3 conversion at 128, 192, 256, or 320 kbps;
-- caption-track metadata plus manual/auto language selection and atomic SRT/WebVTT sidecar saves;
+- native M4A/WebM audio saves plus bundled-FFmpeg MP3, AAC/M4A, Opus/OGG, WAV, and FLAC conversion in the current development branch;
+- optional resolution-aware H.264/AAC MP4, H.265/AAC MP4, and VP9/Opus WebM conversion presets in the current development branch, with original-quality stream copy remaining default;
+- preset-first download setup for Best original, Windows MP4, Small file, MP3 320, and fully custom selection in the current development branch;
+- simple-by-default preset selection with persisted first-run folder/preset/update choices, optional advanced format disclosure, consistent vector navigation, and direct recovery links for common failures;
+- caption-track metadata plus manual/auto language selection, atomic SRT/WebVTT sidecar saves, and opt-in embedding of up to eight ordered soft-subtitle tracks for single videos and collection/archive queue items in MP4/MKV/WebM;
+- opt-in chapter embedding and lossless chapter splitting for single-video MP4/MKV/WebM outputs, with atomic publication, sanitized numbered names, and queue recovery validation;
+- bounded start/end trim controls with keyframe-aligned stream copy for original outputs, precise trim during selected transcodes, and synchronized caption/chapter rebasing;
+- disabled-by-default SponsorBlock integration using a privacy-preserving video-ID hash prefix, selectable categories, local candidate matching, and either chapter markers or explicit transcode removal;
 - on-demand validated thumbnail saves and stable JSON metadata sidecars with chapters but without signed stream URLs;
 - bounded playlist/channel enumeration with per-video selection, source ordering, indexed filenames, and batch queue preparation;
+- persistent playlist/channel archive profiles with destination/template/output/caption/chapter preferences, bounded new-item checkpoints, and one-click selection of items missing from Queue and Library;
 - shared per-provider request limits and bounded `Retry-After` backoff that stops persistent rate-limited bulk preparation;
+- unified system/manual/off proxy settings for metadata, collections, captions, thumbnails, media, and updates, with bounded metadata timeout, media retries, and per-host concurrency; proxy credentials are rejected and never stored;
 - customizable token-based filenames plus a durable local Library used for exact-output and destination duplicate detection;
-- searchable/sortable Library history with one-click cleanup for records whose files were moved or deleted;
-- Short and completed-live-replay classification, sidecar metadata, and normal highest-quality adaptive downloads; active/upcoming capture is explicitly unsupported;
+- searchable/sortable Library history with bounded moved-file rescans, portable schema-versioned JSON export/import, duplicate-safe merging, and one-click cleanup for missing records;
+- Short and completed-live-replay classification, plus bounded public active/upcoming HLS capture with record-now/wait modes, duration/size limits, recoverable segment journals, and validated MKV stream-copy finalization in the current development branch;
 - resumable `.part` transfers, bounded container validation, retries, progress, cancellation, and atomic finalization;
 - opt-in segmented transfer for large files with validated parallel ranges, resumable segment state, and automatic direct-transfer fallback;
 - preflight disk-space forecasting with adaptive-mux peak-space accounting and retryable low-space failures;
@@ -40,7 +50,7 @@ Working now:
 - reproducible portable framework-dependent and self-contained Windows x64 packaging with SHA-256 manifests.
 - branded per-user installer, Add/Remove Programs integration, clean uninstall, and opt-in verified updates from the official GitHub release.
 
-Not included: active/upcoming live capture, authenticated/access-controlled media, or video re-encoding.
+Not included: authenticated/access-controlled media, encrypted/DRM HLS, or generic non-YouTube M3U8 capture.
 
 ## Baseline
 
@@ -90,6 +100,24 @@ Run the isolated local [performance budget](docs/PERFORMANCE_BUDGET.md) probe:
 ```powershell
 dotnet build TubeForge.slnx --configuration Release
 dotnet run --project tools/TubeForge.Performance --configuration Release --no-build
+```
+
+Verify bundled-FFmpeg subtitle, chapter metadata, and chapter splitting for MP4, MKV, and WebM using synthetic local media:
+
+```powershell
+.\scripts\Test-ChapterEmbedding.ps1 -Configuration Release
+```
+
+Verify bundled-FFmpeg trim and SponsorBlock segment removal using synthetic local media:
+
+```powershell
+.\scripts\Test-TimelineEditing.ps1 -Configuration Release
+```
+
+Verify synthetic HLS segmentation, concatenation, MKV finalization, and decode using bundled FFmpeg:
+
+```powershell
+.\scripts\Test-HlsCapture.ps1 -Configuration Release
 ```
 
 Run the desktop application:

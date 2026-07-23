@@ -10,12 +10,14 @@ internal sealed class LoopbackHttpResponseServer : IAsyncDisposable
     private readonly CancellationTokenSource _cancellation = new();
     private readonly TcpListener _listener;
     private readonly byte[] _payload;
+    private readonly int _maximumRequests;
     private readonly TaskCompletionSource<string> _request = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly Task _serverTask;
 
-    private LoopbackHttpResponseServer(IPAddress address, byte[] payload)
+    private LoopbackHttpResponseServer(IPAddress address, byte[] payload, int maximumRequests)
     {
         _payload = payload;
+        _maximumRequests = maximumRequests;
         _listener = new TcpListener(address, 0);
         _listener.Start();
         var endpoint = (IPEndPoint)_listener.LocalEndpoint;
@@ -27,7 +29,10 @@ internal sealed class LoopbackHttpResponseServer : IAsyncDisposable
 
     public Task<string> Request => _request.Task;
 
-    public static LoopbackHttpResponseServer Start(IPAddress address, byte[] payload)
+    public static LoopbackHttpResponseServer Start(
+        IPAddress address,
+        byte[] payload,
+        int maximumRequests = 1)
     {
         ArgumentNullException.ThrowIfNull(address);
         ArgumentNullException.ThrowIfNull(payload);
@@ -36,7 +41,12 @@ internal sealed class LoopbackHttpResponseServer : IAsyncDisposable
             throw new ArgumentException("The test server must bind to loopback.", nameof(address));
         }
 
-        return new LoopbackHttpResponseServer(address, payload.ToArray());
+        if (maximumRequests is < 1 or > 32)
+        {
+            throw new ArgumentOutOfRangeException(nameof(maximumRequests));
+        }
+
+        return new LoopbackHttpResponseServer(address, payload.ToArray(), maximumRequests);
     }
 
     public async ValueTask DisposeAsync()
@@ -62,19 +72,22 @@ internal sealed class LoopbackHttpResponseServer : IAsyncDisposable
 
     private async Task RunAsync(CancellationToken cancellationToken)
     {
-        using var client = await _listener.AcceptTcpClientAsync(cancellationToken).ConfigureAwait(false);
-        client.NoDelay = true;
-        await using var stream = client.GetStream();
-        var request = await ReadRequestAsync(stream, cancellationToken).ConfigureAwait(false);
-        _request.TrySetResult(request);
-        var headers = Encoding.ASCII.GetBytes(
-            "HTTP/1.1 200 OK\r\n" +
-            $"Content-Length: {_payload.Length}\r\n" +
-            "Content-Type: application/octet-stream\r\n" +
-            "Connection: close\r\n\r\n");
-        await stream.WriteAsync(headers, cancellationToken).ConfigureAwait(false);
-        await stream.WriteAsync(_payload, cancellationToken).ConfigureAwait(false);
-        await stream.FlushAsync(cancellationToken).ConfigureAwait(false);
+        for (var requestIndex = 0; requestIndex < _maximumRequests; requestIndex++)
+        {
+            using var client = await _listener.AcceptTcpClientAsync(cancellationToken).ConfigureAwait(false);
+            client.NoDelay = true;
+            await using var stream = client.GetStream();
+            var request = await ReadRequestAsync(stream, cancellationToken).ConfigureAwait(false);
+            _request.TrySetResult(request);
+            var headers = Encoding.ASCII.GetBytes(
+                "HTTP/1.1 200 OK\r\n" +
+                $"Content-Length: {_payload.Length}\r\n" +
+                "Content-Type: application/octet-stream\r\n" +
+                "Connection: close\r\n\r\n");
+            await stream.WriteAsync(headers, cancellationToken).ConfigureAwait(false);
+            await stream.WriteAsync(_payload, cancellationToken).ConfigureAwait(false);
+            await stream.FlushAsync(cancellationToken).ConfigureAwait(false);
+        }
     }
 
     private static async Task<string> ReadRequestAsync(

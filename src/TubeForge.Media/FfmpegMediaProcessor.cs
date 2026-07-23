@@ -1,5 +1,7 @@
 using System.ComponentModel;
 using System.Diagnostics;
+using System.Globalization;
+using System.Text;
 using TubeForge.Core.Errors;
 using TubeForge.Core.Media;
 using TubeForge.Core.Results;
@@ -93,13 +95,351 @@ public sealed class FfmpegMediaProcessor
             cancellationToken,
             allowExistingValidatedOutput);
 
+    public Task<Result<MediaProcessReceipt>> RemuxHlsCaptureAsync(
+        string sourcePath,
+        string destinationPath,
+        CancellationToken cancellationToken = default,
+        bool allowExistingValidatedOutput = false) =>
+        ProcessAsync(
+            [sourcePath],
+            destinationPath,
+            MediaContainer.Mkv,
+            arguments =>
+            {
+                AddInput(arguments, sourcePath);
+                arguments.Add("-map");
+                arguments.Add("0:v?");
+                arguments.Add("-map");
+                arguments.Add("0:a?");
+                arguments.Add("-c");
+                arguments.Add("copy");
+                arguments.Add("-map_metadata");
+                arguments.Add("-1");
+                arguments.Add("-f");
+                arguments.Add("matroska");
+            },
+            cancellationToken,
+            allowExistingValidatedOutput);
+
+    public Task<Result<MediaProcessReceipt>> TrimStreamCopyAsync(
+        string mediaPath,
+        string destinationPath,
+        MediaContainer outputContainer,
+        MediaTrimRange trim,
+        CancellationToken cancellationToken = default,
+        bool allowExistingValidatedOutput = false)
+    {
+        if (!trim.IsValid)
+        {
+            return Task.FromResult(Failure(
+                "Media.InvalidTrimRange",
+                "Choose a trim end that is later than its start."));
+        }
+
+        return ProcessAsync(
+            [mediaPath],
+            destinationPath,
+            outputContainer,
+            arguments =>
+            {
+                arguments.Add("-ss");
+                arguments.Add(Seconds(trim.Start));
+                AddInput(arguments, mediaPath);
+                arguments.Add("-t");
+                arguments.Add(Seconds(trim.Duration));
+                arguments.Add("-map");
+                arguments.Add("0:v?");
+                arguments.Add("-map");
+                arguments.Add("0:a?");
+                arguments.Add("-map");
+                arguments.Add("0:s?");
+                arguments.Add("-c");
+                arguments.Add("copy");
+                arguments.Add("-avoid_negative_ts");
+                arguments.Add("make_zero");
+                arguments.Add("-map_metadata");
+                arguments.Add("-1");
+                if (outputContainer == MediaContainer.Mp4)
+                {
+                    arguments.Add("-movflags");
+                    arguments.Add("+faststart");
+                }
+            },
+            cancellationToken,
+            allowExistingValidatedOutput);
+    }
+
+    public Task<Result<MediaProcessReceipt>> EmbedSubtitleAsync(
+        string mediaPath,
+        string subtitlePath,
+        string destinationPath,
+        MediaContainer outputContainer,
+        CaptionEmbedSelection caption,
+        CancellationToken cancellationToken = default,
+        bool allowExistingValidatedOutput = false)
+    {
+        if (!CaptionEmbedSelectionSet.TryCreate([caption], out var captions))
+        {
+            return Task.FromResult(Failure(
+                "Media.InvalidCaptionSelection",
+                "Select a valid caption language before embedding subtitles."));
+        }
+
+        return EmbedSubtitlesAsync(
+            mediaPath,
+            [subtitlePath],
+            destinationPath,
+            outputContainer,
+            captions,
+            cancellationToken,
+            allowExistingValidatedOutput);
+    }
+
+    public Task<Result<MediaProcessReceipt>> EmbedSubtitlesAsync(
+        string mediaPath,
+        IReadOnlyList<string> subtitlePaths,
+        string destinationPath,
+        MediaContainer outputContainer,
+        CaptionEmbedSelectionSet captions,
+        CancellationToken cancellationToken = default,
+        bool allowExistingValidatedOutput = false)
+    {
+        ArgumentNullException.ThrowIfNull(subtitlePaths);
+        var selections = captions.Selections;
+        if (!captions.IsValid || subtitlePaths.Count != selections.Count)
+        {
+            return Task.FromResult(Failure(
+                "Media.InvalidCaptionSelection",
+                "Select matching caption languages and subtitle files before embedding subtitles."));
+        }
+
+        return ProcessAsync(
+            [mediaPath, .. subtitlePaths],
+            destinationPath,
+            outputContainer,
+            arguments =>
+            {
+                AddInput(arguments, mediaPath);
+                foreach (var subtitlePath in subtitlePaths)
+                {
+                    AddInput(arguments, subtitlePath);
+                }
+                arguments.Add("-map");
+                arguments.Add("0:v:0");
+                arguments.Add("-map");
+                arguments.Add("0:a?");
+                for (var index = 0; index < subtitlePaths.Count; index++)
+                {
+                    arguments.Add("-map");
+                    arguments.Add($"{index + 1}:0");
+                }
+                arguments.Add("-c:v");
+                arguments.Add("copy");
+                arguments.Add("-c:a");
+                arguments.Add("copy");
+                arguments.Add("-c:s");
+                arguments.Add(SubtitleCodec(outputContainer));
+                for (var index = 0; index < selections.Count; index++)
+                {
+                    arguments.Add($"-metadata:s:s:{index}");
+                    arguments.Add($"language={selections[index].LanguageCode}");
+                    arguments.Add($"-disposition:s:{index}");
+                    arguments.Add("0");
+                }
+                arguments.Add("-map_metadata");
+                arguments.Add("-1");
+                if (outputContainer == MediaContainer.Mp4)
+                {
+                    arguments.Add("-movflags");
+                    arguments.Add("+faststart");
+                }
+            },
+            cancellationToken,
+            allowExistingValidatedOutput,
+            (path, token) => ValidateSubtitleStreamsAsync(path, selections.Count, token));
+    }
+
+    public Task<Result<MediaProcessReceipt>> EmbedMetadataAsync(
+        string mediaPath,
+        string destinationPath,
+        MediaContainer outputContainer,
+        IReadOnlyList<VideoChapter> chapters,
+        TimeSpan duration,
+        string? subtitlePath = null,
+        CaptionEmbedSelection? caption = null,
+        CancellationToken cancellationToken = default,
+        bool allowExistingValidatedOutput = false)
+    {
+        if ((subtitlePath is null) != (caption is null))
+        {
+            return Task.FromResult(Failure(
+                "Media.InvalidCaptionSelection",
+                "Select a valid caption language and subtitle file before embedding subtitles."));
+        }
+
+        CaptionEmbedSelectionSet? captions = null;
+        IReadOnlyList<string> subtitlePaths = [];
+        if (caption is { } selectedCaption)
+        {
+            if (!CaptionEmbedSelectionSet.TryCreate([selectedCaption], out var created))
+            {
+                return Task.FromResult(Failure(
+                    "Media.InvalidCaptionSelection",
+                    "Select a valid caption language and subtitle file before embedding subtitles."));
+            }
+
+            captions = created;
+            subtitlePaths = subtitlePath is null ? [] : [subtitlePath];
+        }
+
+        return EmbedMetadataTracksAsync(
+            mediaPath,
+            destinationPath,
+            outputContainer,
+            chapters,
+            duration,
+            subtitlePaths,
+            captions,
+            cancellationToken,
+            allowExistingValidatedOutput);
+    }
+
+    public async Task<Result<MediaProcessReceipt>> EmbedMetadataTracksAsync(
+        string mediaPath,
+        string destinationPath,
+        MediaContainer outputContainer,
+        IReadOnlyList<VideoChapter> chapters,
+        TimeSpan duration,
+        IReadOnlyList<string> subtitlePaths,
+        CaptionEmbedSelectionSet? captions,
+        CancellationToken cancellationToken = default,
+        bool allowExistingValidatedOutput = false)
+    {
+        ArgumentNullException.ThrowIfNull(chapters);
+        ArgumentNullException.ThrowIfNull(subtitlePaths);
+        var selections = captions?.Selections ?? [];
+        if ((subtitlePaths.Count == 0) != (captions is null) ||
+            captions is { IsValid: false } || subtitlePaths.Count != selections.Count)
+        {
+            return Failure(
+                "Media.InvalidCaptionSelection",
+                "Select matching caption languages and subtitle files before embedding subtitles.");
+        }
+
+        var chapterMetadata = BuildChapterMetadata(chapters, duration);
+        if (!chapterMetadata.IsSuccess)
+        {
+            return Result<MediaProcessReceipt>.Failure(chapterMetadata.Error!);
+        }
+
+        string? chapterPath = null;
+        try
+        {
+            var destinationFullPath = Path.GetFullPath(destinationPath);
+            var directory = Path.GetDirectoryName(destinationFullPath);
+            if (string.IsNullOrWhiteSpace(directory))
+            {
+                return Failure("Download.InvalidDestination", "The output directory is invalid.");
+            }
+
+            Directory.CreateDirectory(directory);
+            chapterPath = destinationFullPath + "." + Guid.NewGuid().ToString("N") + ".chapters.ffmetadata";
+            await File.WriteAllTextAsync(
+                chapterPath,
+                chapterMetadata.Value,
+                new UTF8Encoding(encoderShouldEmitUTF8Identifier: false),
+                cancellationToken).ConfigureAwait(false);
+
+            var inputs = new List<string>(subtitlePaths.Count + 2) { mediaPath };
+            inputs.AddRange(subtitlePaths);
+            inputs.Add(chapterPath);
+            var chapterInput = subtitlePaths.Count + 1;
+            return await ProcessAsync(
+                inputs,
+                destinationPath,
+                outputContainer,
+                arguments =>
+                {
+                    AddInput(arguments, mediaPath);
+                    foreach (var subtitlePath in subtitlePaths)
+                    {
+                        AddInput(arguments, subtitlePath);
+                    }
+
+                    AddInput(arguments, chapterPath);
+                    arguments.Add("-map");
+                    arguments.Add("0:v:0");
+                    arguments.Add("-map");
+                    arguments.Add("0:a?");
+                    for (var index = 0; index < subtitlePaths.Count; index++)
+                    {
+                        arguments.Add("-map");
+                        arguments.Add($"{index + 1}:0");
+                    }
+
+                    arguments.Add("-c:v");
+                    arguments.Add("copy");
+                    arguments.Add("-c:a");
+                    arguments.Add("copy");
+                    if (captions is not null)
+                    {
+                        arguments.Add("-c:s");
+                        arguments.Add(SubtitleCodec(outputContainer));
+                        for (var index = 0; index < selections.Count; index++)
+                        {
+                            arguments.Add($"-metadata:s:s:{index}");
+                            arguments.Add($"language={selections[index].LanguageCode}");
+                            arguments.Add($"-disposition:s:{index}");
+                            arguments.Add("0");
+                        }
+                    }
+
+                    arguments.Add("-map_metadata");
+                    arguments.Add(chapterInput.ToString(CultureInfo.InvariantCulture));
+                    arguments.Add("-map_chapters");
+                    arguments.Add(chapterInput.ToString(CultureInfo.InvariantCulture));
+                    if (outputContainer == MediaContainer.Mp4)
+                    {
+                        arguments.Add("-movflags");
+                        arguments.Add("+faststart");
+                    }
+                },
+                cancellationToken,
+                allowExistingValidatedOutput,
+                (path, token) => ValidateEmbeddedMetadataAsync(
+                    path,
+                    selections.Count,
+                    chapters.Count,
+                    token)).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            return Failure("Operation.Cancelled", "Media metadata embedding was cancelled.");
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return Failure(
+                "Media.MetadataWriteFailed",
+                "TubeForge could not prepare chapter metadata.",
+                exception.GetType().Name);
+        }
+        finally
+        {
+            if (chapterPath is not null)
+            {
+                TryDelete(chapterPath);
+            }
+        }
+    }
+
     private async Task<Result<MediaProcessReceipt>> ProcessAsync(
         IReadOnlyList<string> inputs,
         string destinationPath,
         MediaContainer outputContainer,
         Action<ICollection<string>> addOperationArguments,
         CancellationToken cancellationToken,
-        bool allowExistingValidatedOutput)
+        bool allowExistingValidatedOutput,
+        Func<string, CancellationToken, Task<TubeForgeError?>>? extraValidation = null)
     {
         if (outputContainer is not (MediaContainer.Mp4 or MediaContainer.WebM or MediaContainer.Mkv))
         {
@@ -125,9 +465,24 @@ public sealed class FfmpegMediaProcessor
                 var existingValidation = ValidateOutput(destinationFullPath, outputContainer);
                 if (allowExistingValidatedOutput && existingValidation is null)
                 {
+                    if (extraValidation is not null)
+                    {
+                        var extraError = await extraValidation(destinationFullPath, cancellationToken)
+                            .ConfigureAwait(false);
+                        if (extraError is not null)
+                        {
+                            return Result<MediaProcessReceipt>.Failure(extraError);
+                        }
+                    }
+
                     return Result<MediaProcessReceipt>.Success(new MediaProcessReceipt(
                         destinationFullPath,
                         new FileInfo(destinationFullPath).Length));
+                }
+
+                if (allowExistingValidatedOutput && existingValidation is not null)
+                {
+                    return Result<MediaProcessReceipt>.Failure(existingValidation);
                 }
 
                 return Failure(
@@ -190,6 +545,17 @@ public sealed class FfmpegMediaProcessor
                 return Result<MediaProcessReceipt>.Failure(validation);
             }
 
+
+            if (extraValidation is not null)
+            {
+                var extraError = await extraValidation(temporaryPath, cancellationToken)
+                    .ConfigureAwait(false);
+                if (extraError is not null)
+                {
+                    return Result<MediaProcessReceipt>.Failure(extraError);
+                }
+            }
+
             File.Move(temporaryPath, destinationFullPath, overwrite: false);
             temporaryPath = null;
             return Result<MediaProcessReceipt>.Success(new MediaProcessReceipt(
@@ -244,6 +610,175 @@ public sealed class FfmpegMediaProcessor
         arguments.Add(Path.GetFullPath(path));
     }
 
+    private static string Seconds(TimeSpan value) =>
+        value.TotalSeconds.ToString("0.###", CultureInfo.InvariantCulture);
+
+    private async Task<TubeForgeError?> ValidateSubtitleStreamsAsync(
+        string path,
+        int expectedCount,
+        CancellationToken cancellationToken)
+    {
+        if (expectedCount is < 1 or > CaptionEmbedSelectionSet.MaximumTracks)
+        {
+            return new TubeForgeError(
+                "Media.SubtitleValidationFailed",
+                "The expected soft-subtitle stream count is invalid.");
+        }
+
+        var arguments = new List<string>
+        {
+            "-hide_banner",
+            "-loglevel", "error",
+            "-xerror",
+            "-nostdin",
+            "-i", Path.GetFullPath(path)
+        };
+        for (var index = 0; index < expectedCount; index++)
+        {
+            arguments.Add("-map");
+            arguments.Add($"0:s:{index}");
+        }
+        arguments.Add("-c");
+        arguments.Add("copy");
+        arguments.Add("-f");
+        arguments.Add("null");
+        arguments.Add("-");
+        var exitCode = await _processRunner.RunAsync(
+                _executablePath,
+                arguments,
+                Path.GetDirectoryName(Path.GetFullPath(path))!,
+                cancellationToken)
+            .ConfigureAwait(false);
+        return exitCode == 0
+            ? null
+            : new TubeForgeError(
+                "Media.SubtitleValidationFailed",
+                "FFmpeg did not verify an embedded soft-subtitle stream.",
+                $"FFmpeg exited with code {exitCode}.");
+    }
+
+    private async Task<TubeForgeError?> ValidateEmbeddedMetadataAsync(
+        string path,
+        int expectedSubtitleCount,
+        int expectedChapterCount,
+        CancellationToken cancellationToken)
+    {
+        if (expectedSubtitleCount > 0)
+        {
+            var subtitleError = await ValidateSubtitleStreamsAsync(path, expectedSubtitleCount, cancellationToken)
+                .ConfigureAwait(false);
+            if (subtitleError is not null)
+            {
+                return subtitleError;
+            }
+        }
+
+        var probePath = Path.GetFullPath(path) + "." + Guid.NewGuid().ToString("N") + ".probe.ffmetadata";
+        try
+        {
+            var arguments = new[]
+            {
+                "-hide_banner",
+                "-loglevel", "error",
+                "-xerror",
+                "-nostdin",
+                "-i", Path.GetFullPath(path),
+                "-f", "ffmetadata",
+                probePath
+            };
+            var exitCode = await _processRunner.RunAsync(
+                    _executablePath,
+                    arguments,
+                    Path.GetDirectoryName(Path.GetFullPath(path))!,
+                    cancellationToken)
+                .ConfigureAwait(false);
+            if (exitCode != 0 || !File.Exists(probePath))
+            {
+                return ChapterValidationFailure(exitCode);
+            }
+
+            var metadata = await File.ReadAllTextAsync(probePath, cancellationToken).ConfigureAwait(false);
+            var actualCount = metadata.Split("[CHAPTER]", StringSplitOptions.None).Length - 1;
+            return actualCount == expectedChapterCount
+                ? null
+                : ChapterValidationFailure(exitCode, $"Expected {expectedChapterCount} chapters; found {actualCount}.");
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return ChapterValidationFailure(-1, exception.GetType().Name);
+        }
+        finally
+        {
+            TryDelete(probePath);
+        }
+    }
+
+    private static Result<string> BuildChapterMetadata(
+        IReadOnlyList<VideoChapter> chapters,
+        TimeSpan duration)
+    {
+        if (chapters.Count is < 1 or > 1_000 || duration <= TimeSpan.Zero)
+        {
+            return Result<string>.Failure(new TubeForgeError(
+                "Media.InvalidChapters",
+                "Chapter metadata is empty or exceeds its safe limits."));
+        }
+
+        var durationMilliseconds = (long)Math.Floor(duration.TotalMilliseconds);
+        var builder = new StringBuilder(";FFMETADATA1\n");
+        long previousStart = -1;
+        for (var index = 0; index < chapters.Count; index++)
+        {
+            var chapter = chapters[index];
+            var start = (long)Math.Floor(chapter.StartTime.TotalMilliseconds);
+            var end = index + 1 < chapters.Count
+                ? (long)Math.Floor(chapters[index + 1].StartTime.TotalMilliseconds)
+                : durationMilliseconds;
+            if (string.IsNullOrWhiteSpace(chapter.Title) || chapter.Title.Length > 500 ||
+                chapter.Title.Any(char.IsControl) ||
+                start < 0 || start <= previousStart || end <= start || end > durationMilliseconds)
+            {
+                return Result<string>.Failure(new TubeForgeError(
+                    "Media.InvalidChapters",
+                    "Chapter timestamps or titles are invalid for this media duration."));
+            }
+
+            builder.AppendLine("[CHAPTER]");
+            builder.AppendLine("TIMEBASE=1/1000");
+            builder.Append("START=").AppendLine(start.ToString(CultureInfo.InvariantCulture));
+            builder.Append("END=").AppendLine(end.ToString(CultureInfo.InvariantCulture));
+            builder.Append("title=").AppendLine(EscapeMetadataValue(chapter.Title));
+            previousStart = start;
+        }
+
+        return Result<string>.Success(builder.ToString());
+    }
+
+    private static string EscapeMetadataValue(string value) => value
+        .Replace("\\", "\\\\", StringComparison.Ordinal)
+        .Replace("\r", string.Empty, StringComparison.Ordinal)
+        .Replace("\n", "\\n", StringComparison.Ordinal)
+        .Replace("=", "\\=", StringComparison.Ordinal)
+        .Replace(";", "\\;", StringComparison.Ordinal)
+        .Replace("#", "\\#", StringComparison.Ordinal);
+
+    private static TubeForgeError ChapterValidationFailure(int exitCode, string? detail = null) =>
+        new(
+            "Media.ChapterValidationFailed",
+            "FFmpeg did not verify the embedded chapter metadata.",
+            detail ?? $"FFmpeg exited with code {exitCode}.");
+
+    private static void TryDelete(string path)
+    {
+        try
+        {
+            File.Delete(path);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+        }
+    }
+
     private static void AddStreamCopyOutput(ICollection<string> arguments, MediaContainer container)
     {
         arguments.Add("-c");
@@ -279,7 +814,15 @@ public sealed class FfmpegMediaProcessor
         _ => "MP4"
     };
 
-    private static TubeForgeError? ValidateOutput(string path, MediaContainer container) => container switch
+    private static string SubtitleCodec(MediaContainer container) => container switch
+    {
+        MediaContainer.Mp4 => "mov_text",
+        MediaContainer.Mkv => "srt",
+        MediaContainer.WebM => "webvtt",
+        _ => throw new InvalidOperationException("Unsupported subtitle container.")
+    };
+
+    internal static TubeForgeError? ValidateOutput(string path, MediaContainer container) => container switch
     {
         MediaContainer.WebM => ValidateEbmlOutput(path, MediaContainer.WebM),
         MediaContainer.Mkv => ValidateEbmlOutput(path, MediaContainer.Mkv),

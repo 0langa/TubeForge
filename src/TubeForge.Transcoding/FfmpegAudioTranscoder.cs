@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Diagnostics;
+using System.Globalization;
 using TubeForge.Core.Errors;
 using TubeForge.Core.Media;
 using TubeForge.Core.Results;
@@ -59,7 +60,7 @@ public sealed class FfmpegAudioTranscoder
 
             if (File.Exists(destination))
             {
-                var recovered = Mp3FileValidator.Validate(destination);
+                var recovered = AudioTranscodeFileValidator.Validate(destination, request.Output.Kind);
                 if (!request.AllowExistingValidatedOutput || !recovered.IsSuccess)
                 {
                     return Result<AudioTranscodeReceipt>.Failure(
@@ -71,31 +72,36 @@ public sealed class FfmpegAudioTranscoder
                 return Success(destination, request.Output.BitrateKbps);
             }
 
+            if (!File.Exists(source))
+            {
+                return Failure("Media.TranscodeSourceMissing", "The source audio for conversion is missing.");
+            }
+
             var directory = Path.GetDirectoryName(destination)!;
             Directory.CreateDirectory(directory);
-            temporary = destination + "." + Guid.NewGuid().ToString("N") + ".transcoding.mp3";
+            temporary = destination + "." + Guid.NewGuid().ToString("N") + ".transcoding" + request.Output.Extension;
             var arguments = new List<string>
             {
                 "-hide_banner",
                 "-loglevel",
                 "error",
                 "-xerror",
-                "-nostdin",
-                "-i",
-                source,
+                "-nostdin"
+            };
+            AppendTrimInput(arguments, source, request.Trim);
+            arguments.AddRange([
                 "-map",
                 "0:a:0",
-                "-vn",
-                "-c:a",
-                "libmp3lame",
-                "-b:a",
-                $"{request.Output.BitrateKbps}k",
-                "-map_metadata",
-                "-1",
-                "-f",
-                "mp3",
-                temporary
-            };
+                "-vn"
+            ]);
+            if (request.RemovedSegments.Count > 0)
+            {
+                arguments.AddRange([
+                    "-af", $"aselect=not({RemovalExpression(request.RemovedSegments)}),asetpts=N/SR/TB"
+                ]);
+            }
+            AppendEncoderArguments(arguments, request.Output);
+            arguments.AddRange(["-map_metadata", "-1", temporary]);
 
             var exitCode = await _processRunner.RunAsync(
                     _executablePath,
@@ -107,11 +113,11 @@ public sealed class FfmpegAudioTranscoder
             {
                 return Failure(
                     "Media.FFmpegAudioFailed",
-                    "FFmpeg could not convert this audio stream to MP3.",
+                    $"FFmpeg could not convert this audio stream to {request.Output.DisplayName}.",
                     $"FFmpeg exited with code {exitCode}.");
             }
 
-            var outputValidation = Mp3FileValidator.Validate(temporary);
+            var outputValidation = AudioTranscodeFileValidator.Validate(temporary, request.Output.Kind);
             if (!outputValidation.IsSuccess)
             {
                 return Result<AudioTranscodeReceipt>.Failure(outputValidation.Error!);
@@ -158,9 +164,10 @@ public sealed class FfmpegAudioTranscoder
 
     private static TubeForgeError? ValidateRequest(AudioTranscodeRequest request)
     {
-        if (!request.Output.IsValid || request.Output.Kind != AudioOutputKind.Mp3)
+        if (!request.Output.IsValid || !request.Output.IsAudioTranscode ||
+            request.Trim is { IsValid: false } || !RemovalRangesAreValid(request.RemovedSegments))
         {
-            return new TubeForgeError("Media.InvalidTranscodeProfile", "Select a supported MP3 output profile.");
+            return new TubeForgeError("Media.InvalidTranscodeProfile", "Select a supported converted audio output profile.");
         }
 
         if (string.IsNullOrWhiteSpace(request.SourcePath) ||
@@ -173,9 +180,8 @@ public sealed class FfmpegAudioTranscoder
         {
             var source = Path.GetFullPath(request.SourcePath);
             var destination = Path.GetFullPath(request.DestinationPath);
-            if (!File.Exists(source) ||
-                source.Equals(destination, StringComparison.OrdinalIgnoreCase) ||
-                !string.Equals(Path.GetExtension(destination), ".mp3", StringComparison.OrdinalIgnoreCase) ||
+            if (source.Equals(destination, StringComparison.OrdinalIgnoreCase) ||
+                !string.Equals(Path.GetExtension(destination), request.Output.Extension, StringComparison.OrdinalIgnoreCase) ||
                 string.IsNullOrWhiteSpace(Path.GetDirectoryName(destination)))
             {
                 return new TubeForgeError("Media.InvalidTranscodePath", "Select valid source and destination paths.");
@@ -191,6 +197,68 @@ public sealed class FfmpegAudioTranscoder
         }
 
         return null;
+    }
+
+    private static bool RemovalRangesAreValid(IReadOnlyList<MediaTrimRange>? ranges)
+    {
+        if (ranges is null || ranges.Count > 1_000 || ranges.Any(range => !range.IsValid))
+        {
+            return false;
+        }
+
+        return ranges.Zip(ranges.Skip(1)).All(pair => pair.First.End <= pair.Second.Start);
+    }
+
+    private static string RemovalExpression(IReadOnlyList<MediaTrimRange> ranges) =>
+        string.Join('+', ranges.Select(range =>
+            $"between(t\\,{range.Start.TotalSeconds.ToString("0.###", CultureInfo.InvariantCulture)}" +
+            $"\\,{range.End.TotalSeconds.ToString("0.###", CultureInfo.InvariantCulture)})"));
+
+    private static void AppendTrimInput(
+        List<string> arguments,
+        string source,
+        MediaTrimRange? trim)
+    {
+        if (trim is { } range)
+        {
+            arguments.AddRange([
+                "-ss", range.Start.TotalSeconds.ToString("0.###", CultureInfo.InvariantCulture)
+            ]);
+        }
+
+        arguments.AddRange(["-i", source]);
+        if (trim is { } selectedRange)
+        {
+            arguments.AddRange([
+                "-t", selectedRange.Duration.TotalSeconds.ToString("0.###", CultureInfo.InvariantCulture)
+            ]);
+        }
+    }
+
+    private static void AppendEncoderArguments(List<string> arguments, OutputProfile output)
+    {
+        switch (output.Kind)
+        {
+            case OutputProfileKind.Mp3:
+                arguments.AddRange(["-c:a", "libmp3lame", "-b:a", $"{output.BitrateKbps}k", "-f", "mp3"]);
+                break;
+            case OutputProfileKind.Aac:
+                arguments.AddRange([
+                    "-c:a", "aac", "-b:a", $"{output.BitrateKbps}k", "-movflags", "+faststart", "-f", "mp4"
+                ]);
+                break;
+            case OutputProfileKind.Opus:
+                arguments.AddRange(["-c:a", "libopus", "-b:a", $"{output.BitrateKbps}k", "-f", "ogg"]);
+                break;
+            case OutputProfileKind.Wav:
+                arguments.AddRange(["-c:a", "pcm_s16le", "-f", "wav"]);
+                break;
+            case OutputProfileKind.Flac:
+                arguments.AddRange(["-c:a", "flac", "-compression_level", "8", "-f", "flac"]);
+                break;
+            default:
+                throw new InvalidOperationException("Unsupported audio output profile.");
+        }
     }
 
     private static Result<AudioTranscodeReceipt> Success(string path, int bitrateKbps) =>

@@ -13,9 +13,15 @@ public static class DiskSpacePolicyTests
 
         var direct = DiskSpacePolicy.CalculateRequiredAdditionalBytes(sourceBytes, existingBytes, requiresMuxing: false);
         var adaptive = DiskSpacePolicy.CalculateRequiredAdditionalBytes(sourceBytes, existingBytes, requiresMuxing: true);
+        var split = DiskSpacePolicy.CalculateRequiredAdditionalBytes(
+            sourceBytes,
+            existingBytes,
+            requiresMuxing: true,
+            additionalOutputCopies: 1);
 
         Assert.Equal(750_000_000 + DiskSpacePolicy.MinimumReserveBytes, direct);
         Assert.Equal(1_750_000_000 + DiskSpacePolicy.MinimumReserveBytes, adaptive);
+        Assert.Equal(2_750_000_000 + DiskSpacePolicy.MinimumReserveBytes, split);
     }
 
     [Test]
@@ -32,6 +38,8 @@ public static class DiskSpacePolicyTests
             DiskSpacePolicy.CalculateRequiredAdditionalBytes(0, 0, false));
         Assert.Throws<ArgumentOutOfRangeException>(() =>
             DiskSpacePolicy.CalculateRequiredAdditionalBytes(1, -1, false));
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            DiskSpacePolicy.CalculateRequiredAdditionalBytes(1, 0, false, 5));
     }
 
     [Test]
