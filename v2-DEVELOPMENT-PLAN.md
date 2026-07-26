@@ -4,25 +4,25 @@ Target: TubeForge 2.0 should be release-grade, user-friendly, and functionally c
 
 ## Implementation Status
 
-Status date: 2026-07-23.
+Status date: 2026-07-27.
 
 - Phase 0 complete. Sanitized baseline evidence: [`docs/V2_BASELINE_EVIDENCE.md`](docs/V2_BASELINE_EVIDENCE.md).
 - Phase 1 core implementation complete in working tree: expanded audio outputs plus resolution-aware H.264/AAC MP4, H.265/AAC MP4, and VP9/Opus WebM profiles.
 - General output profiles persist through queue restart, validate before publication/recovery, clean failed temporary files, and use allowlisted FFmpeg arguments from the pinned LGPL build.
-- Verification: Release build 0 warnings/errors; 238/238 deterministic tests; isolated core parser p95 0.2214 ms against 25 ms and desktop budgets passed; bundled FFmpeg encode/decode smoke passed for all four new audio outputs, all three video profiles, MP4/MKV/WebM soft-subtitle/chapter embed/split workflows, trim, SponsorBlock removal, and synthetic HLS-to-MKV capture.
-- Phase 1 release proof remains open: installed-app live media matrix and measured quality/time/file-size evidence. Broader custom/device presets remain deferred to UX work.
+- Verification: Release build 0 warnings/errors; 239/239 deterministic tests; isolated core parser p95 0.2214 ms against 25 ms and desktop budgets passed; bundled FFmpeg encode/decode smoke passed for all four new audio outputs, all three video profiles, MP4/MKV/WebM soft-subtitle/chapter embed/split workflows, trim, SponsorBlock removal, and synthetic HLS-to-MKV capture.
+- Phase 1 release proof is partial: the exact packaged candidate produced a fully decoded 213.04-second, 8,523,885-byte MP3, while an immediately preceding media-identical candidate produced a fully decoded 97,747,368-byte 1280x720 HEVC/AAC MP4 with two subtitle streams. Remaining exact-candidate profiles and Windows playback checks keep the matrix open. Broader custom/device presets remain deferred to UX work.
 - Preset-first UX is implemented for Best original, Windows MP4, Small file, MP3 320, and Custom; deterministic tests cover applied state and manual override behavior.
 - Phase 2 subtitle slice implemented: up to eight ordered manual/auto tracks can be embedded as soft subtitles in single-video and collection/archive MP4, MKV, or WebM downloads. Queue identity persists language/type without storing caption URLs; FFmpeg validates every expected subtitle stream before publication or recovery.
 - Phase 2 chapter workflows implemented: embed/split intent survives queue restart; embedding combines with a selected soft subtitle in one atomic FFmpeg pass; splitting keeps the full file and atomically publishes a sibling folder using sanitized `{chapterIndex}` / `{chapterTitle}` names. Both paths validate outputs before publication or recovery.
 - Phase 2 timeline editing implemented: bounded start/end trim persists through queue restart, uses keyframe-aligned stream copy for original outputs, applies precise trim during a selected transcode, and rebases embedded captions and chapters.
 - Phase 2 SponsorBlock integration implemented as a disabled-by-default third-party opt-in. A four-character SHA-256 video-ID prefix is sent to the official API, candidates are matched locally, selected categories can become chapter markers or be removed during an explicit audio/video transcode, and neither IDs nor response payloads enter diagnostics or queue state.
-- Phase 5 implemented: Settings exposes system/manual/off proxy policy, bounded metadata timeout/media retry/per-host concurrency controls, and applies one credential-free proxy object to metadata, collections, captions, thumbnails, media, and updates. Schema migration is safe, diagnostics emit mode only, and loopback tests prove metadata and media proxy paths.
+- Phase 5 implemented: Settings exposes system/manual/off proxy policy, bounded metadata timeout/media retry/per-host concurrency controls, and applies one credential-free proxy object to metadata, collections, captions, thumbnails, media, and updates. Schema migration is safe, diagnostics emit mode only, loopback tests prove metadata and media proxy paths, and exact packaged `System`-mode analysis passed after direct Windows proxy results were preserved.
 - Phase 3 decision complete: v2.0 follows Option A and remains public-only. Cookie import and OAuth are deferred; login-required, private, membership, paid, and other access-controlled media fail with a stable typed error and no credential collection.
 - Phase 4 public-live implementation complete in the working tree: active record-from-now and upcoming wait modes use bounded unencrypted HLS, duration/size/wait limits, trusted-host redirect checks, retrying segment downloads, recoverable hash-only journals, queue pause/resume, and atomic MKV stream-copy finalization. A real authorized public-live canary remains a release gate.
 - Phase 6 implemented: schema-versioned Library transfer/repair plus persistent playlist/channel archive profiles. Profiles retain destination/template/output/caption/chapter preferences and bounded checked-item sets; user-initiated checks queue only new items, while Select missing identifies current collection gaps across Queue and Library.
 - Phase 7 implementation complete: preset-first simple mode hides detailed format controls until requested, Custom reveals them, schema-v5 settings persist a default preset and disclosure choice, first run captures folder/preset/update preferences, vector navigation replaces text glyphs, and error recovery links expose destination, Settings, Diagnostics, and redacted-report actions. Manual Narrator/high-contrast/DPI release passes remain open.
 - Packaged UI accessibility inspection exposes named navigation, download, settings, network, update, and Diagnostics controls. The installed redacted-report action produced valid path/URL-free JSON. This structural probe does not replace the open Narrator, high-contrast, and multi-DPI passes.
-- Phase 8 local release-candidate packaging complete at version 2.0.0: framework-dependent and self-contained ZIPs, installer, checksums, manifest, dependency layout, pinned FFmpeg, embedded payload, and portable launch probes pass. Exact candidate CI, local v1.2.5 update, clean-state install, and both uninstall data modes pass; quiet remove-data relocation now has regression coverage. The candidate is explicitly unsigned. Independent clean-Windows UI readiness, publication, live canaries, and final public-doc sync remain release gates.
+- Phase 8 local release-candidate packaging complete at version 2.0.0 from exact commit `2aead44`: framework-dependent and self-contained ZIPs, installer, checksums, manifest, dependency layout, pinned FFmpeg, embedded payload, and portable launch probes pass. Exact candidate CI, installed default-system-proxy analysis, MP3 output/decode, local v1.2.5 update, and keep-data uninstall/restore pass; earlier clean-state and remove-data transactions plus quiet remove-data regression coverage remain valid. The candidate is explicitly unsigned. Independent clean-Windows UI readiness, publication, public-live HLS canary, remaining output matrix, and final public-doc sync remain release gates.
 
 ## v2 Product Definition
 
@@ -117,6 +117,8 @@ Completed audio slice:
 - [x] Add H.264/AAC MP4, H.265/AAC MP4, and VP9/Opus WebM video transcode paths.
 - [x] Add transcode-specific disk forecast tests.
 - [x] Run synthetic source encode/decode smoke through every pinned video encoder.
+- [x] Record exact installed-candidate MP3 duration, size, and full-decode evidence.
+- [x] Record installed 720p H.265/AAC plus two-soft-subtitle duration, size, and full-decode evidence from the media-identical predecessor candidate.
 - [ ] Run installed-app live media proof and record measured quality/time/file-size evidence.
 
 Exit gate:

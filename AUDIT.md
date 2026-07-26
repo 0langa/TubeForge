@@ -1,6 +1,6 @@
 # TubeForge Audit
 
-Audit date: 2026-07-23.
+Audit date: 2026-07-27.
 
 Scope: v1.2.5 `main` baseline plus the current v2 implementation branch, deterministic local build/test/performance gates, release docs, WPF UI surface, downloader/extractor/media/update/installer code shape, and current public feature surface of popular YouTube downloaders.
 
@@ -30,7 +30,7 @@ Result: passed, 0 warnings, 0 errors.
 dotnet run --project tests\TubeForge.Tests --configuration Release --no-build -- --all
 ```
 
-Result after installer remove-data regression coverage: 238/238 passed.
+Result after system-proxy regression coverage: 239/239 passed.
 
 ```powershell
 dotnet run --project tools\TubeForge.Performance --configuration Release --no-build -- --core-only
@@ -38,9 +38,9 @@ dotnet run --project tools\TubeForge.Performance --configuration Release --no-bu
 
 Latest isolated release-candidate rerun: passed. Core parser p95 0.2214 ms against the 25 ms budget; startup 1,743.7 ms, idle CPU 0%, working set 146.76 MiB, and UI frame p95 39.927 ms also passed. One earlier combined sample exceeded the startup budget at 4,491 ms, so cold-start variance remains a release-monitoring risk.
 
-Locally verified after the initial audit: version 2.0.0 portable and installer candidates, checksums, release manifest, dependency layout, pinned FFmpeg, embedded installer payload, portable launch probe, v1.2.5 update with data preservation, clean-state install, and both uninstall data modes. The candidate is explicitly unsigned. The clean-state process stayed running without a ready window under severe pressure; a later installed-candidate probe did create the main window and exposed named controls across Download, Settings, and Diagnostics, but took 37,160 ms. Independent packaged UI performance and accessibility remain open.
+Locally verified after the initial audit: exact commit `2aead44` produced version 2.0.0 portable and installer candidates whose checksums, release manifest, dependency layout, pinned FFmpeg, embedded installer payload, and portable launch probe pass. Exact candidate CI passed. Installed update from v1.2.5 produced a ready UI, resolved an authorized public video through `System` proxy mode with 27 formats and 23 matching outputs, and completed a 213.04-second MP3 whose 8,523,885 bytes passed full decode. A media-identical predecessor candidate also produced a fully decoded 97,747,368-byte 1280x720 HEVC/AAC MP4 with two soft-subtitle streams. Keep-data uninstall and exact five-file user-data restoration passed. Earlier clean-state and remove-data transactions remain valid. The candidate is explicitly unsigned. Independent packaged UI performance and accessibility remain open.
 
-Not verified in this audit: current live YouTube canary downloads, independent clean-Windows packaged UI readiness, code signing, VirusTotal/SmartScreen reputation, store/winget distribution, long-run queue soak, or accessibility with Narrator/NVDA.
+Not verified in this audit: authorized public-live HLS capture, the remaining exact installed output matrix, independent clean-Windows packaged UI readiness, code signing, VirusTotal/SmartScreen reputation, store/winget distribution, long-run queue soak, or accessibility with Narrator/NVDA.
 
 ## Market Baseline
 
@@ -85,7 +85,7 @@ Popular tools define user expectations beyond "download a public YouTube video":
 | Thumbnails/metadata sidecars | Present | Expected | Low |
 | Queue/resume | Strong | Required | Low |
 | Speed acceleration | Present, bounded to 4 workers | Expected | Low, but needs live throughput benchmarks |
-| Proxy | System/manual/off UI on current v2 branch; shared policy, safe bounds, redacted diagnostics, and metadata/media loopback proof | Expected in SnapDownloader/VideoProc/yt-dlp | Low, installed-app live proof remains |
+| Proxy | System/manual/off UI on current v2 branch; shared policy, safe bounds, redacted diagnostics, metadata/media loopback proof, and exact installed `System`-mode live analysis | Expected in SnapDownloader/VideoProc/yt-dlp | Low |
 | Rate-limit handling | Present bounded backoff | Required | Low |
 | Installer | Present | Expected | Low, but production trust proof missing |
 | Auto-updater | Present as opt-in verified GitHub release flow | Expected | Medium, needs live signed update proof |
@@ -101,7 +101,7 @@ Popular tools define user expectations beyond "download a public YouTube video":
 
 Build, full deterministic tests, and core parser performance passed. Current source quality gate is healthy.
 
-Residual risk: these gates do not prove live extraction against current YouTube, Windows playback of real outputs, installer runtime behavior, or update flow.
+Residual risk: current resolver and installed MP3/H.265 proofs now exist, but deterministic gates still do not prove public-live HLS behavior, the remaining exact output matrix, independent Windows playback, or the final update flow.
 
 ### P1: v2 Positioning Is Undefined: YouTube Specialist vs General Downloader
 
@@ -173,7 +173,7 @@ Repository contains strong release automation and docs. Local version 2.0.0 arch
 
 Wrong/optimizable:
 
-- `docs/EXTRACTION_COMPATIBILITY.md` last live validation is 2026-07-20/2026-07-21 era, while audit date is 2026-07-23.
+- `docs/EXTRACTION_COMPATIBILITY.md` now records the 2026-07-27 resolver and installed-output evidence, but public-live HLS and the remaining exact output matrix are still unvalidated.
 - Live YouTube behavior changes frequently. Deterministic fixtures cannot prove current upstream compatibility.
 - `docs/PERFORMANCE_BUDGET.md` requires ten desktop runs, canary set, active direct download, and adaptive mux run before release; those were not run in this audit.
 - Fresh local proof from `Publish-Release.ps1`, `Test-Release.ps1`, `Publish-Installer.ps1`, and `Test-Installer.ps1` passes. Local install/update/uninstall transactions also pass with exact v1.2.5 and user-data restoration; independent clean-Windows UI readiness and current-upstream media proof remain open.

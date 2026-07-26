@@ -2,6 +2,17 @@
 
 YouTube is an upstream service outside TubeForge's control. Compatibility is versioned by TubeForge release and verified with synthetic fixtures plus bounded public canaries; it is not a permanent guarantee.
 
+## v2.0.0 release-candidate compatibility update
+
+Validated on 2026-07-27 from exact commit `2aead44`:
+
+- two sanitized authorized public canaries resolved through the same configurable Windows `System`-proxy path used by the desktop app, exposing 27 and 23 formats respectively;
+- the exact installed candidate resolved 27 formats with 23 matching outputs in `System` proxy mode, then produced a 213.04-second, 8,523,885-byte MP3 that passed full decode;
+- installed adaptive stream-copy probes produced validated MP4, WebM, and MKV outputs; Windows media-stack playback accepted the H.264/AAC MP4, while the VP9/Opus WebM remained codec-pack dependent;
+- a media-identical predecessor candidate produced a fully decoded 97,747,368-byte 1280x720 HEVC/AAC MP4 containing two ordered soft-subtitle streams.
+
+Exact installed H.264/AAC, VP9/Opus, AAC, Opus, WAV, and FLAC outputs plus public active/upcoming HLS capture remain release gates. Canary identifiers, titles, destinations, and signed media URLs are intentionally not committed.
+
 ## v1.2.3 provider compatibility update
 
 Validated on 2026-07-20:
@@ -64,14 +75,14 @@ Validated on 2026-07-16:
 
 The live 4K canary resolved 27 formats and selected 2160p MP4 video plus AAC audio at this baseline. Canary identifiers and signed media URLs are intentionally not committed.
 
-## Explicitly unsupported
+## Current support boundaries
 
 - account login, cookies, private videos, memberships, purchases, or DRM;
 - bypassing age, region, payment, or access controls;
-- active or upcoming live-stream capture;
-- video transcoding or re-encoding;
 - arbitrary JavaScript execution or general-purpose JavaScript evaluation;
 - formats whose container/codec combination the supported finalization pipeline cannot represent safely.
+
+Stable v1.2.5 does not capture active/upcoming live streams or transcode video. The v2.0.0 candidate adds bounded public unencrypted HLS capture plus explicit H.264/AAC, H.265/AAC, and VP9/Opus conversion profiles. Those v2 paths remain prerelease until their open release gates above pass.
 
 Malformed, oversized, or unsupported player scripts fail closed. When public extraction changes, follow the [extractor maintenance playbook](EXTRACTOR_PLAYBOOK.md) and add a sanitized synthetic regression before changing a client profile or transform rule.
 
