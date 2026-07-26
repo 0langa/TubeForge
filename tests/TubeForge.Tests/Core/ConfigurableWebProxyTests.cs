@@ -48,11 +48,32 @@ public static class ConfigurableWebProxyTests
         Assert.True(NetworkProxyPolicy.TryParseManualUri("https://proxy.example:8443/", out _));
     }
 
+    [Test]
+    public static void PreservesNullFromDirectWindowsSystemProxy()
+    {
+        var destination = new Uri("https://www.youtube.com/watch");
+        var proxy = new ConfigurableWebProxy(
+            new NetworkProxyConfiguration(NetworkProxyMode.System),
+            new DirectSystemProxy());
+
+        Assert.True(proxy.GetProxy(destination) is null);
+        Assert.False(proxy.IsBypassed(destination));
+    }
+
     private sealed class FixedProxy(Uri endpoint) : IWebProxy
     {
         public ICredentials? Credentials { get; set; }
 
         public Uri GetProxy(Uri destination) => endpoint;
+
+        public bool IsBypassed(Uri host) => false;
+    }
+
+    private sealed class DirectSystemProxy : IWebProxy
+    {
+        public ICredentials? Credentials { get; set; }
+
+        public Uri GetProxy(Uri destination) => null!;
 
         public bool IsBypassed(Uri host) => false;
     }

@@ -78,7 +78,11 @@ public sealed class ConfigurableWebProxy : IWebProxy
         {
             NetworkProxyMode.None => destination,
             NetworkProxyMode.Manual => configuration.ManualProxyUri!,
-            _ => _systemProxy.GetProxy(destination) ?? destination
+            // Some Windows direct-access configurations return null while
+            // IsBypassed also returns false. SocketsHttpHandler understands
+            // that null as "connect directly"; replacing it with destination
+            // makes the destination server act as its own HTTP proxy.
+            _ => _systemProxy.GetProxy(destination)!
         };
     }
 

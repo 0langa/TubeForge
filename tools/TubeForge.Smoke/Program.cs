@@ -1,6 +1,8 @@
 using System.Net;
 using System.Buffers.Binary;
 using TubeForge.Core.Media;
+using TubeForge.Core.Networking;
+using TubeForge.Core.Settings;
 using TubeForge.Core.YouTube;
 using TubeForge.YouTube;
 using TubeForge.YouTube.Collections;
@@ -40,14 +42,7 @@ if (!parsed.IsSuccess)
     return 2;
 }
 
-using var handler = new SocketsHttpHandler
-{
-    AutomaticDecompression = DecompressionMethods.All,
-    AllowAutoRedirect = true,
-    MaxAutomaticRedirections = 5,
-    ConnectTimeout = TimeSpan.FromSeconds(10),
-    PooledConnectionLifetime = TimeSpan.FromMinutes(5)
-};
+using var handler = CreateSystemNetworkHandler();
 using var client = new HttpClient(handler)
 {
     Timeout = Timeout.InfiniteTimeSpan
@@ -337,14 +332,7 @@ static async Task<int> RunCanarySetAsync(string inputPath)
         eventArgs.Cancel = true;
         cancellation.Cancel();
     };
-    using var handler = new SocketsHttpHandler
-    {
-        AutomaticDecompression = DecompressionMethods.All,
-        AllowAutoRedirect = true,
-        MaxAutomaticRedirections = 5,
-        ConnectTimeout = TimeSpan.FromSeconds(10),
-        PooledConnectionLifetime = TimeSpan.FromMinutes(5)
-    };
+    using var handler = CreateSystemNetworkHandler();
     using var client = new HttpClient(handler) { Timeout = Timeout.InfiniteTimeSpan };
     var resolver = new YouTubeMetadataResolver(client);
     var failures = 0;
@@ -399,14 +387,7 @@ static async Task<int> RunCollectionAsync(string input, int maximumItems)
     }
 
     using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(60));
-    using var handler = new SocketsHttpHandler
-    {
-        AutomaticDecompression = DecompressionMethods.All,
-        AllowAutoRedirect = true,
-        MaxAutomaticRedirections = 5,
-        ConnectTimeout = TimeSpan.FromSeconds(10),
-        PooledConnectionLifetime = TimeSpan.FromMinutes(5)
-    };
+    using var handler = CreateSystemNetworkHandler();
     using var client = new HttpClient(handler) { Timeout = Timeout.InfiniteTimeSpan };
     var resolver = new YouTubeCollectionResolver(client);
     var result = await resolver.ResolveAsync(parsed.Value, maximumItems, timeout.Token);
@@ -432,3 +413,14 @@ static async Task<int> RunCollectionAsync(string input, int maximumItems)
     Console.WriteLine($"Truncated: {data.IsTruncated}");
     return data.Items.Count > 0 && uniqueVideoIds == data.Items.Count ? 0 : 1;
 }
+
+static SocketsHttpHandler CreateSystemNetworkHandler() => new()
+{
+    AutomaticDecompression = DecompressionMethods.All,
+    AllowAutoRedirect = true,
+    MaxAutomaticRedirections = 5,
+    ConnectTimeout = TimeSpan.FromSeconds(10),
+    PooledConnectionLifetime = TimeSpan.FromMinutes(5),
+    Proxy = new ConfigurableWebProxy(new NetworkProxyConfiguration(NetworkProxyMode.System)),
+    UseProxy = true
+};
