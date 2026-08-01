@@ -9,9 +9,13 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-$archiveName = 'ffmpeg-n8.1.2-22-g94138f6973-win64-lgpl-8.1.zip'
-$archiveHash = '66fdaf7e314968332c4c3fffbe730fedce47f9ac456ae3a04f73cd531080f4b3'
-$archiveUrl = 'https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-07-17-13-22/' + $archiveName
+$upstreamArchiveName = 'ffmpeg-n8.1.2-22-g94138f6973-win64-lgpl-8.1.zip'
+$upstreamArchiveHash = '66fdaf7e314968332c4c3fffbe730fedce47f9ac456ae3a04f73cd531080f4b3'
+$upstreamArchiveUrl = 'https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-07-17-13-22/' + $upstreamArchiveName
+$bootstrapArchiveName = 'TubeForge-1.2.5-win-x64-framework-dependent.zip'
+$bootstrapArchiveHash = 'e1a43566a114a09a71d178608a1a21f1a996121475f1a9681e3b95ea0b639b82'
+$bootstrapArchiveUrl = 'https://github.com/0langa/TubeForge/releases/download/v1.2.5/' + $bootstrapArchiveName
+$ffmpegExecutableHash = 'c63b7c29e268acb70f058c2c1863fdeae16830d401b226a6c6d25a29c55a4702'
 $ffmpegLicenseName = 'ffmpeg-license-94138f6973.txt'
 $ffmpegLicenseHash = '246041b6ecf9bc32d718a62c57877c78b5eb397b6467e74ed7ae2626ab189c30'
 $ffmpegLicenseUrl = 'https://raw.githubusercontent.com/FFmpeg/FFmpeg/94138f6973dd1ac6208ace92148ac0d172455d65/COPYING.LGPLv2.1'
@@ -59,14 +63,17 @@ function Get-VerifiedDownload(
     }
 }
 
-$archivePath = Get-VerifiedDownload -Name $archiveName -Uri $archiveUrl -ExpectedHash $archiveHash
+$archivePath = Get-VerifiedDownload `
+    -Name $bootstrapArchiveName `
+    -Uri $bootstrapArchiveUrl `
+    -ExpectedHash $bootstrapArchiveHash
 $ffmpegLicense = Get-VerifiedDownload -Name $ffmpegLicenseName -Uri $ffmpegLicenseUrl -ExpectedHash $ffmpegLicenseHash
 $buildLicense = Get-VerifiedDownload -Name $buildLicenseName -Uri $buildLicenseUrl -ExpectedHash $buildLicenseHash
 
 Add-Type -AssemblyName System.IO.Compression
 $archive = [IO.Compression.ZipFile]::OpenRead($archivePath)
 try {
-    $matches = @($archive.Entries | Where-Object { $_.FullName -match '/bin/ffmpeg\.exe$' })
+    $matches = @($archive.Entries | Where-Object { $_.FullName -eq 'ffmpeg/ffmpeg.exe' })
     if ($matches.Count -ne 1 -or $matches[0].Length -le 0) {
         throw 'Pinned FFmpeg archive does not contain exactly one non-empty bin/ffmpeg.exe.'
     }
@@ -79,6 +86,12 @@ finally {
     $archive.Dispose()
 }
 
+$extractedFfmpeg = Join-Path $ffmpegDirectory 'ffmpeg.exe'
+$actualFfmpegHash = (Get-FileHash -LiteralPath $extractedFfmpeg -Algorithm SHA256).Hash
+if (-not $actualFfmpegHash.Equals($ffmpegExecutableHash, [StringComparison]::OrdinalIgnoreCase)) {
+    throw 'Bootstrapped FFmpeg executable failed SHA-256 verification.'
+}
+
 Copy-Item -LiteralPath $ffmpegLicense -Destination (Join-Path $ffmpegDirectory 'FFmpeg-LICENSE.txt') -Force
 Copy-Item -LiteralPath $buildLicense -Destination (Join-Path $ffmpegDirectory 'FFmpeg-Builds-LICENSE.txt') -Force
 Copy-Item -LiteralPath (Join-Path $repoRoot 'THIRD_PARTY_NOTICES.md') -Destination $destinationRoot -Force
@@ -87,8 +100,11 @@ $provenance = @"
 FFmpeg 8.1.2-22-g94138f6973
 Target: Windows x64
 Variant: LGPL static command-line executable
-Archive: $archiveUrl
-Archive SHA-256: $archiveHash
+Original build archive: $upstreamArchiveUrl
+Original build archive SHA-256: $upstreamArchiveHash
+Distribution bootstrap archive: $bootstrapArchiveUrl
+Distribution bootstrap archive SHA-256: $bootstrapArchiveHash
+FFmpeg executable SHA-256: $ffmpegExecutableHash
 FFmpeg source: https://github.com/FFmpeg/FFmpeg/archive/94138f6973dd1ac6208ace92148ac0d172455d65.tar.gz
 Build scripts: https://github.com/BtbN/FFmpeg-Builds/archive/1f74efed63f467dbf0d1e5dd8548bf2188f4ad21.tar.gz
 "@

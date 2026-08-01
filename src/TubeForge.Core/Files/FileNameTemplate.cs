@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text;
+using System.Text.RegularExpressions;
 using TubeForge.Core.Errors;
 using TubeForge.Core.Results;
 
@@ -114,13 +115,68 @@ public static class FileNameTemplate
         Index = 1
     }).IsSuccess;
 
+    public static string MigrateLegacyOutputTokens(string? template, out bool includeQuality)
+    {
+        includeQuality = false;
+        if (string.IsNullOrWhiteSpace(template))
+        {
+            return Default;
+        }
+
+        var builder = new StringBuilder(template.Length);
+        for (var position = 0; position < template.Length; position++)
+        {
+            var current = template[position];
+            if (current == '{' && position + 1 < template.Length && template[position + 1] == '{')
+            {
+                builder.Append("{{");
+                position++;
+                continue;
+            }
+
+            if (current != '{')
+            {
+                builder.Append(current);
+                continue;
+            }
+
+            var closing = template.IndexOf('}', position + 1);
+            if (closing < 0)
+            {
+                return template;
+            }
+
+            var token = template[(position + 1)..closing];
+            if (token == "quality")
+            {
+                includeQuality = true;
+            }
+            else if (token != "container")
+            {
+                builder.Append(template, position, closing - position + 1);
+            }
+
+            position = closing;
+        }
+
+        var migrated = Regex.Replace(
+            builder.ToString(),
+            @"\[\s*\]|\(\s*\)",
+            string.Empty,
+            RegexOptions.CultureInvariant);
+        migrated = Regex.Replace(
+            migrated,
+            @"[ \t]{2,}",
+            " ",
+            RegexOptions.CultureInvariant).Trim();
+        return string.IsNullOrWhiteSpace(migrated) ? Default : migrated;
+    }
+
     private static string? TokenValue(string token, FileNameTemplateContext context) => token switch
     {
         "title" => context.Title,
         "channel" => context.Channel,
         "videoId" => context.VideoId,
-        "quality" => context.Quality,
-        "container" => context.Container,
         "index" => context.Index?.ToString(
             "D" + context.IndexWidth.ToString(CultureInfo.InvariantCulture),
             CultureInfo.InvariantCulture) ?? string.Empty,

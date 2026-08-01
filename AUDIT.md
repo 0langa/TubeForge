@@ -4,6 +4,8 @@ Audit date: 2026-07-27.
 
 Scope: v1.2.5 `main` baseline plus the current v2 implementation branch, deterministic local build/test/performance gates, release docs, WPF UI surface, downloader/extractor/media/update/installer code shape, and current public feature surface of popular YouTube downloaders.
 
+Release status: v2 implementation ships as TubeForge v2.1.0. Candidate-version and open-gate statements below preserve pre-release audit history; current public behavior is documented in `README.md`, `CHANGELOG.md`, and `docs/RELEASE_NOTES.md`.
+
 ## Current State
 
 TubeForge is no longer a thin prototype. Current `main` builds cleanly and already includes many items that were earlier v2 targets:

@@ -10,14 +10,14 @@ TubeForge provides a recommended per-user installer and portable ZIP distributio
 
 Both builds target Windows 10/11 x64. Extract the whole archive; do not run `TubeForge.exe` from inside the ZIP.
 
-The self-contained release build restores only the exact Microsoft .NET runtime packs selected by the pinned SDK from the official NuGet feed. Application projects still reject every `PackageReference`. Every x64 distribution also contains `ffmpeg/ffmpeg.exe`, pinned by SHA-256 and used as a separate process for MP4, WebM, and MKV stream-copy finalization plus MP3 audio conversion. Licenses and exact source/build provenance ship beside it and in [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md).
+The self-contained release build restores only the exact Microsoft .NET runtime packs selected by the pinned SDK from the official NuGet feed. Application projects still reject every `PackageReference`. Every x64 distribution also contains `ffmpeg/ffmpeg.exe`, pinned by SHA-256 and used as a separate process for MP4, WebM, and MKV stream-copy finalization plus optional audio/video conversion. Licenses and exact source/build provenance ship beside it and in [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md).
 
 ## Verify and install
 
 Keep the downloaded installer or ZIP and `SHA256SUMS.txt` in the same directory. In PowerShell:
 
 ```powershell
-$version = '1.2.5'
+$version = '2.1.0'
 $name = "TubeForge-$version-win-x64-setup.exe"
 $expected = (Get-Content .\SHA256SUMS.txt | Where-Object { $_ -match "  $([regex]::Escape($name))$" }).Split(' ')[0]
 $actual = (Get-FileHash -LiteralPath ".\$name" -Algorithm SHA256).Hash
@@ -47,14 +47,14 @@ gh attestation verify ".\$name" -R 0langa/TubeForge
 
 Portable users should verify and extract the new archive to a sibling directory. Keep the prior portable directory until the new version has completed an analyze/download smoke test.
 
-Portable rollback uses the previous version directory. Installer rollback requires reinstalling a previously verified setup asset. Settings schema v1-v4 files migrate in memory to schema v5 and are written as v5 on the next save; queue, Library history, and archive profiles retain their own schemas. Downgrading after TubeForge writes schema v5 settings is unsupported, so keep the newer installer available.
+Portable rollback uses the previous version directory. Installer rollback requires reinstalling a previously verified setup asset. Settings schema v1-v5 files migrate in memory to schema v6 and are written as v6 on the next save; legacy quality/container filename tokens migrate to the quality-suffix option and extension-free template. Queue and Library history retain their own schemas; archive profiles migrate from schema v1 to v2. Downgrading after TubeForge writes these newer schemas is unsupported, so keep the newer installer available.
 
 ## Local data and retention
 
 TubeForge stores application state in `%LOCALAPPDATA%\TubeForge`:
 
-- `settings.json`: download directory, filename template, default preset, simple/advanced disclosure, concurrency, accelerated-transfer preference, update preference, Library sort preference, responsible-use acknowledgement;
-- `archives.json`: user-created playlist/channel archive sources, local destination/template/output preferences, and bounded checked video identifiers; no signed media URLs or credentials;
+- `settings.json`: download directory, filename template, optional quality suffix, default preset, simple/advanced disclosure, concurrency, accelerated-transfer preference, update preference, Library sort preference, responsible-use acknowledgement;
+- `archives.json`: user-created playlist/channel archive sources, local destination/template/quality-suffix/output preferences, and bounded checked video identifiers; no signed media URLs or credentials;
 - `queue.json`: video IDs, display titles, format identities, destination paths, byte counts, attempt counts, timestamps, and failure codes;
 - `history.json`: completed video IDs, display titles, format identities, destination paths, sizes, and timestamps;
 - `.bak` and `.pending` siblings: crash-recovery copies of those stores.

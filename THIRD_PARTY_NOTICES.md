@@ -12,6 +12,12 @@ audio are not re-encoded and source quality is preserved.
 - Windows x64 build variant: `win64-lgpl-8.1`
 - Build archive SHA-256:
   `66fdaf7e314968332c4c3fffbe730fedce47f9ac456ae3a04f73cd531080f4b3`
+- FFmpeg executable SHA-256:
+  `c63b7c29e268acb70f058c2c1863fdeae16830d401b226a6c6d25a29c55a4702`
+- Distribution bootstrap archive: TubeForge v1.2.5 framework-dependent ZIP
+  (`e1a43566a114a09a71d178608a1a21f1a996121475f1a9681e3b95ea0b639b82`);
+  this immutable release archive preserves the exact verified build after upstream
+  autobuild retention expires.
 - Build scripts revision:
   `1f74efed63f467dbf0d1e5dd8548bf2188f4ad21`
 

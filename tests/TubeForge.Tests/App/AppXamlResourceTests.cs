@@ -63,6 +63,10 @@ public static class AppXamlResourceTests
         Assert.True(mainWindowXaml.Contains(
             "Use {index} in the filename template to include collection positions.",
             StringComparison.Ordinal));
+        Assert.True(mainWindowXaml.Contains(
+            "AutomationProperties.Name=\"Include quality in filename\"",
+            StringComparison.Ordinal));
+        Assert.False(mainWindowXaml.Contains("{container}", StringComparison.Ordinal));
     }
 
     [Test]

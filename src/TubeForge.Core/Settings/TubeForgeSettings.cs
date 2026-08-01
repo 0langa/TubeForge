@@ -2,7 +2,7 @@ namespace TubeForge.Core.Settings;
 
 public sealed record TubeForgeSettings
 {
-    public const int CurrentSchemaVersion = 5;
+    public const int CurrentSchemaVersion = 6;
 
     public int SchemaVersion { get; init; } = CurrentSchemaVersion;
 
@@ -11,6 +11,8 @@ public sealed record TubeForgeSettings
     public int MaximumConcurrentDownloads { get; init; } = 2;
 
     public string FileNameTemplate { get; init; } = Files.FileNameTemplate.Default;
+
+    public bool IncludeQualityInFileName { get; init; }
 
     public bool EnableAcceleratedTransfers { get; init; } = true;
 

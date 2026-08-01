@@ -22,12 +22,12 @@ public static class FileNameTemplateTests
         };
 
         var result = FileNameTemplate.Render(
-            "{index} - {title} [{quality} {container}] by {channel} {{id {videoId}}} - {chapterIndex} {chapterTitle}",
+            "{index} - {title} by {channel} {{id {videoId}}} - {chapterIndex} {chapterTitle}",
             context);
 
         Assert.True(result.IsSuccess, result.Error?.TechnicalDetail);
         Assert.Equal(
-            "007 - Fixture title [2160p mp4] by Fixture channel {id Video000001} - 002 Main section",
+            "007 - Fixture title by Fixture channel {id Video000001} - 002 Main section",
             result.Value);
     }
 
@@ -47,9 +47,28 @@ public static class FileNameTemplateTests
         Assert.True(noIndex.IsSuccess, noIndex.Error?.TechnicalDetail);
         Assert.Equal("Fixture", noIndex.Value);
 
-        foreach (var template in new[] { "{unknown}", "{title", "title}", "{title}}", "   " })
+        foreach (var template in new[]
+                 {
+                     "{unknown}", "{quality}", "{container}", "{title", "title}", "{title}}", "   "
+                 })
         {
             Assert.False(FileNameTemplate.Render(template, context).IsSuccess, template);
         }
+    }
+
+    [Test]
+    public static void MigratesLegacyOutputTokensWithoutChangingEscapedLiterals()
+    {
+        var migrated = FileNameTemplate.MigrateLegacyOutputTokens(
+            "{title} [{quality} {container}]",
+            out var includeQuality);
+        var escaped = FileNameTemplate.MigrateLegacyOutputTokens(
+            "{title} {{quality}}",
+            out var escapedIncludesQuality);
+
+        Assert.Equal("{title}", migrated);
+        Assert.True(includeQuality);
+        Assert.Equal("{title} {{quality}}", escaped);
+        Assert.False(escapedIncludesQuality);
     }
 }

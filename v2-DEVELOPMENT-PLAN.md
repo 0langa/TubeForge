@@ -1,5 +1,7 @@
 # TubeForge v2.0 Development Plan
 
+Release status: implemented v2 scope ships as TubeForge v2.1.0. Candidate-version references below remain as historical validation checkpoints.
+
 Target: TubeForge 2.0 should be release-grade, user-friendly, and functionally competitive with popular YouTube downloaders while preserving TubeForge's strongest differentiators: local-only operation, no ads, no telemetry, no hosted conversion, strict redaction, and safer bounded extraction.
 
 ## Implementation Status

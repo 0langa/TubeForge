@@ -206,36 +206,57 @@ public sealed class TubeForgeSettingsStore
         return null;
     }
 
-    private static TubeForgeSettings Migrate(TubeForgeSettings settings) => settings.SchemaVersion switch
+    private static TubeForgeSettings Migrate(TubeForgeSettings settings)
     {
-        1 => settings with
+        var migrated = settings.SchemaVersion switch
         {
-            SchemaVersion = TubeForgeSettings.CurrentSchemaVersion,
-            LibrarySortOrder = LibrarySortOrder.NewestFirst,
-            EnableAcceleratedTransfers = true
-        },
-        2 => settings with
+            1 => settings with
+            {
+                SchemaVersion = TubeForgeSettings.CurrentSchemaVersion,
+                LibrarySortOrder = LibrarySortOrder.NewestFirst,
+                EnableAcceleratedTransfers = true
+            },
+            2 => settings with
+            {
+                SchemaVersion = TubeForgeSettings.CurrentSchemaVersion,
+                EnableAcceleratedTransfers = true
+            },
+            3 => settings with
+            {
+                SchemaVersion = TubeForgeSettings.CurrentSchemaVersion,
+                ProxyMode = NetworkProxyMode.System,
+                ManualProxyUri = string.Empty,
+                MetadataTimeoutSeconds = 20,
+                DownloadRetryAttempts = 3,
+                PerHostConcurrency = 2
+            },
+            4 => settings with
+            {
+                SchemaVersion = TubeForgeSettings.CurrentSchemaVersion,
+                DefaultDownloadPreset = PreferredDownloadPreset.BestOriginal,
+                ShowAdvancedDownloadOptions = false
+            },
+            5 => settings with
+            {
+                SchemaVersion = TubeForgeSettings.CurrentSchemaVersion
+            },
+            _ => settings
+        };
+
+        if (settings.SchemaVersion is < 1 or >= TubeForgeSettings.CurrentSchemaVersion)
         {
-            SchemaVersion = TubeForgeSettings.CurrentSchemaVersion,
-            EnableAcceleratedTransfers = true
-        },
-        3 => settings with
+            return migrated;
+        }
+
+        var fileNameTemplate = FileNameTemplate.MigrateLegacyOutputTokens(
+            migrated.FileNameTemplate,
+            out var includeQuality);
+        return migrated with
         {
-            SchemaVersion = TubeForgeSettings.CurrentSchemaVersion,
-            ProxyMode = NetworkProxyMode.System,
-            ManualProxyUri = string.Empty,
-            MetadataTimeoutSeconds = 20,
-            DownloadRetryAttempts = 3,
-            PerHostConcurrency = 2
-        },
-        4 => settings with
-        {
-            SchemaVersion = TubeForgeSettings.CurrentSchemaVersion,
-            DefaultDownloadPreset = PreferredDownloadPreset.BestOriginal,
-            ShowAdvancedDownloadOptions = false
-        },
-        _ => settings
-    };
+            FileNameTemplate = fileNameTemplate,
+            IncludeQualityInFileName = includeQuality
+        };
+    }
 
     private static TubeForgeError InvalidState() => new(
         "Settings.InvalidState",

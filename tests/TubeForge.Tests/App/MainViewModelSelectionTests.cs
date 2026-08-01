@@ -1,5 +1,6 @@
 using System.Reflection;
 using TubeForge.App.ViewModels;
+using TubeForge.Core.Files;
 using TubeForge.Core.Media;
 using TubeForge.Core.Results;
 using TubeForge.Core.YouTube;
@@ -66,7 +67,8 @@ public static class MainViewModelSelectionTests
     {
         using var viewModel = new MainViewModel
         {
-            FileNameTemplateText = "{quality} {container}"
+            FileNameTemplateText = FileNameTemplate.Default,
+            IncludeQualityInFileName = true
         };
         Assert.True(YouTubeVideoId.TryCreate("Fixture123_", out var videoId));
         var metadata = new VideoMetadata
@@ -85,15 +87,22 @@ public static class MainViewModelSelectionTests
             [metadata, new FormatItemViewModel(source), null, 2, OutputProfile.Mp3(192)])!;
 
         Assert.True(result.IsSuccess);
-        Assert.Equal("192kbps mp3", result.Value);
+        Assert.Equal("Fixture 192kbps", result.Value);
+
+        viewModel.IncludeQualityInFileName = false;
+        var cleanResult = (Result<string>)render.Invoke(viewModel,
+            [metadata, new FormatItemViewModel(source), null, 2, OutputProfile.Mp3(192)])!;
+        Assert.True(cleanResult.IsSuccess);
+        Assert.Equal("Fixture", cleanResult.Value);
     }
 
     [Test]
-    public static void ConvertedAudioFilenamesUseSelectedProfileExtensionAndQuality()
+    public static void AudioFilenamesUseSelectedQualityWithoutContainerSuffix()
     {
         using var viewModel = new MainViewModel
         {
-            FileNameTemplateText = "{quality} {container}"
+            FileNameTemplateText = FileNameTemplate.Default,
+            IncludeQualityInFileName = true
         };
         Assert.True(YouTubeVideoId.TryCreate("Fixture123_", out var videoId));
         var metadata = new VideoMetadata { Id = videoId, Title = "Fixture", Formats = [] };
@@ -105,10 +114,11 @@ public static class MainViewModelSelectionTests
 
         foreach (var testCase in new[]
                  {
-                     (OutputProfile.Aac(256), "256kbps m4a"),
-                     (OutputProfile.Opus(160), "160kbps ogg"),
-                     (OutputProfile.Wav, "lossless wav"),
-                     (OutputProfile.Flac, "lossless flac")
+                     (OutputProfile.Native, "Fixture 143kbps"),
+                     (OutputProfile.Aac(256), "Fixture 256kbps"),
+                     (OutputProfile.Opus(160), "Fixture 160kbps"),
+                     (OutputProfile.Wav, "Fixture lossless"),
+                     (OutputProfile.Flac, "Fixture lossless")
                  })
         {
             var result = (Result<string>)render.Invoke(
@@ -124,7 +134,8 @@ public static class MainViewModelSelectionTests
     {
         using var viewModel = new MainViewModel
         {
-            FileNameTemplateText = "{quality} {container}"
+            FileNameTemplateText = FileNameTemplate.Default,
+            IncludeQualityInFileName = true
         };
         Assert.True(YouTubeVideoId.TryCreate("Fixture123_", out var videoId));
         var metadata = new VideoMetadata { Id = videoId, Title = "Fixture", Formats = [] };
@@ -151,7 +162,7 @@ public static class MainViewModelSelectionTests
             viewModel,
             [metadata, selection, null, 2, OutputProfile.H264AacMp4])!;
         Assert.True(filename.IsSuccess);
-        Assert.Equal("1080p mp4", filename.Value);
+        Assert.Equal("Fixture 1080p", filename.Value);
     }
 
     [Test]

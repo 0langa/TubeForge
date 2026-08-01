@@ -31,6 +31,8 @@ public sealed record CollectionArchiveProfile
 
     public required string FileNameTemplate { get; init; }
 
+    public bool IncludeQualityInFileName { get; init; }
+
     public ArchiveOutputPreset OutputPreset { get; init; }
 
     public ArchiveCaptionPreference CaptionPreference { get; init; }
@@ -46,7 +48,7 @@ public sealed record CollectionArchiveProfile
 
 public sealed record CollectionArchiveSnapshot
 {
-    public const int CurrentSchemaVersion = 1;
+    public const int CurrentSchemaVersion = 2;
 
     public int SchemaVersion { get; init; } = CurrentSchemaVersion;
 

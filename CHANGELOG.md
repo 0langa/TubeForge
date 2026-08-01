@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+## 2.1.0 - 2026-08-01
+
+- Keep output extensions out of filename stems and add an opt-in quality suffix covering audio bitrate/lossless profiles and video resolution.
 - Generalize persisted output profiles across native, audio-conversion, and video-conversion paths.
 - Add resolution-aware H.264/AAC MP4, H.265/AAC MP4, and VP9/Opus WebM presets using encoders present in the pinned LGPL FFmpeg build.
 - Preserve original-quality stream copy as default; stage native source media before optional video conversion and recover validated outputs after an interrupted queue checkpoint.

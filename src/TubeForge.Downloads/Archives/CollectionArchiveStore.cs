@@ -55,6 +55,7 @@ public sealed class CollectionArchiveStore
                 stream,
                 SerializerOptions,
                 cancellationToken).ConfigureAwait(false);
+            snapshot = snapshot is null ? null : Migrate(snapshot);
             return snapshot is not null && Validate(snapshot) is null
                 ? Result<CollectionArchiveSnapshot>.Success(snapshot)
                 : Corrupt();
@@ -184,6 +185,35 @@ public sealed class CollectionArchiveStore
         }
 
         return null;
+    }
+
+    private static CollectionArchiveSnapshot Migrate(CollectionArchiveSnapshot snapshot)
+    {
+        if (snapshot.SchemaVersion != 1 || snapshot.Profiles is null)
+        {
+            return snapshot;
+        }
+
+        return snapshot with
+        {
+            SchemaVersion = CollectionArchiveSnapshot.CurrentSchemaVersion,
+            Profiles = snapshot.Profiles.Select(profile =>
+            {
+                if (profile is null)
+                {
+                    return profile!;
+                }
+
+                var template = FileNameTemplate.MigrateLegacyOutputTokens(
+                    profile.FileNameTemplate,
+                    out var includeQuality);
+                return profile with
+                {
+                    FileNameTemplate = template,
+                    IncludeQualityInFileName = includeQuality
+                };
+            }).ToArray()
+        };
     }
 
     private static bool IsVideoId(string value) =>

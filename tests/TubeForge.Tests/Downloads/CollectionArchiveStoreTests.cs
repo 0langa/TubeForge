@@ -24,6 +24,7 @@ public static class CollectionArchiveStoreTests
         Assert.Equal(profile.SourceUrl, reloaded.SourceUrl);
         Assert.Equal(profile.OutputPreset, reloaded.OutputPreset);
         Assert.Equal(profile.CaptionPreference, reloaded.CaptionPreference);
+        Assert.True(reloaded.IncludeQualityInFileName);
         Assert.Equal(profile.LastCheckedVideoIds.Single(), reloaded.LastCheckedVideoIds.Single());
         var json = await File.ReadAllTextAsync(store.StoragePath);
         Assert.False(json.Contains("googlevideo", StringComparison.OrdinalIgnoreCase));
@@ -50,6 +51,30 @@ public static class CollectionArchiveStoreTests
         Assert.Equal("Archive.Corrupt", (await store.LoadAsync()).Error?.Code);
     }
 
+    [Test]
+    public static async Task MigratesLegacyFilenameTokensAndQualityPreference()
+    {
+        using var directory = new TestDirectory();
+        var store = new CollectionArchiveStore(Path.Combine(directory.Path, "archives.json"));
+        var legacyProfile = Profile() with
+        {
+            FileNameTemplate = "{title} {quality} {container}",
+            IncludeQualityInFileName = false
+        };
+        await File.WriteAllTextAsync(store.StoragePath, System.Text.Json.JsonSerializer.Serialize(new
+        {
+            schemaVersion = 1,
+            profiles = new[] { legacyProfile }
+        }));
+
+        var loaded = await store.LoadAsync();
+
+        Assert.True(loaded.IsSuccess, loaded.Error?.Message);
+        Assert.Equal(CollectionArchiveSnapshot.CurrentSchemaVersion, loaded.Value.SchemaVersion);
+        Assert.Equal("{title}", loaded.Value.Profiles.Single().FileNameTemplate);
+        Assert.True(loaded.Value.Profiles.Single().IncludeQualityInFileName);
+    }
+
     private static CollectionArchiveProfile Profile() => new()
     {
         Id = Guid.Parse("00000000-0000-0000-0000-000000000001"),
@@ -58,6 +83,7 @@ public static class CollectionArchiveStoreTests
         DisplayName = "Fixture playlist",
         DestinationPath = Path.GetFullPath(Path.Combine(Path.GetTempPath(), "TubeForgeArchive")),
         FileNameTemplate = FileNameTemplate.Default,
+        IncludeQualityInFileName = true,
         OutputPreset = ArchiveOutputPreset.WindowsCompatibleMp4,
         CaptionPreference = ArchiveCaptionPreference.ManualPreferred,
         EmbedChapters = true,

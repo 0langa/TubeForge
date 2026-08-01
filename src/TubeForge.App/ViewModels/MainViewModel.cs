@@ -214,6 +214,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     private int _downloadRetryAttempts = 3;
     private int _perHostConcurrency = 2;
     private string _fileNameTemplate = FileNameTemplate.Default;
+    private bool _includeQualityInFileName;
     private TubeForgeSettings _settings;
     private bool _showResponsibleUseNotice = true;
     private string _settingsStatus = "Settings stay on this device.";
@@ -909,6 +910,12 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         set => Set(ref _fileNameTemplate, value);
     }
 
+    public bool IncludeQualityInFileName
+    {
+        get => _includeQualityInFileName;
+        set => Set(ref _includeQualityInFileName, value);
+    }
+
     public double DownloadFraction
     {
         get => _downloadFraction;
@@ -1400,6 +1407,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             OnPropertyChanged(nameof(EnableAutomaticUpdateChecks));
             _fileNameTemplate = _settings.FileNameTemplate;
             OnPropertyChanged(nameof(FileNameTemplateText));
+            _includeQualityInFileName = _settings.IncludeQualityInFileName;
+            OnPropertyChanged(nameof(IncludeQualityInFileName));
             _selectedProxyMode = ProxyModeChoices.First(option => option.Value == _settings.ProxyMode);
             OnPropertyChanged(nameof(SelectedProxyMode));
             OnPropertyChanged(nameof(UsesManualProxy));
@@ -1517,6 +1526,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                 DownloadFolder = Path.GetFullPath(DownloadFolder),
                 MaximumConcurrentDownloads = SelectedMaxConcurrentDownloads,
                 FileNameTemplate = FileNameTemplateText,
+                IncludeQualityInFileName = IncludeQualityInFileName,
                 EnableAcceleratedTransfers = EnableAcceleratedTransfers,
                 EnableAutomaticUpdateChecks = EnableAutomaticUpdateChecks,
                 ProxyMode = proxyMode,
@@ -1585,6 +1595,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                 DownloadFolder = Path.GetFullPath(DownloadFolder),
                 MaximumConcurrentDownloads = SelectedMaxConcurrentDownloads,
                 FileNameTemplate = FileNameTemplateText,
+                IncludeQualityInFileName = IncludeQualityInFileName,
                 EnableAcceleratedTransfers = EnableAcceleratedTransfers,
                 EnableAutomaticUpdateChecks = EnableAutomaticUpdateChecks,
                 LibrarySortOrder = SelectedLibrarySort.Value ?? LibrarySortOrder.NewestFirst,
@@ -2021,7 +2032,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                         position,
                         indexWidth,
                         output,
-                        configuration.FileNameTemplate);
+                        configuration.FileNameTemplate,
+                        configuration.IncludeQualityInFileName);
                     if (!renderedName.IsSuccess)
                     {
                         card.SetStatus($"Failed · {renderedName.Error!.Code}");
@@ -2103,6 +2115,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     private CollectionQueueConfiguration CurrentCollectionQueueConfiguration() => new(
         DownloadFolder,
         FileNameTemplateText,
+        IncludeQualityInFileName,
         SelectedArchiveOutputPreset.Value,
         SelectedArchiveCaptionPreference.Value,
         ArchiveEmbedChapters);
@@ -2144,6 +2157,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                 DisplayName = _collection.Title,
                 DestinationPath = Path.GetFullPath(DownloadFolder),
                 FileNameTemplate = FileNameTemplateText,
+                IncludeQualityInFileName = IncludeQualityInFileName,
                 OutputPreset = SelectedArchiveOutputPreset.Value,
                 CaptionPreference = SelectedArchiveCaptionPreference.Value,
                 EmbedChapters = ArchiveEmbedChapters,
@@ -2270,6 +2284,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             _activeCollectionQueueConfiguration = new CollectionQueueConfiguration(
                 profile.DestinationPath,
                 profile.FileNameTemplate,
+                profile.IncludeQualityInFileName,
                 profile.OutputPreset,
                 profile.CaptionPreference,
                 profile.EmbedChapters);
@@ -4499,7 +4514,14 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         int? index,
         int indexWidth,
         OutputProfile output = default) =>
-        RenderCollectionFileName(metadata, selection, index, indexWidth, output, FileNameTemplateText);
+        RenderCollectionFileName(
+            metadata,
+            selection,
+            index,
+            indexWidth,
+            output,
+            FileNameTemplateText,
+            IncludeQualityInFileName);
 
     private static Result<string> RenderCollectionFileName(
         VideoMetadata metadata,
@@ -4507,7 +4529,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         int? index,
         int indexWidth,
         OutputProfile output,
-        string fileNameTemplate)
+        string fileNameTemplate,
+        bool includeQualityInFileName)
     {
         var format = selection.Format;
         var quality = output.IsAudioTranscode
@@ -4519,7 +4542,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         var template = index is not null && fileNameTemplate == FileNameTemplate.Default
             ? "{index} - {title}"
             : fileNameTemplate;
-        return FileNameTemplate.Render(template, new FileNameTemplateContext
+        var rendered = FileNameTemplate.Render(template, new FileNameTemplateContext
         {
             Title = metadata.Title,
             Channel = metadata.Channel,
@@ -4529,6 +4552,9 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             Index = index,
             IndexWidth = indexWidth
         });
+        return rendered.IsSuccess && includeQualityInFileName
+            ? Result<string>.Success($"{rendered.Value} {quality}")
+            : rendered;
     }
 
     private static string DuplicateDescription(DownloadDuplicateKind kind) => kind switch
@@ -5675,6 +5701,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     private sealed record CollectionQueueConfiguration(
         string DestinationPath,
         string FileNameTemplate,
+        bool IncludeQualityInFileName,
         ArchiveOutputPreset OutputPreset,
         ArchiveCaptionPreference CaptionPreference,
         bool EmbedChapters);

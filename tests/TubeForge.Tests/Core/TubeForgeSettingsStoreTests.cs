@@ -17,7 +17,8 @@ public static class TubeForgeSettingsStoreTests
         var save = await store.SaveAsync(defaults with
         {
             MaximumConcurrentDownloads = 4,
-            FileNameTemplate = "{channel} - {title} [{quality}]",
+            FileNameTemplate = "{channel} - {title}",
+            IncludeQualityInFileName = true,
             EnableAcceleratedTransfers = false,
             EnableAutomaticUpdateChecks = false,
             ProxyMode = NetworkProxyMode.Manual,
@@ -36,7 +37,8 @@ public static class TubeForgeSettingsStoreTests
         Assert.True(save.IsSuccess);
         Assert.True(loaded.IsSuccess);
         Assert.Equal(4, loaded.Value.MaximumConcurrentDownloads);
-        Assert.Equal("{channel} - {title} [{quality}]", loaded.Value.FileNameTemplate);
+        Assert.Equal("{channel} - {title}", loaded.Value.FileNameTemplate);
+        Assert.True(loaded.Value.IncludeQualityInFileName);
         Assert.False(loaded.Value.EnableAcceleratedTransfers);
         Assert.False(loaded.Value.EnableAutomaticUpdateChecks);
         Assert.Equal(NetworkProxyMode.Manual, loaded.Value.ProxyMode);
@@ -203,6 +205,38 @@ public static class TubeForgeSettingsStoreTests
         Assert.Equal(TubeForgeSettings.CurrentSchemaVersion, loaded.Value.SchemaVersion);
         Assert.Equal(PreferredDownloadPreset.BestOriginal, loaded.Value.DefaultDownloadPreset);
         Assert.False(loaded.Value.ShowAdvancedDownloadOptions);
+    }
+
+    [Test]
+    public static async Task MigratesSchemaFiveOutputTokensToExplicitQualityPreference()
+    {
+        using var directory = new TestDirectory();
+        var path = Path.Combine(directory.Path, "settings.json");
+        await File.WriteAllTextAsync(path, JsonSerializer.Serialize(new
+        {
+            schemaVersion = 5,
+            downloadFolder = Path.GetFullPath(directory.Path),
+            maximumConcurrentDownloads = 2,
+            fileNameTemplate = "{title} {quality} {container}",
+            enableAcceleratedTransfers = true,
+            enableAutomaticUpdateChecks = true,
+            proxyMode = 0,
+            manualProxyUri = string.Empty,
+            metadataTimeoutSeconds = 20,
+            downloadRetryAttempts = 3,
+            perHostConcurrency = 2,
+            librarySortOrder = 0,
+            defaultDownloadPreset = 0,
+            showAdvancedDownloadOptions = false,
+            responsibleUseAccepted = true
+        }));
+
+        var loaded = await new TubeForgeSettingsStore(path).LoadAsync(Settings(directory.Path));
+
+        Assert.True(loaded.IsSuccess, loaded.Error?.Message);
+        Assert.Equal(TubeForgeSettings.CurrentSchemaVersion, loaded.Value.SchemaVersion);
+        Assert.Equal("{title}", loaded.Value.FileNameTemplate);
+        Assert.True(loaded.Value.IncludeQualityInFileName);
     }
 
     private static TubeForgeSettings Settings(string folder) => new()

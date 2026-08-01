@@ -9,9 +9,7 @@ TubeForge is an experimental, ad-free Windows desktop downloader built from scra
 
 ## Status
 
-TubeForge v1.2.5 is the current public stable release.
-
-Current `main` also contains unreleased v2 work. Public v1.2.5 behavior remains documented in release notes and v1 support policy.
+TubeForge v2.1.0 is the current public stable release.
 
 Working now:
 
@@ -21,9 +19,9 @@ Working now:
 - type-first stream selection with resolution, container, codec, FPS/HDR, bitrate, and exact-stream filters;
 - highest-quality video + audio selection with separate resumable track downloads and FFmpeg stream-copy MP4, WebM, or MKV finalization;
 - automatic validated multi-worker transfers for large media, with bounded resume state and safe sequential fallback;
-- native M4A/WebM audio saves plus bundled-FFmpeg MP3, AAC/M4A, Opus/OGG, WAV, and FLAC conversion in the current development branch;
-- optional resolution-aware H.264/AAC MP4, H.265/AAC MP4, and VP9/Opus WebM conversion presets in the current development branch, with original-quality stream copy remaining default;
-- preset-first download setup for Best original, Windows MP4, Small file, MP3 320, and fully custom selection in the current development branch;
+- native M4A/WebM audio saves plus bundled-FFmpeg MP3, AAC/M4A, Opus/OGG, WAV, and FLAC conversion;
+- optional resolution-aware H.264/AAC MP4, H.265/AAC MP4, and VP9/Opus WebM conversion presets, with original-quality stream copy remaining default;
+- preset-first download setup for Best original, Windows MP4, Small file, MP3 320, and fully custom selection;
 - simple-by-default preset selection with persisted first-run folder/preset/update choices, optional advanced format disclosure, consistent vector navigation, and direct recovery links for common failures;
 - caption-track metadata plus manual/auto language selection, atomic SRT/WebVTT sidecar saves, and opt-in embedding of up to eight ordered soft-subtitle tracks for single videos and collection/archive queue items in MP4/MKV/WebM;
 - opt-in chapter embedding and lossless chapter splitting for single-video MP4/MKV/WebM outputs, with atomic publication, sanitized numbered names, and queue recovery validation;
@@ -36,7 +34,7 @@ Working now:
 - unified system/manual/off proxy settings for metadata, collections, captions, thumbnails, media, and updates, with bounded metadata timeout, media retries, and per-host concurrency; proxy credentials are rejected and never stored;
 - customizable token-based filenames plus a durable local Library used for exact-output and destination duplicate detection;
 - searchable/sortable Library history with bounded moved-file rescans, portable schema-versioned JSON export/import, duplicate-safe merging, and one-click cleanup for missing records;
-- Short and completed-live-replay classification, plus bounded public active/upcoming HLS capture with record-now/wait modes, duration/size limits, recoverable segment journals, and validated MKV stream-copy finalization in the current development branch;
+- Short and completed-live-replay classification, plus bounded public active/upcoming HLS capture with record-now/wait modes, duration/size limits, recoverable segment journals, and validated MKV stream-copy finalization;
 - resumable `.part` transfers, bounded container validation, retries, progress, cancellation, and atomic finalization;
 - opt-in segmented transfer for large files with validated parallel ranges, resumable segment state, and automatic direct-transfer fallback;
 - preflight disk-space forecasting with adaptive-mux peak-space accounting and retryable low-space failures;
@@ -131,17 +129,17 @@ dotnet run --project src/TubeForge.App --configuration Release
 Create framework-dependent and self-contained Windows x64 archives, a manifest, and SHA-256 checksums:
 
 ```powershell
-.\scripts\Publish-Release.ps1 -Version 1.2.5
-.\scripts\Test-Release.ps1 -Version 1.2.5
+.\scripts\Publish-Release.ps1 -Version 2.1.0
+.\scripts\Test-Release.ps1 -Version 2.1.0
 ```
 
 Create the self-contained per-user installer and checksum manifest:
 
 ```powershell
-.\scripts\Publish-Installer.ps1 -Version 1.2.5
+.\scripts\Publish-Installer.ps1 -Version 2.1.0
 ```
 
-Authenticode signing is optional and fails closed when a requested certificate cannot produce a valid signature. See [installation and data retention](docs/INSTALLATION.md), [extraction compatibility](docs/EXTRACTION_COMPATIBILITY.md), and the [v1 support policy](docs/SUPPORT_POLICY.md).
+Authenticode signing is optional and fails closed when a requested certificate cannot produce a valid signature. See [installation and data retention](docs/INSTALLATION.md), [extraction compatibility](docs/EXTRACTION_COMPATIBILITY.md), and the [support policy](docs/SUPPORT_POLICY.md).
 
 The release workflow signs both `TubeForge.exe` and the setup executable when the protected PFX secrets and `TUBEFORGE_TIMESTAMP_SERVER` repository variable are configured. Every setup is checksum-checked and runs an embedded-payload verification probe before publication.
 
