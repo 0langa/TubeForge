@@ -41,7 +41,7 @@ public static class MainViewModelUpdateTests
                     typeof(MainViewModel).FullName,
                     ".ctor(string, HttpMessageHandler, Version)");
             using var viewModel = (MainViewModel)(constructor.Invoke(
-                [applicationDataDirectory, new LatestReleaseHandler(), new Version(2, 2, 0)])
+                [applicationDataDirectory, new LatestReleaseHandler(), new Version(2, 2, 1)])
                 ?? throw new InvalidOperationException("Update test view model was not created."));
             var promptedVersion = new TaskCompletionSource<Version>(
                 TaskCreationOptions.RunContinuationsAsynchronously);
@@ -51,8 +51,8 @@ public static class MainViewModelUpdateTests
             await viewModel.InitializeAsync();
             var version = await promptedVersion.Task.WaitAsync(TimeSpan.FromSeconds(5));
 
-            Assert.Equal(new Version(2, 2, 1), version);
-            Assert.Equal("2.2.1", viewModel.AvailableUpdateVersion);
+            Assert.Equal(new Version(2, 2, 2), version);
+            Assert.Equal("2.2.2", viewModel.AvailableUpdateVersion);
             Assert.True(viewModel.IsUpdateActionAvailable);
             Assert.True(viewModel.UpdateNowCommand.CanExecute(null));
         }
@@ -82,7 +82,7 @@ public static class MainViewModelUpdateTests
     }
 
     [Test]
-    public static void UpdateInstallerLaunchIsQuietWaitsForAppAndRelaunches()
+    public static void UpdateInstallerLaunchUsesWindowsShellWaitsForAppAndRelaunches()
     {
         var factory = typeof(MainViewModel).GetMethod(
             "CreateUpdateInstallerStartInfo",
@@ -94,8 +94,9 @@ public static class MainViewModelUpdateTests
         var start = (ProcessStartInfo)(factory.Invoke(null, ["C:\\staging\\TubeForge-Setup.exe", 4321])
             ?? throw new InvalidOperationException("Update installer launch plan was not created."));
 
-        Assert.False(start.UseShellExecute);
+        Assert.True(start.UseShellExecute);
         Assert.Equal("C:\\staging\\TubeForge-Setup.exe", start.FileName);
+        Assert.Equal("C:\\staging", start.WorkingDirectory);
         Assert.SequenceEqual(
             new[] { "/update", "/quiet", "/wait-pid", "4321", "/launch" },
             start.ArgumentList);
@@ -112,14 +113,14 @@ public static class MainViewModelUpdateTests
                 return Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound));
             }
 
-            const string setupName = "TubeForge-2.2.1-win-x64-setup.exe";
+            const string setupName = "TubeForge-2.2.2-win-x64-setup.exe";
             const string setupHash = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
             var checksumBytes = Encoding.UTF8.GetBytes($"{setupHash}  {setupName}\n");
             var checksumHash = Convert.ToHexString(SHA256.HashData(checksumBytes)).ToLowerInvariant();
             var json = JsonSerializer.Serialize(new
             {
-                tag_name = "v2.2.1",
-                html_url = "https://github.com/0langa/TubeForge/releases/tag/v2.2.1",
+                tag_name = "v2.2.2",
+                html_url = "https://github.com/0langa/TubeForge/releases/tag/v2.2.2",
                 draft = false,
                 prerelease = false,
                 assets = new object[]
@@ -129,14 +130,14 @@ public static class MainViewModelUpdateTests
                         name = setupName,
                         size = 1024 * 1024,
                         digest = "sha256:" + setupHash,
-                        browser_download_url = $"https://github.com/0langa/TubeForge/releases/download/v2.2.1/{setupName}"
+                        browser_download_url = $"https://github.com/0langa/TubeForge/releases/download/v2.2.2/{setupName}"
                     },
                     new
                     {
                         name = "SHA256SUMS.txt",
                         size = checksumBytes.LongLength,
                         digest = "sha256:" + checksumHash,
-                        browser_download_url = "https://github.com/0langa/TubeForge/releases/download/v2.2.1/SHA256SUMS.txt"
+                        browser_download_url = "https://github.com/0langa/TubeForge/releases/download/v2.2.2/SHA256SUMS.txt"
                     }
                 }
             });

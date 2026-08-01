@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 2.2.2 - 2026-08-02
+
+- Launch the verified update installer through the Windows graphical shell before TubeForge exits, reducing direct child-process coupling under supervised launches.
+- Treat Windows shell launch failures as safe update failures instead of allowing an unhandled updater exception.
+- Keep regression coverage for the exact quiet, wait-for-current-process, install, and relaunch arguments.
+
 ## 2.2.1 - 2026-08-02
 
 - Add a startup-path regression proving an automatic update check raises the update prompt and immediately enables `Update now`.

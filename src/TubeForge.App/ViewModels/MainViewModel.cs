@@ -2677,7 +2677,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             UpdateStatus = $"Installing TubeForge {ready.Version.ToString(3)}…";
             return true;
         }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException)
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or
+                                          InvalidOperationException or Win32Exception)
         {
             UpdateStatus = $"Update install failed safely ({exception.GetType().Name}).";
             return false;
@@ -2785,7 +2786,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         var start = new ProcessStartInfo
         {
             FileName = installerPath,
-            UseShellExecute = false
+            WorkingDirectory = Path.GetDirectoryName(Path.GetFullPath(installerPath))!,
+            UseShellExecute = true
         };
         start.ArgumentList.Add("/update");
         start.ArgumentList.Add("/quiet");
