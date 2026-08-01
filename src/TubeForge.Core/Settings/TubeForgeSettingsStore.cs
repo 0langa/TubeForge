@@ -1,6 +1,7 @@
 using System.Text.Json;
 using TubeForge.Core.Errors;
 using TubeForge.Core.Files;
+using TubeForge.Core.Networking;
 using TubeForge.Core.Results;
 
 namespace TubeForge.Core.Settings;
@@ -171,7 +172,16 @@ public sealed class TubeForgeSettingsStore
         }
 
         if (settings.MaximumConcurrentDownloads is < 1 or > 4 ||
+            settings.PerHostConcurrency is < 1 or > 4 ||
+            settings.MetadataTimeoutSeconds is < 5 or > 120 ||
+            settings.DownloadRetryAttempts is < 1 or > 5 ||
+            !Enum.IsDefined(settings.ProxyMode) ||
+            settings.ProxyMode == NetworkProxyMode.Manual &&
+                !NetworkProxyPolicy.TryParseManualUri(settings.ManualProxyUri, out _) ||
+            settings.ProxyMode != NetworkProxyMode.Manual &&
+                !string.IsNullOrEmpty(settings.ManualProxyUri) ||
             !Enum.IsDefined(settings.LibrarySortOrder) ||
+            !Enum.IsDefined(settings.DefaultDownloadPreset) ||
             !FileNameTemplate.IsValid(settings.FileNameTemplate) ||
             string.IsNullOrWhiteSpace(settings.DownloadFolder) ||
             settings.DownloadFolder.Length > 32_767 ||
@@ -196,21 +206,57 @@ public sealed class TubeForgeSettingsStore
         return null;
     }
 
-    private static TubeForgeSettings Migrate(TubeForgeSettings settings) => settings.SchemaVersion switch
+    private static TubeForgeSettings Migrate(TubeForgeSettings settings)
     {
-        1 => settings with
+        var migrated = settings.SchemaVersion switch
         {
-            SchemaVersion = TubeForgeSettings.CurrentSchemaVersion,
-            LibrarySortOrder = LibrarySortOrder.NewestFirst,
-            EnableAcceleratedTransfers = true
-        },
-        2 => settings with
+            1 => settings with
+            {
+                SchemaVersion = TubeForgeSettings.CurrentSchemaVersion,
+                LibrarySortOrder = LibrarySortOrder.NewestFirst,
+                EnableAcceleratedTransfers = true
+            },
+            2 => settings with
+            {
+                SchemaVersion = TubeForgeSettings.CurrentSchemaVersion,
+                EnableAcceleratedTransfers = true
+            },
+            3 => settings with
+            {
+                SchemaVersion = TubeForgeSettings.CurrentSchemaVersion,
+                ProxyMode = NetworkProxyMode.System,
+                ManualProxyUri = string.Empty,
+                MetadataTimeoutSeconds = 20,
+                DownloadRetryAttempts = 3,
+                PerHostConcurrency = 2
+            },
+            4 => settings with
+            {
+                SchemaVersion = TubeForgeSettings.CurrentSchemaVersion,
+                DefaultDownloadPreset = PreferredDownloadPreset.BestOriginal,
+                ShowAdvancedDownloadOptions = false
+            },
+            5 => settings with
+            {
+                SchemaVersion = TubeForgeSettings.CurrentSchemaVersion
+            },
+            _ => settings
+        };
+
+        if (settings.SchemaVersion is < 1 or >= TubeForgeSettings.CurrentSchemaVersion)
         {
-            SchemaVersion = TubeForgeSettings.CurrentSchemaVersion,
-            EnableAcceleratedTransfers = true
-        },
-        _ => settings
-    };
+            return migrated;
+        }
+
+        var fileNameTemplate = FileNameTemplate.MigrateLegacyOutputTokens(
+            migrated.FileNameTemplate,
+            out var includeQuality);
+        return migrated with
+        {
+            FileNameTemplate = fileNameTemplate,
+            IncludeQualityInFileName = includeQuality
+        };
+    }
 
     private static TubeForgeError InvalidState() => new(
         "Settings.InvalidState",

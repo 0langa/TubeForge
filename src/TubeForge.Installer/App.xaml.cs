@@ -146,7 +146,7 @@ public partial class App : Application
 
     private void StartRelocatedUninstaller(InstallerArguments arguments)
     {
-        var removeData = false;
+        var removeData = arguments.RemoveData;
         if (!arguments.Has("/quiet"))
         {
             var choice = MessageBox.Show(
@@ -224,6 +224,8 @@ public partial class App : Application
 internal sealed class InstallerArguments(string[] values)
 {
     public bool Has(string value) => values.Contains(value, StringComparer.OrdinalIgnoreCase);
+
+    public bool RemoveData => Has("/remove-data");
 
     public int? WaitProcessId
     {

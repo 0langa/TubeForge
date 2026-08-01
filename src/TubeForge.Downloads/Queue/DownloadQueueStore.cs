@@ -202,7 +202,7 @@ public sealed class DownloadQueueStore
 
                     return item.Status == DownloadQueueStatus.Completed &&
                            DownloadSourceIdentity.TryParse(item.SourceIdentity, out var sourceIdentity) &&
-                           sourceIdentity.Output.Kind != Core.Media.AudioOutputKind.Native
+                           IsCompletedProcessedOutput(item, sourceIdentity)
                         ? item with { ExpectedLength = item.BytesReceived }
                         : item;
                 })
@@ -306,7 +306,7 @@ public sealed class DownloadQueueStore
                 !ids.Add(item.Id) ||
                 !YouTubeVideoId.TryCreate(item.VideoId, out _) ||
                 item.FormatId <= 0 ||
-                !IsSafeText(item.SourceIdentity, 256) ||
+                !IsSafeText(item.SourceIdentity, DownloadSourceIdentity.MaximumIdentityLength) ||
                 !DownloadSourceIdentity.TryParse(item.SourceIdentity, out var sourceIdentity) ||
                 sourceIdentity.VideoId.Value != item.VideoId ||
                 sourceIdentity.PrimaryFormatId != item.FormatId ||
@@ -317,7 +317,7 @@ public sealed class DownloadQueueStore
                 item.AttemptCount is < 0 or > 100_000 ||
                 item.ExpectedLength is not null &&
                     item.BytesReceived > item.ExpectedLength &&
-                    !IsCompletedConvertedOutput(item, sourceIdentity) ||
+                    !IsCompletedProcessedOutput(item, sourceIdentity) ||
                 !Enum.IsDefined(item.Status) ||
                 item.CreatedAtUtc == default ||
                 item.UpdatedAtUtc < item.CreatedAtUtc ||
@@ -340,11 +340,15 @@ public sealed class DownloadQueueStore
         _ => snapshot
     };
 
-    private static bool IsCompletedConvertedOutput(
+    private static bool IsCompletedProcessedOutput(
         DownloadQueueItem item,
         DownloadSourceIdentity sourceIdentity) =>
         item.Status == DownloadQueueStatus.Completed &&
-        sourceIdentity.Output.Kind != Core.Media.AudioOutputKind.Native;
+        (sourceIdentity.Output.Kind != Core.Media.OutputProfileKind.Native ||
+         sourceIdentity.Captions is not null ||
+         sourceIdentity.EmbedChapters ||
+         sourceIdentity.SponsorBlock is not null ||
+         sourceIdentity.LiveCapture is not null);
 
     private static bool IsSafeText(string? value, int maximumLength) =>
         !string.IsNullOrWhiteSpace(value) &&

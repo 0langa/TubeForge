@@ -12,28 +12,64 @@ using TubeForge.YouTube.Player;
 
 namespace TubeForge.YouTube;
 
-public sealed class YouTubeMetadataResolver(HttpClient httpClient)
+public sealed class YouTubeMetadataResolver
 {
     private const int MaximumWatchPageCharacters = 8 * 1024 * 1024;
     private const int MaximumPlayerScriptCharacters = 6 * 1024 * 1024;
-    private static readonly TimeSpan RequestTimeout = TimeSpan.FromSeconds(20);
+    private static readonly TimeSpan DefaultRequestTimeout = TimeSpan.FromSeconds(20);
+    private static readonly Uri DefaultOrigin = new("https://www.youtube.com/");
     private static readonly PlayerTransformCache TransformCache = new();
+    private readonly HttpClient _httpClient;
+    private readonly Uri _origin;
+    private readonly TimeSpan _requestTimeout;
+
+    public YouTubeMetadataResolver(HttpClient httpClient, TimeSpan? requestTimeout = null)
+        : this(httpClient, DefaultOrigin, requestTimeout)
+    {
+    }
+
+    internal YouTubeMetadataResolver(HttpClient httpClient, Uri origin, TimeSpan? requestTimeout = null)
+    {
+        _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
+        ArgumentNullException.ThrowIfNull(origin);
+        if (!origin.IsAbsoluteUri || origin.Scheme is not ("http" or "https") ||
+            string.IsNullOrWhiteSpace(origin.IdnHost) || origin.AbsolutePath != "/" ||
+            !string.IsNullOrEmpty(origin.UserInfo) || !string.IsNullOrEmpty(origin.Query) ||
+            !string.IsNullOrEmpty(origin.Fragment))
+        {
+            throw new ArgumentException("The metadata origin must be an HTTP(S) origin.", nameof(origin));
+        }
+
+        _origin = origin;
+        _requestTimeout = ValidateRequestTimeout(requestTimeout);
+    }
+
+    private static TimeSpan ValidateRequestTimeout(TimeSpan? value)
+    {
+        var timeout = value ?? DefaultRequestTimeout;
+        if (timeout < TimeSpan.FromSeconds(5) || timeout > TimeSpan.FromMinutes(2))
+        {
+            throw new ArgumentOutOfRangeException(nameof(value));
+        }
+
+        return timeout;
+    }
 
     public async Task<Result<WatchPageData>> ResolveAsync(
         YouTubeVideoId videoId,
         CancellationToken cancellationToken = default)
     {
         using var timeoutSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        timeoutSource.CancelAfter(RequestTimeout);
+        timeoutSource.CancelAfter(_requestTimeout);
 
         try
         {
-            var url = new Uri($"https://www.youtube.com/watch?v={Uri.EscapeDataString(videoId.Value)}&hl=en");
+            var url = new Uri(_origin, $"watch?v={Uri.EscapeDataString(videoId.Value)}&hl=en");
             using var request = new HttpRequestMessage(HttpMethod.Get, url);
             AddBrowserHeaders(request);
             request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("text/html"));
 
-            using var response = await httpClient.SendAsync(
+            using var response = await _httpClient.SendAsync(
                 request,
                 HttpCompletionOption.ResponseHeadersRead,
                 timeoutSource.Token).ConfigureAwait(false);
@@ -54,6 +90,11 @@ public sealed class YouTubeMetadataResolver(HttpClient httpClient)
                 timeoutSource.Token).ConfigureAwait(false);
             var watchResult = YouTubeWatchPageParser.Parse(html);
             if (!watchResult.IsSuccess)
+            {
+                return watchResult;
+            }
+
+            if (watchResult.Value.Metadata.Formats.Any(format => format.IsLiveHls))
             {
                 return watchResult;
             }
@@ -265,7 +306,7 @@ public sealed class YouTubeMetadataResolver(HttpClient httpClient)
                 JsonSerializer.Serialize(payload),
                 Encoding.UTF8,
                 "application/json");
-            using var response = await httpClient.SendAsync(
+            using var response = await _httpClient.SendAsync(
                 request,
                 HttpCompletionOption.ResponseHeadersRead,
                 cancellationToken).ConfigureAwait(false);
@@ -357,7 +398,7 @@ public sealed class YouTubeMetadataResolver(HttpClient httpClient)
             probe.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("*/*"));
             probe.Headers.Range = new RangeHeaderValue(lastByte, lastByte);
             probe.Headers.Referrer = watchUrl;
-            using var response = await httpClient.SendAsync(
+            using var response = await _httpClient.SendAsync(
                 probe,
                 HttpCompletionOption.ResponseHeadersRead,
                 cancellationToken).ConfigureAwait(false);
@@ -387,7 +428,7 @@ public sealed class YouTubeMetadataResolver(HttpClient httpClient)
             AddBrowserHeaders(scriptRequest);
             scriptRequest.Headers.Accept.Clear();
             scriptRequest.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("text/javascript"));
-            using var scriptResponse = await httpClient.SendAsync(
+            using var scriptResponse = await _httpClient.SendAsync(
                 scriptRequest,
                 HttpCompletionOption.ResponseHeadersRead,
                 cancellationToken).ConfigureAwait(false);
@@ -541,7 +582,7 @@ public sealed class YouTubeMetadataResolver(HttpClient httpClient)
         probe.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("*/*"));
         probe.Headers.Range = new RangeHeaderValue(0, 0);
         probe.Headers.Referrer = watchUrl;
-        using var response = await httpClient.SendAsync(
+        using var response = await _httpClient.SendAsync(
             probe,
             HttpCompletionOption.ResponseHeadersRead,
             cancellationToken).ConfigureAwait(false);

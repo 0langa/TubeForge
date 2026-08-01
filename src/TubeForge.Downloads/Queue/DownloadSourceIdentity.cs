@@ -7,13 +7,30 @@ public readonly record struct DownloadSourceIdentity(
     YouTubeVideoId VideoId,
     int PrimaryFormatId,
     int? AudioFormatId,
-    AudioOutputProfile Output = default)
+    OutputProfile Output = default,
+    CaptionEmbedSelectionSet? Captions = null,
+    bool EmbedChapters = false,
+    bool SplitChapters = false,
+    MediaTrimRange? Trim = null,
+    SponsorBlockSelection? SponsorBlock = null,
+    LiveCaptureOptions? LiveCapture = null)
 {
+    public const int MaximumIdentityLength = 512;
+
+    public CaptionEmbedSelection? Caption =>
+        Captions is { } set && set.Selections.Count == 1 ? set.Selections[0] : null;
+
     public static string Create(
         YouTubeVideoId videoId,
         int primaryFormatId,
         int? audioFormatId = null,
-        AudioOutputProfile output = default)
+        OutputProfile output = default,
+        CaptionEmbedSelectionSet? captions = null,
+        bool embedChapters = false,
+        bool splitChapters = false,
+        MediaTrimRange? trim = null,
+        SponsorBlockSelection? sponsorBlock = null,
+        LiveCaptureOptions? liveCapture = null)
     {
         if (primaryFormatId <= 0)
         {
@@ -27,21 +44,59 @@ public readonly record struct DownloadSourceIdentity(
 
         if (!output.IsValid)
         {
-            throw new ArgumentException("The audio output profile is invalid.", nameof(output));
+            throw new ArgumentException("The output profile is invalid.", nameof(output));
+        }
+
+        if (captions is { IsValid: false })
+        {
+            throw new ArgumentException("The embedded caption selections are invalid.", nameof(captions));
+        }
+
+        if (trim is { IsValid: false })
+        {
+            throw new ArgumentException("The trim range is invalid.", nameof(trim));
+        }
+
+        if (sponsorBlock is { IsValid: false })
+        {
+            throw new ArgumentException("The SponsorBlock selection is invalid.", nameof(sponsorBlock));
+        }
+
+        if (liveCapture is { IsValid: false })
+        {
+            throw new ArgumentException("The live capture options are invalid.", nameof(liveCapture));
         }
 
         var streams = audioFormatId is null
             ? $"{videoId.Value}:{primaryFormatId}"
             : $"{videoId.Value}:{primaryFormatId}+{audioFormatId.Value}";
-        return output.Kind == AudioOutputKind.Native
+        var media = output.Kind == OutputProfileKind.Native
             ? streams
             : $"{streams}@{output.Identity}";
+        var captioned = captions is null ? media : $"{media}~{captions.Value.Identity}";
+        var chapterMode = (embedChapters, splitChapters) switch
+        {
+            (true, true) => "chapters+split",
+            (true, false) => "chapters",
+            (false, true) => "split",
+            _ => null
+        };
+        var chaptered = chapterMode is null ? captioned : $"{captioned}^{chapterMode}";
+        var trimmed = trim is null ? chaptered : $"{chaptered}%{trim.Value.Identity}";
+        var sponsored = sponsorBlock is null ? trimmed : $"{trimmed}&{sponsorBlock.Value.Identity}";
+        var identity = liveCapture is null ? sponsored : $"{sponsored}!{liveCapture.Value.Identity}";
+        if (identity.Length > MaximumIdentityLength)
+        {
+            throw new ArgumentException("The combined download source identity exceeds its safe limit.");
+        }
+
+        return identity;
     }
 
     public static bool TryParse(string? value, out DownloadSourceIdentity identity)
     {
         identity = default;
-        if (string.IsNullOrWhiteSpace(value))
+        if (string.IsNullOrWhiteSpace(value) || value.Length > MaximumIdentityLength)
         {
             return false;
         }
@@ -54,18 +109,119 @@ public readonly record struct DownloadSourceIdentity(
         }
 
         var formatPart = value[(colon + 1)..];
+        LiveCaptureOptions? liveCapture = null;
+        var exclamation = formatPart.IndexOf('!');
+        if (exclamation != formatPart.LastIndexOf('!'))
+        {
+            return false;
+        }
+
+        if (exclamation >= 0)
+        {
+            if (exclamation == formatPart.Length - 1 ||
+                !LiveCaptureOptions.TryParseIdentity(
+                    formatPart[(exclamation + 1)..],
+                    out var parsedLiveCapture))
+            {
+                return false;
+            }
+
+            liveCapture = parsedLiveCapture;
+            formatPart = formatPart[..exclamation];
+        }
+
+        SponsorBlockSelection? sponsorBlock = null;
+        var ampersand = formatPart.IndexOf('&');
+        if (ampersand != formatPart.LastIndexOf('&'))
+        {
+            return false;
+        }
+
+        if (ampersand >= 0)
+        {
+            if (ampersand == formatPart.Length - 1 ||
+                !SponsorBlockSelection.TryParseIdentity(
+                    formatPart[(ampersand + 1)..],
+                    out var parsedSponsorBlock))
+            {
+                return false;
+            }
+
+            sponsorBlock = parsedSponsorBlock;
+            formatPart = formatPart[..ampersand];
+        }
+
+        MediaTrimRange? trim = null;
+        var percent = formatPart.IndexOf('%');
+        if (percent != formatPart.LastIndexOf('%'))
+        {
+            return false;
+        }
+
+        if (percent >= 0)
+        {
+            if (percent == formatPart.Length - 1 ||
+                !MediaTrimRange.TryParseIdentity(formatPart[(percent + 1)..], out var parsedTrim))
+            {
+                return false;
+            }
+
+            trim = parsedTrim;
+            formatPart = formatPart[..percent];
+        }
+
+        var embedChapters = false;
+        var splitChapters = false;
+        var caret = formatPart.IndexOf('^');
+        if (caret != formatPart.LastIndexOf('^'))
+        {
+            return false;
+        }
+
+        if (caret >= 0)
+        {
+            var chapterMode = formatPart[(caret + 1)..];
+            if (chapterMode is not ("chapters" or "split" or "chapters+split"))
+            {
+                return false;
+            }
+
+            embedChapters = chapterMode is "chapters" or "chapters+split";
+            splitChapters = chapterMode is "split" or "chapters+split";
+            formatPart = formatPart[..caret];
+        }
+
+        CaptionEmbedSelectionSet? captions = null;
+        var tilde = formatPart.IndexOf('~');
+        if (tilde != formatPart.LastIndexOf('~'))
+        {
+            return false;
+        }
+
+        if (tilde >= 0)
+        {
+            if (tilde == formatPart.Length - 1 ||
+                !CaptionEmbedSelectionSet.TryParseIdentity(formatPart[(tilde + 1)..], out var parsedCaptions))
+            {
+                return false;
+            }
+
+            captions = parsedCaptions;
+            formatPart = formatPart[..tilde];
+        }
+
         var at = formatPart.IndexOf('@');
         if (at != formatPart.LastIndexOf('@'))
         {
             return false;
         }
 
-        var output = AudioOutputProfile.Native;
+        var output = OutputProfile.Native;
         if (at >= 0)
         {
             if (at == formatPart.Length - 1 ||
-                !AudioOutputProfile.TryParseIdentity(formatPart[(at + 1)..], out output) ||
-                output.Kind == AudioOutputKind.Native)
+                !OutputProfile.TryParseIdentity(formatPart[(at + 1)..], out output) ||
+                output.Kind == OutputProfileKind.Native)
             {
                 return false;
             }
@@ -98,7 +254,17 @@ public readonly record struct DownloadSourceIdentity(
             audioFormatId = parsedAudioFormatId;
         }
 
-        identity = new DownloadSourceIdentity(videoId, primaryFormatId, audioFormatId, output);
+        identity = new DownloadSourceIdentity(
+            videoId,
+            primaryFormatId,
+            audioFormatId,
+            output,
+            captions,
+            embedChapters,
+            splitChapters,
+            trim,
+            sponsorBlock,
+            liveCapture);
         return true;
     }
 }

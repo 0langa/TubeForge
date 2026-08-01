@@ -4,5 +4,7 @@ public enum VideoContentKind
 {
     Standard,
     Short,
-    LiveReplay
+    LiveReplay,
+    LiveActive,
+    LiveUpcoming
 }

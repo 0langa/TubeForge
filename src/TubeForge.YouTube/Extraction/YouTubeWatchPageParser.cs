@@ -11,6 +11,7 @@ namespace TubeForge.YouTube.Extraction;
 public static class YouTubeWatchPageParser
 {
     private const string PlayerResponseMarker = "ytInitialPlayerResponse";
+    public const int LiveHlsFormatId = 1_000_001;
     private static readonly Uri YouTubeOrigin = new("https://www.youtube.com/");
 
     public static Result<WatchPageData> Parse(
@@ -153,31 +154,6 @@ public static class YouTubeWatchPageParser
         var isLiveNow = ReadBoolean(details, "isLive") ||
                         liveBroadcast is { } liveNow && ReadBoolean(liveNow, "isLiveNow");
         var status = ReadString(root, "playabilityStatus", "status") ?? "UNKNOWN";
-        if (!status.Equals("OK", StringComparison.OrdinalIgnoreCase))
-        {
-            var reason = ReadString(root, "playabilityStatus", "reason") ??
-                         "YouTube reported that this video is unavailable.";
-            if (status.Equals("LIVE_STREAM_OFFLINE", StringComparison.OrdinalIgnoreCase) ||
-                liveStartedAtUtc is not null && liveEndedAtUtc is null)
-            {
-                return UnsupportedLive(
-                    "Video.LiveUpcomingUnsupported",
-                    "Upcoming and offline live-stream capture is not implemented.");
-            }
-
-            var code = status.Equals("LOGIN_REQUIRED", StringComparison.OrdinalIgnoreCase)
-                ? "Video.LoginRequired"
-                : "Video.Unavailable";
-            return Result<WatchPageData>.Failure(new TubeForgeError(code, reason));
-        }
-
-        if (isLiveNow)
-        {
-            return UnsupportedLive(
-                "Video.ActiveLiveUnsupported",
-                "Active live-stream capture is not implemented. Completed replays with normal streams are supported.");
-        }
-
         var rawId = ReadString(details, "videoId");
         if (!YouTubeVideoId.TryCreate(rawId, out var videoId))
         {
@@ -188,6 +164,42 @@ public static class YouTubeWatchPageParser
         if (string.IsNullOrWhiteSpace(title))
         {
             return Failure("The player response did not contain a video title.");
+        }
+
+        if (!status.Equals("OK", StringComparison.OrdinalIgnoreCase))
+        {
+            var reason = ReadString(root, "playabilityStatus", "reason") ??
+                         "YouTube reported that this video is unavailable.";
+            if (status.Equals("LOGIN_REQUIRED", StringComparison.OrdinalIgnoreCase))
+            {
+                return Result<WatchPageData>.Failure(new TubeForgeError(
+                    "Video.AuthenticationUnsupported",
+                    "Authenticated and access-controlled media are intentionally unsupported in TubeForge v2."));
+            }
+
+            if (status.Equals("LIVE_STREAM_OFFLINE", StringComparison.OrdinalIgnoreCase) ||
+                liveStartedAtUtc is not null && liveEndedAtUtc is null)
+            {
+                var pendingFormat = LiveFormat(
+                    new Uri(YouTubeOrigin, $"watch?v={Uri.EscapeDataString(videoId.Value)}"),
+                    manifestPending: true);
+                return Result<WatchPageData>.Success(new WatchPageData(
+                    LiveMetadata(
+                        root,
+                        details,
+                        videoId,
+                        title,
+                        liveStartedAtUtc,
+                        liveEndedAtUtc,
+                        VideoContentKind.LiveUpcoming,
+                        pendingFormat),
+                    ParsePlayerScriptUrl(html),
+                    0,
+                    status,
+                    new ExtractionDiagnostics("LiveUpcoming")));
+            }
+
+            return Result<WatchPageData>.Failure(new TubeForgeError("Video.Unavailable", reason));
         }
 
         var formats = new List<StreamFormat>();
@@ -209,6 +221,31 @@ public static class YouTubeWatchPageParser
                 signatureCipherResolver,
                 mediaUrlResolver,
                 ref cipheredCount);
+        }
+
+        if (isLiveNow)
+        {
+            if (!TryParseHlsManifest(root, out var manifestUri))
+            {
+                return UnsupportedLive(
+                    "Video.LiveManifestUnavailable",
+                    "YouTube did not provide a trusted public HLS manifest for this active stream.");
+            }
+
+            return Result<WatchPageData>.Success(new WatchPageData(
+                LiveMetadata(
+                    root,
+                    details,
+                    videoId,
+                    title,
+                    liveStartedAtUtc,
+                    liveEndedAtUtc,
+                    VideoContentKind.LiveActive,
+                    LiveFormat(manifestUri, manifestPending: false)),
+                ParsePlayerScriptUrl(html),
+                0,
+                status,
+                new ExtractionDiagnostics("LiveHlsResolved")));
         }
 
         var duration = ParseDuration(ReadString(details, "lengthSeconds"));
@@ -240,6 +277,63 @@ public static class YouTubeWatchPageParser
             ParsePlayerScriptUrl(html),
             cipheredCount,
             status));
+    }
+
+    private static VideoMetadata LiveMetadata(
+        JsonElement root,
+        JsonElement details,
+        YouTubeVideoId videoId,
+        string title,
+        DateTimeOffset? liveStartedAtUtc,
+        DateTimeOffset? liveEndedAtUtc,
+        VideoContentKind contentKind,
+        StreamFormat format) => new()
+        {
+            Id = videoId,
+            Title = title.Trim(),
+            Channel = ReadString(details, "author")?.Trim() ?? string.Empty,
+            Duration = null,
+            ThumbnailUrl = ParseThumbnail(details),
+            Availability = contentKind == VideoContentKind.LiveUpcoming
+            ? VideoAvailability.LiveStreamOffline
+            : VideoAvailability.Available,
+            ContentKind = contentKind,
+            LiveStartedAtUtc = liveStartedAtUtc,
+            LiveEndedAtUtc = liveEndedAtUtc,
+            Formats = [format],
+            CaptionTracks = MapCaptionTracks(root),
+            Chapters = []
+        };
+
+    private static StreamFormat LiveFormat(Uri uri, bool manifestPending) => new()
+    {
+        FormatId = LiveHlsFormatId,
+        Url = uri,
+        Container = MediaContainer.Mkv,
+        Kind = StreamKind.Progressive,
+        VideoCodec = VideoCodec.Unknown,
+        AudioCodec = AudioCodec.Unknown,
+        QualityLabel = manifestPending ? "Upcoming live · wait and record" : "Active live · record from now",
+        IsLiveHls = true,
+        IsLiveManifestPending = manifestPending
+    };
+
+    private static bool TryParseHlsManifest(JsonElement root, out Uri uri)
+    {
+        uri = null!;
+        var value = ReadString(root, "streamingData", "hlsManifestUrl");
+        if (string.IsNullOrWhiteSpace(value) || value.Length > 8_192 ||
+            !Uri.TryCreate(value, UriKind.Absolute, out var parsed) ||
+            parsed.Scheme != Uri.UriSchemeHttps || !string.IsNullOrEmpty(parsed.UserInfo) ||
+            !string.IsNullOrEmpty(parsed.Fragment) ||
+            (!parsed.Host.Equals("googlevideo.com", StringComparison.OrdinalIgnoreCase) &&
+             !parsed.Host.EndsWith(".googlevideo.com", StringComparison.OrdinalIgnoreCase)))
+        {
+            return false;
+        }
+
+        uri = parsed;
+        return true;
     }
 
     private static IReadOnlyList<CaptionTrack> MapCaptionTracks(JsonElement root)

@@ -1,7 +1,10 @@
 using System.Net;
 using System.Net.Http.Headers;
 using TubeForge.Core.Media;
+using TubeForge.Core.Networking;
+using TubeForge.Core.Settings;
 using TubeForge.Core.YouTube;
+using TubeForge.Tests.Downloads;
 using TubeForge.Tests.Framework;
 using TubeForge.YouTube;
 
@@ -9,6 +12,36 @@ namespace TubeForge.Tests.YouTube;
 
 public static class YouTubeMetadataResolverTests
 {
+    [Test]
+    public static async Task FetchesMetadataThroughConfiguredLoopbackProxy()
+    {
+        var html = await File.ReadAllTextAsync(
+            Path.Combine(AppContext.BaseDirectory, "Fixtures", "watch-page-basic.html"));
+        await using var proxy = LoopbackHttpResponseServer.Start(
+            IPAddress.Loopback,
+            System.Text.Encoding.UTF8.GetBytes(html),
+            maximumRequests: 8);
+        var proxyOrigin = new Uri(proxy.EndpointUri.GetLeftPart(UriPartial.Authority) + "/");
+        var networkProxy = new ConfigurableWebProxy(
+            new NetworkProxyConfiguration(NetworkProxyMode.Manual, proxyOrigin));
+        using var handler = new SocketsHttpHandler { Proxy = networkProxy, UseProxy = true };
+        using var client = new HttpClient(handler) { Timeout = Timeout.InfiniteTimeSpan };
+        var resolver = new YouTubeMetadataResolver(
+            client,
+            new Uri("http://metadata.test/"),
+            TimeSpan.FromSeconds(5));
+
+        Assert.True(YouTubeVideoId.TryCreate("Fixture123_", out var videoId));
+        var result = await resolver.ResolveAsync(videoId);
+        var request = await proxy.Request;
+
+        Assert.True(result.IsSuccess, result.Error?.Message);
+        Assert.True(request.Contains(
+            "GET http://metadata.test/watch?v=Fixture123_&hl=en HTTP/1.1",
+            StringComparison.Ordinal));
+        Assert.Equal("Fixture {video}; title", result.Value.Metadata.Title);
+    }
+
     [Test]
     public static async Task FetchesExpectedWatchPageAndMapsIt()
     {

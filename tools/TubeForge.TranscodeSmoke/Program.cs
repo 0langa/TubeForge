@@ -84,7 +84,7 @@ try
         {
             SourcePath = source,
             DestinationPath = output,
-            Output = AudioOutputProfile.Mp3(192)
+            Output = OutputProfile.Mp3(192)
         });
         if (!transcode.IsSuccess)
         {

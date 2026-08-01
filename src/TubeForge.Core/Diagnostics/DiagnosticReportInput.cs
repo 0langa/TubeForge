@@ -27,4 +27,6 @@ public sealed record DiagnosticReportInput
     public int FailedQueueItems { get; init; }
 
     public int CancelledQueueItems { get; init; }
+
+    public string ProxyMode { get; init; } = "System";
 }

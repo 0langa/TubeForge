@@ -94,6 +94,16 @@ public static class YouTubeWatchPageParserTests
         Assert.False(unavailable.IsSuccess);
         Assert.Equal("Video.Unavailable", unavailable.Error?.Code);
 
+        var loginRequired = YouTubeWatchPageParser.Parse(
+            "<script>var ytInitialPlayerResponse={\"playabilityStatus\":{\"status\":\"LOGIN_REQUIRED\",\"reason\":\"Private fixture detail\"}," +
+            "\"videoDetails\":{\"videoId\":\"Fixture123_\",\"title\":\"Fixture\"}};</script>");
+        Assert.False(loginRequired.IsSuccess);
+        Assert.Equal("Video.AuthenticationUnsupported", loginRequired.Error?.Code);
+        Assert.Equal(
+            "Authenticated and access-controlled media are intentionally unsupported in TubeForge v2.",
+            loginRequired.Error?.Message);
+        Assert.False(loginRequired.Error!.Message.Contains("fixture", StringComparison.OrdinalIgnoreCase));
+
         var hostileThumbnail = YouTubeWatchPageParser.Parse(
             "<script>var ytInitialPlayerResponse={\"playabilityStatus\":{\"status\":\"OK\"}," +
             "\"videoDetails\":{\"videoId\":\"Fixture123_\",\"title\":\"Fixture\"," +
@@ -136,12 +146,13 @@ public static class YouTubeWatchPageParserTests
     }
 
     [Test]
-    public static void RejectsActiveAndUpcomingLiveCaptureWithTypedErrors()
+    public static void MapsActiveAndUpcomingLiveCaptureModes()
     {
         var active = YouTubeWatchPageParser.Parse(PlayerResponse("""
             "videoDetails":{
               "videoId":"Fixture123_","title":"Active fixture","isLiveContent":true,"isLive":true
-            }
+            },
+            "streamingData":{"hlsManifestUrl":"https://manifest.googlevideo.com/api/manifest/hls_playlist/test.m3u8"}
             """));
         var upcoming = YouTubeWatchPageParser.Parse("""
             <script>var ytInitialPlayerResponse={
@@ -153,10 +164,15 @@ public static class YouTubeWatchPageParserTests
             };</script>
             """);
 
-        Assert.False(active.IsSuccess);
-        Assert.Equal("Video.ActiveLiveUnsupported", active.Error?.Code);
-        Assert.False(upcoming.IsSuccess);
-        Assert.Equal("Video.LiveUpcomingUnsupported", upcoming.Error?.Code);
+        Assert.True(active.IsSuccess, active.Error?.Message);
+        Assert.Equal(VideoContentKind.LiveActive, active.Value.Metadata.ContentKind);
+        Assert.True(active.Value.Metadata.Formats.Single().IsLiveHls);
+        Assert.False(active.Value.Metadata.Formats.Single().IsLiveManifestPending);
+        Assert.Equal(YouTubeWatchPageParser.LiveHlsFormatId, active.Value.Metadata.Formats.Single().FormatId);
+
+        Assert.True(upcoming.IsSuccess, upcoming.Error?.Message);
+        Assert.Equal(VideoContentKind.LiveUpcoming, upcoming.Value.Metadata.ContentKind);
+        Assert.True(upcoming.Value.Metadata.Formats.Single().IsLiveManifestPending);
     }
 
     private static string PlayerResponse(string body) => $$"""
