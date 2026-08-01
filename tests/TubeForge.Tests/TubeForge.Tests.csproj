@@ -24,6 +24,9 @@
     <None Include="../../src/TubeForge.App/MainWindow.xaml"
           Link="Fixtures/MainWindow.xaml"
           CopyToOutputDirectory="PreserveNewest" />
+    <None Include="../../src/TubeForge.App/UpdateAvailableWindow.xaml"
+          Link="Fixtures/UpdateAvailableWindow.xaml"
+          CopyToOutputDirectory="PreserveNewest" />
     <None Include="../../assets/TubeForge.svg"
           Link="Fixtures/TubeForge.svg"
           CopyToOutputDirectory="PreserveNewest" />

@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 2.2.0 - 2026-08-01
+
+- Fix update action command invalidation so Settings enables `Update now` immediately after a successful release check.
+- Prompt once per detected release with `Later` and `Update now` actions, download progress, and clear data-retention guidance.
+- Make explicit `Update now` confirmation download and verify the official installer, close TubeForge, install unattended, and relaunch the updated app.
+
 ## 2.1.0 - 2026-08-01
 
 - Keep output extensions out of filename stems and add an opt-in quality suffix covering audio bitrate/lossless profiles and video resolution.

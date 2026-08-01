@@ -367,8 +367,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         CheckForUpdatesCommand = new AsyncRelayCommand(
             () => CheckForUpdatesAsync(isAutomatic: false),
             () => !ShowResponsibleUseNotice && !IsCheckingForUpdate && !IsDownloadingUpdate);
-        DownloadUpdateCommand = new AsyncRelayCommand(
-            DownloadUpdateAsync,
+        UpdateNowCommand = new AsyncRelayCommand(
+            UpdateNowAsync,
             () => _availableUpdate is not null && !IsCheckingForUpdate && !IsDownloadingUpdate);
         ClearCompletedCommand = new AsyncRelayCommand(ClearCompletedAsync, () => QueueItems.Any(item => item.Status == DownloadQueueStatus.Completed));
         ClearHistoryCommand = new AsyncRelayCommand(
@@ -380,6 +380,10 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     }
 
     public event PropertyChangedEventHandler? PropertyChanged;
+
+    public event EventHandler<UpdateAvailableEventArgs>? UpdateAvailable;
+
+    public event EventHandler? UpdateInstallerStarted;
 
     public ObservableCollection<FormatItemViewModel> Formats { get; } = [];
 
@@ -446,7 +450,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
 
     public AsyncRelayCommand CheckForUpdatesCommand { get; }
 
-    public AsyncRelayCommand DownloadUpdateCommand { get; }
+    public AsyncRelayCommand UpdateNowCommand { get; }
 
     public AsyncRelayCommand ClearCompletedCommand { get; }
 
@@ -731,7 +735,11 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         get => _isDownloadingUpdate;
         private set
         {
-            if (Set(ref _isDownloadingUpdate, value)) RefreshCommands();
+            if (Set(ref _isDownloadingUpdate, value))
+            {
+                OnPropertyChanged(nameof(CanDismissUpdatePrompt));
+                RefreshCommands();
+            }
         }
     }
 
@@ -744,6 +752,10 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     public bool HasUpdateAvailable => _availableUpdate is not null && _readyUpdate is null;
 
     public bool IsUpdateReady => _readyUpdate is not null;
+
+    public bool IsUpdateActionAvailable => _availableUpdate is not null;
+
+    public bool CanDismissUpdatePrompt => !IsDownloadingUpdate;
 
     public string AvailableUpdateVersion => _availableUpdate?.Version.ToString(3) ?? string.Empty;
 
@@ -2649,15 +2661,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                 throw new IOException("Update installer hash changed after verification.");
             }
 
-            var start = new ProcessStartInfo
-            {
-                FileName = installerPath,
-                UseShellExecute = false
-            };
-            start.ArgumentList.Add("/update");
-            start.ArgumentList.Add("/wait-pid");
-            start.ArgumentList.Add(Environment.ProcessId.ToString(System.Globalization.CultureInfo.InvariantCulture));
-            start.ArgumentList.Add("/launch");
+            var start = CreateUpdateInstallerStartInfo(installerPath, Environment.ProcessId);
             _ = Process.Start(start) ?? throw new IOException("The verified update installer did not start.");
             UpdateStatus = $"Installing TubeForge {ready.Version.ToString(3)}…";
             return true;
@@ -2671,6 +2675,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
 
     private async Task CheckForUpdatesAsync(bool isAutomatic)
     {
+        UpdateRelease? detectedUpdate = null;
         IsCheckingForUpdate = true;
         UpdateStatus = "Checking GitHub for a verified stable release…";
         try
@@ -2692,20 +2697,39 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             UpdateStatus = _availableUpdate is null
                 ? $"TubeForge {current.ToString(3)} is up to date."
                 : $"TubeForge {_availableUpdate.Version.ToString(3)} is available and ready to download.";
+            detectedUpdate = _availableUpdate;
             NotifyUpdateProperties();
         }
         finally
         {
             IsCheckingForUpdate = false;
         }
+
+        if (detectedUpdate is not null)
+        {
+            UpdateAvailable?.Invoke(this, new UpdateAvailableEventArgs(detectedUpdate.Version));
+        }
     }
 
-    private async Task DownloadUpdateAsync()
+    private async Task UpdateNowAsync()
+    {
+        if (_readyUpdate is null && !await DownloadUpdateAsync())
+        {
+            return;
+        }
+
+        if (await StartReadyUpdateAsync())
+        {
+            UpdateInstallerStarted?.Invoke(this, EventArgs.Empty);
+        }
+    }
+
+    private async Task<bool> DownloadUpdateAsync()
     {
         var release = _availableUpdate;
         if (release is null)
         {
-            return;
+            return false;
         }
 
         IsDownloadingUpdate = true;
@@ -2718,12 +2742,13 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             if (!result.IsSuccess)
             {
                 UpdateStatus = $"Update download rejected safely ({result.Error!.Code}).";
-                return;
+                return false;
             }
 
             _readyUpdate = result.Value;
-            UpdateStatus = $"TubeForge {release.Version.ToString(3)} verified. Install when ready.";
+            UpdateStatus = $"TubeForge {release.Version.ToString(3)} verified. Starting installer…";
             NotifyUpdateProperties();
+            return true;
         }
         finally
         {
@@ -2735,8 +2760,30 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     {
         OnPropertyChanged(nameof(HasUpdateAvailable));
         OnPropertyChanged(nameof(IsUpdateReady));
+        OnPropertyChanged(nameof(IsUpdateActionAvailable));
         OnPropertyChanged(nameof(AvailableUpdateVersion));
         RefreshCommands();
+    }
+
+    internal static ProcessStartInfo CreateUpdateInstallerStartInfo(string installerPath, int waitProcessId)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(installerPath);
+        if (waitProcessId <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(waitProcessId));
+        }
+
+        var start = new ProcessStartInfo
+        {
+            FileName = installerPath,
+            UseShellExecute = false
+        };
+        start.ArgumentList.Add("/update");
+        start.ArgumentList.Add("/quiet");
+        start.ArgumentList.Add("/wait-pid");
+        start.ArgumentList.Add(waitProcessId.ToString(CultureInfo.InvariantCulture));
+        start.ArgumentList.Add("/launch");
+        return start;
     }
 
     public void Dispose()
@@ -3825,7 +3872,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         ClearCompletedCommand.RaiseCanExecuteChanged();
         CancelCommand.RaiseCanExecuteChanged();
         CheckForUpdatesCommand.RaiseCanExecuteChanged();
-        DownloadUpdateCommand.RaiseCanExecuteChanged();
+        UpdateNowCommand.RaiseCanExecuteChanged();
     }
 
     private void NotifyHistoryProperties()
@@ -5394,6 +5441,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         QueueCollectionCommand.RaiseCanExecuteChanged();
         CancelAnalysisCommand.RaiseCanExecuteChanged();
         CancelCommand.RaiseCanExecuteChanged();
+        CheckForUpdatesCommand.RaiseCanExecuteChanged();
+        UpdateNowCommand.RaiseCanExecuteChanged();
     }
 
     private void CancelAnalysis()
@@ -5733,4 +5782,9 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                 ? MediaTimelineEditor.MergeRemovalRanges(SafeSponsorSegments)
                 : [];
     }
+}
+
+public sealed class UpdateAvailableEventArgs(Version version) : EventArgs
+{
+    public Version Version { get; } = version ?? throw new ArgumentNullException(nameof(version));
 }

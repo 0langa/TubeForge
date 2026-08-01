@@ -23,7 +23,7 @@ Include the TubeForge version, Windows version, typed failure code, extraction s
 - Audio/video conversion depends on bundled FFmpeg and remains explicitly opt-in; original-quality stream copy stays default.
 - No authenticated, private, paid, membership, DRM, or access-control content.
 - No encrypted HLS.
-- No silent update, telemetry, or crash-upload service. Update checks are optional and installation always requires confirmation.
+- No unprompted/background installation, telemetry, or crash-upload service. Update checks are optional; choosing `Update now` explicitly authorizes verified download, unattended install, and app restart.
 - Installer and portable distributions are Windows x64 only.
 - Public extraction can break when YouTube changes response or player structure.
 

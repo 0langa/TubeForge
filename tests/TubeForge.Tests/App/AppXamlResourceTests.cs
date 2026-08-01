@@ -93,4 +93,17 @@ public static class AppXamlResourceTests
         Assert.True(mainWindowXaml.Contains("Content=\"Open diagnostics\"", StringComparison.Ordinal));
         Assert.True(mainWindowXaml.Contains("Content=\"Copy report\"", StringComparison.Ordinal));
     }
+
+    [Test]
+    public static void UpdatePromptOffersOneClickVerifiedInstallAndRestart()
+    {
+        var fixtureDirectory = Path.Combine(AppContext.BaseDirectory, "Fixtures");
+        var updateWindowXaml = File.ReadAllText(Path.Combine(fixtureDirectory, "UpdateAvailableWindow.xaml"));
+
+        Assert.True(updateWindowXaml.Contains("Content=\"Update now\"", StringComparison.Ordinal));
+        Assert.True(updateWindowXaml.Contains("Command=\"{Binding UpdateNowCommand}\"", StringComparison.Ordinal));
+        Assert.True(updateWindowXaml.Contains("Value=\"{Binding UpdateDownloadFraction, Mode=OneWay}\"", StringComparison.Ordinal));
+        Assert.True(updateWindowXaml.Contains("IsEnabled=\"{Binding CanDismissUpdatePrompt}\"", StringComparison.Ordinal));
+        Assert.True(updateWindowXaml.Contains("install the update, then launch the new version", StringComparison.Ordinal));
+    }
 }

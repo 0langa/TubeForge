@@ -41,9 +41,9 @@ gh attestation verify ".\$name" -R 0langa/TubeForge
 ## Upgrade and rollback
 
 1. Let active downloads finish or pause them, then close TubeForge.
-2. Use Settings to check for an update, or download the new installer from the official release.
-3. TubeForge verifies the repository, version, asset name, size, GitHub digest, and matching SHA-256 manifest before offering to run an update.
-4. Confirm installation explicitly. Existing local settings, queue, and Library are reused from `%LOCALAPPDATA%\TubeForge`.
+2. Let the startup check show the update prompt, use Settings → Check now, or download the new installer from the official release.
+3. Choose `Update now` to authorize the full update. TubeForge downloads the official installer and verifies the repository, version, asset name, size, GitHub digest, and matching SHA-256 manifest.
+4. TubeForge rechecks the staged installer, closes the running version, installs the update for the current Windows user, then launches the updated app. Existing local settings, queue, and Library are reused from `%LOCALAPPDATA%\TubeForge`.
 
 Portable users should verify and extract the new archive to a sibling directory. Keep the prior portable directory until the new version has completed an analyze/download smoke test.
 
