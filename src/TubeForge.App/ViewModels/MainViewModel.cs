@@ -138,6 +138,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     private readonly CollectionArchiveStore _archiveStore;
     private readonly TubeForgeSettingsStore _settingsStore;
     private readonly GitHubUpdateClient _updateClient;
+    private readonly Version _currentVersion;
     private readonly string _updateDirectory;
     private readonly DownloadQueueDispatcher _queueDispatcher = new(2);
     private HostRequestGate _hostRequestGate;
@@ -254,7 +255,10 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     {
     }
 
-    internal MainViewModel(string? applicationDataDirectory)
+    internal MainViewModel(
+        string? applicationDataDirectory,
+        HttpMessageHandler? updateMessageHandler = null,
+        Version? currentVersion = null)
     {
         _hostRequestGate = new HostRequestGate(2);
         _rateLimitedRequests = new RateLimitedRequestExecutor(_hostRequestGate);
@@ -294,7 +298,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         _sidecarHttpClient = new HttpClient(sidecarHandler) { Timeout = TimeSpan.FromSeconds(60) };
         _thumbnailDownloader = new ThumbnailDownloadEngine(_sidecarHttpClient);
         _sponsorBlockClient = new SponsorBlockClient(_sidecarHttpClient);
-        var updateHandler = new SocketsHttpHandler
+        var updateHandler = updateMessageHandler ?? new SocketsHttpHandler
         {
             AutomaticDecompression = DecompressionMethods.All,
             AllowAutoRedirect = false,
@@ -305,6 +309,13 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         };
         _updateHttpClient = new HttpClient(updateHandler) { Timeout = TimeSpan.FromSeconds(60) };
         _updateClient = new GitHubUpdateClient(_updateHttpClient);
+        var executingVersion = currentVersion ??
+            Assembly.GetExecutingAssembly().GetName().Version ??
+            new Version(1, 0, 0);
+        _currentVersion = new Version(
+            executingVersion.Major,
+            executingVersion.Minor,
+            Math.Max(0, executingVersion.Build));
         applicationDataDirectory ??= Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
             "TubeForge");
@@ -2680,9 +2691,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         UpdateStatus = "Checking GitHub for a verified stable release…";
         try
         {
-            var current = Assembly.GetExecutingAssembly().GetName().Version ?? new Version(1, 0, 0);
-            current = new Version(current.Major, current.Minor, Math.Max(0, current.Build));
-            var result = await _updateClient.CheckForUpdateAsync(current);
+            var result = await _updateClient.CheckForUpdateAsync(_currentVersion);
             if (!result.IsSuccess)
             {
                 UpdateStatus = isAutomatic
@@ -2695,7 +2704,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             _readyUpdate = null;
             UpdateDownloadFraction = 0;
             UpdateStatus = _availableUpdate is null
-                ? $"TubeForge {current.ToString(3)} is up to date."
+                ? $"TubeForge {_currentVersion.ToString(3)} is up to date."
                 : $"TubeForge {_availableUpdate.Version.ToString(3)} is available and ready to download.";
             detectedUpdate = _availableUpdate;
             NotifyUpdateProperties();

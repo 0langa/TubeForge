@@ -19,7 +19,7 @@ The self-contained release build restores only the exact Microsoft .NET runtime 
 Keep the downloaded installer or ZIP and `SHA256SUMS.txt` in the same directory. In PowerShell:
 
 ```powershell
-$version = '2.2.0'
+$version = '2.2.1'
 $name = "TubeForge-$version-win-x64-setup.exe"
 $expected = (Get-Content .\SHA256SUMS.txt | Where-Object { $_ -match "  $([regex]::Escape($name))$" }).Split(' ')[0]
 $actual = (Get-FileHash -LiteralPath ".\$name" -Algorithm SHA256).Hash
@@ -41,6 +41,9 @@ gh attestation verify ".\$name" -R 0langa/TubeForge
 ```
 
 ## Upgrade and rollback
+
+> [!IMPORTANT]
+> TubeForge v2.1.0 requires one manual upgrade. Its update check can find a newer release, but its installed binary cannot enable the update action and does not contain the startup prompt. Download, verify, and run the current setup executable once. Installed v2.2.0 and later releases can use the flow below.
 
 1. Let active downloads finish or pause them, then close TubeForge.
 2. Let the startup check show the update prompt, use Settings → Check now, or download the new installer from the official release.

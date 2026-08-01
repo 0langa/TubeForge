@@ -1,13 +1,17 @@
-# TubeForge v2.2.0
+# TubeForge v2.2.1
 
-TubeForge v2.2.0 fixes the disabled update action and adds an explicit one-click update flow. When a stable release is detected, TubeForge can now download and verify the official installer, close the running app, install the update, and launch the updated version.
+TubeForge v2.2.1 is a recovery-verification release for the updater introduced in v2.2.0. It adds an end-to-end startup regression proving a detected stable release raises the prompt and immediately enables `Update now`.
+
+> [!IMPORTANT]
+> TubeForge v2.1.0 can detect a newer release, but its installed binary cannot enable the download button and does not contain the startup prompt. It cannot repair itself. If you are running v2.1.0, download and run `TubeForge-2.2.1-win-x64-setup.exe` once from the official release. Updates after that can use the in-app flow.
 
 Choose the per-user Windows x64 installer for normal use or a portable archive when needed. Verify `SHA256SUMS.txt` before running or extracting an asset. GitHub Actions release artifacts carry build-provenance attestations; the release manifest states whether Windows executables also have an Authenticode signature.
 
 Highlights:
 
-- fixes the Settings update button remaining disabled after a successful release check;
-- adds an update-available prompt with `Later` and `Update now` actions;
+- carries forward the v2.2.0 fix that enables the Settings update button after a successful release check;
+- carries forward the startup prompt with `Later` and `Update now` actions;
+- adds regression coverage for the complete automatic-check, prompt-event, and command-enable path;
 - shows verified download progress and prevents prompt dismissal while the installer downloads;
 - makes `Update now` download and validate both GitHub and manifest SHA-256 records, then re-hash the staged installer before execution;
 - starts the installer in unattended update mode, waits for the current TubeForge process to close, installs for the current Windows user, and relaunches TubeForge;

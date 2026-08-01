@@ -2,7 +2,11 @@
 
 ## Unreleased
 
-- Refresh public documentation, issue intake, support/security boundaries, and repository links for the v2.2.0 product surface.
+## 2.2.1 - 2026-08-02
+
+- Add a startup-path regression proving an automatic update check raises the update prompt and immediately enables `Update now`.
+- Document the one-time manual upgrade required for v2.1.0, whose installed updater can detect a release but cannot enable its action or show the later prompt UI.
+- Refresh public documentation, issue intake, support/security boundaries, and repository links for the current product surface.
 - Replace the expired timestamped FFmpeg autobuild link with immutable build identifiers and the verified TubeForge bootstrap asset.
 
 ## 2.2.0 - 2026-08-01

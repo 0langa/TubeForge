@@ -1,12 +1,70 @@
 using System.Diagnostics;
+using System.Net;
+using System.Net.Http;
 using System.Reflection;
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.Json;
 using TubeForge.App.ViewModels;
+using TubeForge.Core.Settings;
 using TubeForge.Tests.Framework;
 
 namespace TubeForge.Tests.App;
 
 public static class MainViewModelUpdateTests
 {
+    [Test]
+    public static async Task StartupCheckRaisesPromptAndEnablesUpdateAction()
+    {
+        var applicationDataDirectory = Path.Combine(
+            Path.GetTempPath(),
+            $"tubeforge-startup-update-{Guid.NewGuid():N}");
+        try
+        {
+            var settings = new TubeForgeSettings
+            {
+                DownloadFolder = Path.GetFullPath(applicationDataDirectory),
+                EnableAutomaticUpdateChecks = true,
+                ResponsibleUseAccepted = true
+            };
+            var save = await new TubeForgeSettingsStore(
+                    Path.Combine(applicationDataDirectory, "settings.json"))
+                .SaveAsync(settings);
+            Assert.True(save.IsSuccess, save.Error?.Message);
+
+            var constructor = typeof(MainViewModel).GetConstructor(
+                BindingFlags.Instance | BindingFlags.NonPublic,
+                binder: null,
+                [typeof(string), typeof(HttpMessageHandler), typeof(Version)],
+                modifiers: null)
+                ?? throw new MissingMethodException(
+                    typeof(MainViewModel).FullName,
+                    ".ctor(string, HttpMessageHandler, Version)");
+            using var viewModel = (MainViewModel)(constructor.Invoke(
+                [applicationDataDirectory, new LatestReleaseHandler(), new Version(2, 2, 0)])
+                ?? throw new InvalidOperationException("Update test view model was not created."));
+            var promptedVersion = new TaskCompletionSource<Version>(
+                TaskCreationOptions.RunContinuationsAsynchronously);
+            viewModel.UpdateAvailable += (_, eventArgs) =>
+                promptedVersion.TrySetResult(eventArgs.Version);
+
+            await viewModel.InitializeAsync();
+            var version = await promptedVersion.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+            Assert.Equal(new Version(2, 2, 1), version);
+            Assert.Equal("2.2.1", viewModel.AvailableUpdateVersion);
+            Assert.True(viewModel.IsUpdateActionAvailable);
+            Assert.True(viewModel.UpdateNowCommand.CanExecute(null));
+        }
+        finally
+        {
+            if (Directory.Exists(applicationDataDirectory))
+            {
+                Directory.Delete(applicationDataDirectory, recursive: true);
+            }
+        }
+    }
+
     [Test]
     public static void GeneralCommandRefreshInvalidatesUpdateAction()
     {
@@ -41,5 +99,51 @@ public static class MainViewModelUpdateTests
         Assert.SequenceEqual(
             new[] { "/update", "/quiet", "/wait-pid", "4321", "/launch" },
             start.ArgumentList);
+    }
+
+    private sealed class LatestReleaseHandler : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken)
+        {
+            if (request.RequestUri?.Host != "api.github.com")
+            {
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound));
+            }
+
+            const string setupName = "TubeForge-2.2.1-win-x64-setup.exe";
+            const string setupHash = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+            var checksumBytes = Encoding.UTF8.GetBytes($"{setupHash}  {setupName}\n");
+            var checksumHash = Convert.ToHexString(SHA256.HashData(checksumBytes)).ToLowerInvariant();
+            var json = JsonSerializer.Serialize(new
+            {
+                tag_name = "v2.2.1",
+                html_url = "https://github.com/0langa/TubeForge/releases/tag/v2.2.1",
+                draft = false,
+                prerelease = false,
+                assets = new object[]
+                {
+                    new
+                    {
+                        name = setupName,
+                        size = 1024 * 1024,
+                        digest = "sha256:" + setupHash,
+                        browser_download_url = $"https://github.com/0langa/TubeForge/releases/download/v2.2.1/{setupName}"
+                    },
+                    new
+                    {
+                        name = "SHA256SUMS.txt",
+                        size = checksumBytes.LongLength,
+                        digest = "sha256:" + checksumHash,
+                        browser_download_url = "https://github.com/0langa/TubeForge/releases/download/v2.2.1/SHA256SUMS.txt"
+                    }
+                }
+            });
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(json, Encoding.UTF8, "application/json")
+            });
+        }
     }
 }
