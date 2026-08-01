@@ -13,7 +13,15 @@ body:
     id: commit
     attributes:
       label: Commit or version
-      placeholder: 1478c0a or 0.1.0
+      placeholder: 9f86c94 or 2.2.0
+    validations:
+      required: true
+
+  - type: input
+    id: windows
+    attributes:
+      label: Windows version
+      placeholder: Windows 11 24H2 x64
     validations:
       required: true
 
@@ -59,5 +67,5 @@ body:
           required: true
         - label: I reproduced with public media I am authorized to probe or with synthetic fixtures.
           required: true
-        - label: I ran the current test suite and checked the extractor playbook.
+        - label: I checked the latest stable release and searched existing issues.
           required: true

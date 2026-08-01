@@ -1,37 +1,39 @@
-# Security Policy
+# Security policy
 
 ## Supported versions
 
-Security fixes target the latest v1 release and `main`.
+Security fixes target the latest stable TubeForge release and `main`.
 
 | Version | Supported |
 |---|---|
-| Latest 1.x | Yes |
-| Older 1.x | Upgrade first |
-| Development snapshots | Best effort |
+| Latest stable (2.2.x) | Yes |
+| `main` development snapshots | Best effort |
+| Older releases | Upgrade first |
 
-## Reporting a vulnerability
+## Report a vulnerability privately
 
-Use GitHub's private vulnerability reporting feature when enabled. If unavailable, open a minimal issue asking the maintainer to establish a private channel; do not publish exploit details or secrets.
+Use [GitHub private vulnerability reporting](https://github.com/0langa/TubeForge/security/advisories/new). Do not open a public issue containing exploit details, credentials, private media information, or other sensitive data.
 
 Never include:
 
-- cookies or account credentials;
-- signed media URLs or their query strings;
-- visitor/session identifiers;
+- cookies, account credentials, tokens, keys, or passwords;
+- signed media URLs or query strings;
+- visitor or session identifiers;
 - private or unlisted video details;
-- tokens, keys, passwords, or local personal information;
+- local usernames, full paths, or other personal information;
 - downloaded media.
 
-Useful safe details include the commit/version, failure code, affected subsystem, sanitized reproduction structure, and whether the issue works with synthetic/local test data.
+Useful safe details include the TubeForge version or commit, typed failure code, affected subsystem, sanitized reproduction structure, and whether the issue reproduces with synthetic/local test data.
 
-Use the in-app Diagnostics export when possible. Its JSON schema is whitelist-only and excludes URLs, video IDs, titles, channels, local paths, headers, cookies, signatures, visitor data, and media. Review exported data before sharing it.
+Use the in-app Diagnostics export when possible. Its whitelist-only JSON excludes URLs, video IDs, titles, channels, local paths, headers, cookies, signatures, visitor data, and media. Review exported data before sharing it.
 
 ## Security boundaries
 
-- Player JavaScript must never be executed directly.
-- Remote JSON and media containers are untrusted input.
-- Download output must remain under the user-selected directory.
-- Partial files must not replace completed files.
-- Logs and diagnostics must redact URL query strings and sensitive headers.
-- TubeForge does not attempt to bypass DRM, payment, membership, or access controls.
+- Player JavaScript is tokenized into a constrained operation plan and never executed directly.
+- Remote HTML, JSON, JavaScript, captions, thumbnails, HLS playlists, segments, and media containers are untrusted input.
+- Downloads and generated sidecars use bounded parsing, temporary files, output validation, and atomic publication.
+- Manual proxy mode is user-controlled; proxy credentials are rejected and proxy endpoints are excluded from diagnostics.
+- Update installation requires explicit user confirmation and accepts only policy-matching assets from the official repository with matching GitHub and manifest SHA-256 records.
+- TubeForge does not attempt to bypass DRM, payment, membership, login, or other access controls.
+
+See the repository-grounded [threat model](TUBEFORGE_THREAT_MODEL.md) and [security false-positive response guide](docs/SECURITY_FALSE_POSITIVE_RESPONSE.md).

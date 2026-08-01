@@ -1,0 +1,88 @@
+name: General bug
+description: Report app, installer, updater, queue, library, or UI behavior
+title: "[Bug] "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not include media URLs/IDs, titles, channels, cookies, headers, signatures, visitor data, proxy endpoints, local paths, private-video details, or downloaded media. Use TubeForge Diagnostics → Export JSON and review it before submission.
+
+  - type: input
+    id: version
+    attributes:
+      label: TubeForge version
+      placeholder: 2.2.0
+    validations:
+      required: true
+
+  - type: input
+    id: windows
+    attributes:
+      label: Windows version
+      placeholder: Windows 11 24H2 x64
+    validations:
+      required: true
+
+  - type: dropdown
+    id: install
+    attributes:
+      label: Distribution
+      options:
+        - Per-user installer
+        - Self-contained portable ZIP
+        - Framework-dependent portable ZIP
+        - Source build
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Affected area
+      options:
+        - Install, update, or uninstall
+        - Analyze or download setup
+        - Queue or transfer
+        - Media conversion or finalization
+        - Captions, chapters, trimming, or SponsorBlock
+        - Library or archive
+        - Settings or diagnostics
+        - UI or accessibility
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Sanitized reproduction steps
+      description: Describe exact UI actions without identifying media or including URLs.
+    validations:
+      required: true
+
+  - type: textarea
+    id: result
+    attributes:
+      label: Expected and observed result
+      description: Include any typed TubeForge failure code and separate expected behavior from observed behavior.
+    validations:
+      required: true
+
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Redacted diagnostic JSON
+      description: Optional. Paste only the reviewed JSON produced by TubeForge Diagnostics.
+      render: json
+
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Safety checklist
+      options:
+        - label: I removed URLs, IDs, titles, channels, local paths, proxy endpoints, headers, cookies, signatures, visitor data, and media.
+          required: true
+        - label: I checked the latest stable release and searched existing issues.
+          required: true

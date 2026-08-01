@@ -2,150 +2,91 @@
 
 # TubeForge
 
-TubeForge is an experimental, ad-free Windows desktop downloader built from scratch for media you are authorized to save from YouTube. It does not use `yt-dlp`, hosted conversion services, or third-party NuGet packages. Releases bundle a pinned LGPL FFmpeg executable for local stream-copy finalization and optional media conversion.
+[![CI](https://github.com/0langa/TubeForge/actions/workflows/ci.yml/badge.svg)](https://github.com/0langa/TubeForge/actions/workflows/ci.yml)
+[![Latest release](https://img.shields.io/github/v/release/0langa/TubeForge?display_name=tag)](https://github.com/0langa/TubeForge/releases/latest)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
+TubeForge is an ad-free Windows desktop app for public YouTube media you own or are authorized to save. It is built from scratch in C# without `yt-dlp`, hosted conversion services, telemetry, accounts, or third-party NuGet packages. Releases bundle a pinned LGPL FFmpeg executable for local stream-copy finalization and optional conversion.
 
 > [!IMPORTANT]
-> You are responsible for complying with YouTube's terms, copyright, privacy, and local law. Download only content you own or have permission to save. TubeForge is not intended to bypass DRM, payment, membership, or other access controls.
+> You are responsible for complying with YouTube's terms, copyright, privacy, and local law. Download only content you own or have permission to save. TubeForge does not bypass DRM, payment, membership, login, or other access controls.
 
-## Status
+## Download
 
-TubeForge v2.2.0 is the current public stable release.
+**[Download latest stable release](https://github.com/0langa/TubeForge/releases/latest)**
 
-Working now:
+TubeForge v2.2.0 is the current stable release. For normal use, choose `TubeForge-2.2.0-win-x64-setup.exe`. It installs for the current Windows user without administrator access. Portable self-contained and framework-dependent ZIPs are also available.
 
-- modern WPF analyze/download screen;
-- strict YouTube URL parsing and live public-video metadata resolution;
-- tail-verified no-token YouTube client chain for direct progressive, native-audio, and video-only streams;
-- type-first stream selection with resolution, container, codec, FPS/HDR, bitrate, and exact-stream filters;
-- highest-quality video + audio selection with separate resumable track downloads and FFmpeg stream-copy MP4, WebM, or MKV finalization;
-- automatic validated multi-worker transfers for large media, with bounded resume state and safe sequential fallback;
-- native M4A/WebM audio saves plus bundled-FFmpeg MP3, AAC/M4A, Opus/OGG, WAV, and FLAC conversion;
-- optional resolution-aware H.264/AAC MP4, H.265/AAC MP4, and VP9/Opus WebM conversion presets, with original-quality stream copy remaining default;
-- preset-first download setup for Best original, Windows MP4, Small file, MP3 320, and fully custom selection;
-- simple-by-default preset selection with persisted first-run folder/preset/update choices, optional advanced format disclosure, consistent vector navigation, and direct recovery links for common failures;
-- caption-track metadata plus manual/auto language selection, atomic SRT/WebVTT sidecar saves, and opt-in embedding of up to eight ordered soft-subtitle tracks for single videos and collection/archive queue items in MP4/MKV/WebM;
-- opt-in chapter embedding and lossless chapter splitting for single-video MP4/MKV/WebM outputs, with atomic publication, sanitized numbered names, and queue recovery validation;
-- bounded start/end trim controls with keyframe-aligned stream copy for original outputs, precise trim during selected transcodes, and synchronized caption/chapter rebasing;
-- disabled-by-default SponsorBlock integration using a privacy-preserving video-ID hash prefix, selectable categories, local candidate matching, and either chapter markers or explicit transcode removal;
-- on-demand validated thumbnail saves and stable JSON metadata sidecars with chapters but without signed stream URLs;
-- bounded playlist/channel enumeration with per-video selection, source ordering, indexed filenames, and batch queue preparation;
-- persistent playlist/channel archive profiles with destination/template/output/caption/chapter preferences, bounded new-item checkpoints, and one-click selection of items missing from Queue and Library;
-- shared per-provider request limits and bounded `Retry-After` backoff that stops persistent rate-limited bulk preparation;
-- unified system/manual/off proxy settings for metadata, collections, captions, thumbnails, media, and updates, with bounded metadata timeout, media retries, and per-host concurrency; proxy credentials are rejected and never stored;
-- customizable token-based filenames plus a durable local Library used for exact-output and destination duplicate detection;
-- searchable/sortable Library history with bounded moved-file rescans, portable schema-versioned JSON export/import, duplicate-safe merging, and one-click cleanup for missing records;
-- Short and completed-live-replay classification, plus bounded public active/upcoming HLS capture with record-now/wait modes, duration/size limits, recoverable segment journals, and validated MKV stream-copy finalization;
-- resumable `.part` transfers, bounded container validation, retries, progress, cancellation, and atomic finalization;
-- opt-in segmented transfer for large files with validated parallel ranges, resumable segment state, and automatic direct-transfer fallback;
-- preflight disk-space forecasting with adaptive-mux peak-space accounting and retryable low-space failures;
-- queue screen with 1–4 transfer global concurrency, per-item progress/speed/ETA, pause/resume/cancel/retry/remove/reveal controls, and interrupted-download recovery;
-- privacy-safe schema-versioned queue state that stores source identities instead of expiring media URLs;
-- local settings, first-run responsible-use acknowledgement, and redacted runtime/extraction diagnostics pages;
-- keyboard-focused navigation, screen-reader labels/live regions, DPI-aware layout rounding, and dark Windows title-bar integration;
-- package-free fixture/transfer test runner with deterministic hostile-container mutation coverage, plus sanitized live smoke tools.
-- isolated performance budgets for analysis latency, startup, CPU, memory, and UI frame pacing, with the deterministic core gate enforced in CI.
-- bounded structural classic/ES6 signature and `n` throttling transforms without executing player JavaScript;
-- reproducible portable framework-dependent and self-contained Windows x64 packaging with SHA-256 manifests.
-- branded per-user installer, Add/Remove Programs integration, clean uninstall, and opt-in verified updates with an explicit one-click download, install, and restart flow.
+Requirements: Windows 10 or 11, x64. Self-contained builds include the .NET runtime; framework-dependent builds require the x64 .NET 10 Windows Desktop Runtime. See [installation, verification, upgrades, rollback, and removal](docs/INSTALLATION.md).
 
-Not included: authenticated/access-controlled media, encrypted/DRM HLS, or generic non-YouTube M3U8 capture.
+## Features
 
-## Baseline
+### Downloads and formats
 
-- Windows 10/11 x64
-- .NET 10 WPF desktop application
-- Public video metadata plus progressive and highest-compatible adaptive downloads
-- Native audio-only downloads
-- Indexed MP4 plus validated WebM/MKV finalization through pinned FFmpeg stream copy
-- Resumable direct transfers, persisted queue recovery, and bounded concurrent queue processing
-- No ads, telemetry, accounts, or paid features
+- Public videos, Shorts, completed live replays, playlists, and channels with per-item selection.
+- Bounded public active/upcoming YouTube HLS capture with wait/record modes, duration and size limits, recoverable segment journals, and validated MKV finalization.
+- Progressive, native-audio, and adaptive video/audio streams with resolution, container, codec, FPS/HDR, bitrate, and exact-stream filters.
+- Highest-quality MP4, WebM, or MKV stream-copy output plus resumable separate-track downloads.
+- Native M4A/WebM audio and optional MP3, AAC/M4A, Opus/OGG, WAV, or FLAC conversion.
+- Optional H.264/AAC MP4, H.265/AAC MP4, and VP9/Opus WebM conversion presets; original-quality stream copy remains default.
 
-## Build
+### Download workflow
 
-Required source toolchain: .NET 10 SDK on Windows. Release packaging downloads one pinned, SHA-256-verified FFmpeg x64 archive.
+- Presets for Best original, Windows MP4, Small file, and MP3 320, plus full custom selection.
+- Queue with 1–4 global transfers, progress/speed/ETA, pause, resume, cancel, retry, reveal, and interrupted-download recovery.
+- Automatic validated multi-worker transfers for large media with bounded resume state and sequential fallback.
+- Preflight disk forecasting, retry limits, atomic publication, collision-safe names, and output validation.
+- Token-based filename templates with extensions applied once and an optional quality suffix for bitrate/lossless audio or video resolution.
+- Searchable local Library, duplicate detection, moved-file rescans, JSON import/export, and playlist/channel archive profiles.
+
+### Optional media tools
+
+- SRT/WebVTT caption sidecars and ordered soft-subtitle embedding for MP4, MKV, and WebM.
+- Chapter embedding and lossless chapter splitting with sanitized numbered filenames.
+- Start/end trimming with synchronized caption and chapter rebasing.
+- Disabled-by-default SponsorBlock chapter markers or explicit transcode removal using a privacy-preserving hash-prefix lookup.
+- Validated thumbnail downloads and stable JSON metadata sidecars without signed stream URLs.
+
+### Privacy, networking, and updates
+
+- No ads, telemetry, accounts, hosted services, cookie import, or credential storage.
+- System, manual, or disabled proxy mode across metadata, collections, captions, thumbnails, media, SponsorBlock, and update checks; credential-bearing proxy URLs are rejected.
+- Redacted diagnostics export that excludes media URLs, IDs, titles, channels, local paths, headers, cookies, signatures, and visitor data.
+- Opt-in update checks. Explicit `Update now` downloads and verifies the official installer, closes TubeForge, installs per-user, and relaunches the updated version.
+- Reproducible Windows x64 packages with SHA-256 manifests, GitHub build-provenance attestations, and optional Authenticode signatures.
+
+## Not supported
+
+- Authenticated, private, paid, membership, age/region-bypass, or other access-controlled media.
+- Encrypted or DRM-protected streams.
+- Generic non-YouTube URLs or arbitrary M3U8 capture.
+- macOS, Linux, ARM64, or 32-bit Windows builds.
+
+## Documentation
+
+- [Installation, updates, rollback, data retention, and uninstall](docs/INSTALLATION.md)
+- [Current release notes](docs/RELEASE_NOTES.md) and [complete changelog](CHANGELOG.md)
+- [Support policy and current limitations](docs/SUPPORT_POLICY.md)
+- [Extraction compatibility history](docs/EXTRACTION_COMPATIBILITY.md) and [maintainer playbook](docs/EXTRACTOR_PLAYBOOK.md)
+- [Security policy](SECURITY.md), [threat model](TUBEFORGE_THREAT_MODEL.md), and [false-positive response guide](docs/SECURITY_FALSE_POSITIVE_RESPONSE.md)
+- [FFmpeg licensing and build provenance](THIRD_PARTY_NOTICES.md)
+- [Contributor and maintainer checks](CONTRIBUTING.md)
+
+## Build from source
+
+Required toolchain: .NET 10 SDK on Windows.
 
 ```powershell
 dotnet build TubeForge.slnx --configuration Release
 dotnet run --project tests/TubeForge.Tests --configuration Release -- --all
-```
-
-Opt-in live metadata smoke test (prints no media URLs):
-
-```powershell
-dotnet run --project tools/TubeForge.Smoke -- analyze "https://www.youtube.com/watch?v=VIDEO_ID"
-```
-
-Opt-in bounded collection smoke test (prints aggregate counts, not item IDs or titles):
-
-```powershell
-dotnet run --project tools/TubeForge.Smoke -- collection "https://www.youtube.com/playlist?list=PLAYLIST_ID" 150
-```
-
-Run a bounded local canary set without printing URLs, IDs, titles, or channels. See [extractor playbook](docs/EXTRACTOR_PLAYBOOK.md).
-
-```powershell
-dotnet run --project tools/TubeForge.Smoke -- canary C:\private\tubeforge-canaries.txt
-```
-
-Opt-in live MP4 mux smoke test (requires bundled FFmpeg or `ffmpeg.exe` on `PATH`; downloads the smallest compatible H.264/AAC pair, produces indexed MP4, validates it with Windows media stack, then deletes it):
-
-```powershell
-dotnet run --project tools/TubeForge.LiveMuxSmoke -- "https://www.youtube.com/watch?v=VIDEO_ID"
-```
-
-Run the isolated local [performance budget](docs/PERFORMANCE_BUDGET.md) probe:
-
-```powershell
-dotnet build TubeForge.slnx --configuration Release
-dotnet run --project tools/TubeForge.Performance --configuration Release --no-build
-```
-
-Verify bundled-FFmpeg subtitle, chapter metadata, and chapter splitting for MP4, MKV, and WebM using synthetic local media:
-
-```powershell
-.\scripts\Test-ChapterEmbedding.ps1 -Configuration Release
-```
-
-Verify bundled-FFmpeg trim and SponsorBlock segment removal using synthetic local media:
-
-```powershell
-.\scripts\Test-TimelineEditing.ps1 -Configuration Release
-```
-
-Verify synthetic HLS segmentation, concatenation, MKV finalization, and decode using bundled FFmpeg:
-
-```powershell
-.\scripts\Test-HlsCapture.ps1 -Configuration Release
-```
-
-Run the desktop application:
-
-```powershell
 dotnet run --project src/TubeForge.App --configuration Release
 ```
 
-## Release packaging
-
-Create framework-dependent and self-contained Windows x64 archives, a manifest, and SHA-256 checksums:
-
-```powershell
-.\scripts\Publish-Release.ps1 -Version 2.2.0
-.\scripts\Test-Release.ps1 -Version 2.2.0
-```
-
-Create the self-contained per-user installer and checksum manifest:
-
-```powershell
-.\scripts\Publish-Installer.ps1 -Version 2.2.0
-```
-
-Authenticode signing is optional and fails closed when a requested certificate cannot produce a valid signature. See [installation and data retention](docs/INSTALLATION.md), [extraction compatibility](docs/EXTRACTION_COMPATIBILITY.md), and the [support policy](docs/SUPPORT_POLICY.md).
-
-The release workflow signs both `TubeForge.exe` and the setup executable when the protected PFX secrets and `TUBEFORGE_TIMESTAMP_SERVER` repository variable are configured. Every setup is checksum-checked and runs an embedded-payload verification probe before publication.
+Release packaging downloads one pinned, SHA-256-verified FFmpeg x64 archive. Advanced extractor, media, performance, packaging, and installer checks are documented in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Security
 
-Do not include media URLs, cookies, signatures, visitor data, private video data, or copyrighted media when reporting problems. Use Diagnostics → Export JSON, review it, then follow [SECURITY.md](SECURITY.md).
+Do not include media URLs, cookies, signatures, visitor data, private-video data, local paths, or downloaded media in reports. Use Diagnostics → Export JSON, review the output, then follow [SECURITY.md](SECURITY.md). Report vulnerabilities through GitHub's private vulnerability reporting flow.
 
 ## License
 

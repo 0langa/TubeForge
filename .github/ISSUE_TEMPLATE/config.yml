@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/0langa/TubeForge/security/advisories/new
+    about: Report security vulnerabilities privately.
+  - name: Support policy
+    url: https://github.com/0langa/TubeForge/blob/main/docs/SUPPORT_POLICY.md
+    about: Review supported environments, report requirements, and current limitations.
+  - name: Latest stable release
+    url: https://github.com/0langa/TubeForge/releases/latest
+    about: Download or verify the current release before reporting a problem.

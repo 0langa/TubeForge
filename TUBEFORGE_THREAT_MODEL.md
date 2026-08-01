@@ -2,16 +2,16 @@
 
 ## Executive summary
 
-TubeForge is a local single-user Windows desktop application with no hosted backend, accounts, authentication, or multi-tenancy. Its main risks are processing attacker-influenced YouTube/player/media bytes, safely constraining network destinations and filesystem writes, protecting privacy-bearing local state, and preserving release integrity. Existing allowlists, size/depth bounds, constrained non-executing JavaScript plans, atomic file publication, dependency rejection, checksums, and build attestations reduce all identified v1 threats to medium or low priority; no critical/high residual threat was found under the confirmed public single-user deployment model.
+TubeForge is a local single-user Windows desktop application with no hosted backend, accounts, authentication, or multi-tenancy. Its main risks are processing attacker-influenced YouTube/player/media bytes, safely constraining network destinations and filesystem writes, protecting privacy-bearing local state, constraining external FFmpeg and installer processes, and preserving release integrity. Existing allowlists, size/depth bounds, constrained non-executing JavaScript plans, atomic file publication, dependency rejection, checksums, and build attestations reduce all identified current threats to medium or low priority; no critical/high residual threat was found under the confirmed public single-user deployment model.
 
 ## Scope and assumptions
 
 - In scope: `src/`, `scripts/`, `.github/workflows/`, runtime persistence, public release artifacts, and the supported Windows x64 desktop deployment.
-- Out of scope: YouTube infrastructure, Windows/.NET platform vulnerabilities, DRM/login/private/paid media, active-live capture, social/legal misuse, and attackers who already control the user's Windows account or administrator context.
+- Out of scope: YouTube/SponsorBlock infrastructure, vulnerability discovery inside Windows/.NET/FFmpeg, DRM/login/private/paid media, encrypted HLS, generic M3U8 capture, social/legal misuse, and attackers who already control the user's Windows account or administrator context. Integration and dependency controls remain in scope.
 - Confirmed: binaries may be used by unrelated users, but each instance is local, single-user, and keeps private per-user state; no hosted service or shared database exists.
-- Data sensitivity: ordinary personal data in local titles, video IDs, destination paths, and history; no intended credentials, cookies, regulated records, or payment data.
-- Attacker-controlled inputs: pasted URLs, upstream HTML/JSON/player JavaScript/media/container/caption/thumbnail bytes, redirects, and public issue contents.
-- Confirmed: the per-user installer remains unelevated; update checks are opt-in, accept only the pinned TubeForge GitHub repository and asset policy, verify two matching SHA-256 records, and require explicit confirmation before execution.
+- Data sensitivity: ordinary personal data in local titles, video IDs, destination paths, history, and an optional manual proxy endpoint; no intended credentials, cookies, regulated records, or payment data.
+- Attacker-controlled inputs: pasted URLs, upstream HTML/JSON/player JavaScript/media/container/caption/thumbnail/HLS bytes, SponsorBlock responses, redirects, configured proxy behavior, and public issue contents.
+- Confirmed: the per-user installer remains unelevated; update checks are opt-in, accept only the pinned TubeForge GitHub repository and asset policy, verify matching GitHub and manifest SHA-256 records, and require explicit `Update now` confirmation before download, execution, app shutdown, installation, and relaunch.
 - Open question: a future login feature, shared-machine deployment, elevated process, silent update, or alternate update source would require a new threat model and could materially raise risk.
 
 ## System model
@@ -20,9 +20,9 @@ TubeForge is a local single-user Windows desktop application with no hosted back
 
 - WPF desktop/UI and orchestration: `src/TubeForge.App/App.xaml.cs::App_OnStartup` and `src/TubeForge.App/ViewModels/MainViewModel.cs::AnalyzeAsync`.
 - URL/domain validation and ranking: `src/TubeForge.Core/YouTube/` and `src/TubeForge.Core/Media/`.
-- YouTube extraction, collection parsing, constrained player transforms, and sidecars: `src/TubeForge.YouTube/`.
-- Direct/segmented transfer, persistence, disk policy, and adaptive orchestration: `src/TubeForge.Downloads/`.
-- In-house MP4/WebM parsers and muxers: `src/TubeForge.Media/`.
+- YouTube extraction, collection parsing, constrained player transforms, sidecars, and opt-in SponsorBlock lookup: `src/TubeForge.YouTube/`.
+- Direct/segmented transfer, bounded HLS capture, persistence, disk policy, and adaptive orchestration: `src/TubeForge.Downloads/`.
+- In-house MP4/WebM parsers plus pinned-FFmpeg finalization, conversion, timeline editing, and validation: `src/TubeForge.Media/` and `src/TubeForge.Transcoding/`.
 - Repository-pinned update discovery, download, and verification: `src/TubeForge.Updates/`.
 - Per-user install, repair, update, and uninstall: `src/TubeForge.Installation/` and `src/TubeForge.Installer/`.
 - Release build, verification, CI, and provenance: `scripts/Publish-Release.ps1`, `scripts/Test-Release.ps1`, and `.github/workflows/`.
@@ -30,10 +30,12 @@ TubeForge is a local single-user Windows desktop application with no hosted back
 ### Data flows and trust boundaries
 
 - User → WPF application: pasted YouTube URL, destination, mode/filter/settings over in-process UI binding; strict URL parsing and normalized path/filename handling.
+- WPF application → configured network path: direct, Windows system proxy, or bounded user-selected HTTP(S) proxy; no proxy credentials; origin and redirect policies remain active.
 - WPF application → YouTube: public identifiers and bounded requests over HTTPS; no account credential or cookie import; per-provider concurrency and retry bounds.
-- YouTube → extractors: untrusted HTML, JSON, player JavaScript, caption, and thumbnail bytes over HTTPS; host checks, response limits, JSON depth limits, and constrained token/operation plans.
+- YouTube → extractors/capture: untrusted HTML, JSON, player JavaScript, caption, thumbnail, HLS playlist, and segment bytes over HTTPS; host checks, response limits, JSON depth limits, constrained token/operation plans, and capture duration/size bounds.
+- Application → SponsorBlock: disabled-by-default four-character video-ID hash prefix and selected categories over HTTPS; returned candidates are bounded, validated, and matched locally against the full ID.
 - Extractors → Google media hosts: signed media URLs over HTTPS; exact `googlevideo.com` suffix allowlist and redirect revalidation.
-- Media hosts → transfer/container code: untrusted byte streams over HTTPS; length/range validation, bounded parsers, partial files, container validation, and atomic finalization.
+- Media hosts → transfer/container/FFmpeg code: untrusted byte streams over HTTPS; length/range validation, bounded parsers, partial files, argument-list process invocation, pinned executable verification at packaging, output validation, and atomic finalization.
 - Application → per-user disk: settings, queue, Library history, partial files, and completed output through Windows filesystem APIs; schema validation, backup/pending recovery, and collision-safe names.
 - GitHub release → updater → installer: repository-pinned stable metadata and bounded assets over HTTPS; exact name/version/size policy, GitHub digest plus checksum agreement, staged download, and explicit user confirmation.
 - Maintainer/tag → GitHub Actions → users: source, Microsoft runtime packs, ZIP/installer artifacts, checksums, provenance attestations, and optional Authenticode signatures; constrained workflow permissions and release verification.
@@ -44,11 +46,19 @@ TubeForge is a local single-user Windows desktop application with no hosted back
 flowchart LR
   U["Local user"] --> A["TubeForge desktop"]
   A --> Y["YouTube web and API"]
+  A --> B["SponsorBlock API (opt-in)"]
   Y --> E["Bounded extractors"]
   E --> G["Google media hosts"]
   G --> D["Download and container pipeline"]
   D --> F["User filesystem"]
+  D --> X["Pinned FFmpeg subprocess"]
+  X --> F
   A --> S["Per-user app state"]
+  A -. "optional network routing" .-> P["System or manual proxy"]
+  P -.-> Y
+  P -.-> B
+  P -.-> G
+  P -.-> R
   R --> V["Pinned update verifier"]
   V --> I["Unelevated installer"]
   I --> A
@@ -72,8 +82,8 @@ flowchart LR
 
 ### Capabilities
 
-- Publish or influence a public URL that the user pastes, and control bytes returned by a compromised/malicious upstream or redirect endpoint within the accepted domain boundaries.
-- Supply malformed, oversized, deeply nested, truncated, or adversarial player/media/container data.
+- Publish or influence a public URL that the user pastes, and control bytes returned by a compromised/malicious upstream, SponsorBlock response, HLS source, or redirect endpoint within the accepted domain boundaries.
+- Supply malformed, oversized, deeply nested, truncated, or adversarial player/media/container/playlist data.
 - Cause network stalls, truncation, retries, rate limits, and disk-pressure conditions.
 - Convince a user to share issue content or diagnostic material.
 - With separate local access, race or modify files writable by the same Windows user.
@@ -92,9 +102,13 @@ flowchart LR
 | Watch/API/collection responses | HTTPS requests | Internet → extractor | Bounded reads and JSON depth | `src/TubeForge.YouTube/YouTubeMetadataResolver.cs::ResolveAsync`; `Collections/YouTubeCollectionResolver.cs` |
 | Player JavaScript | Player script URL in watch response | Internet → transform planner | Tokenized and constrained; never executed | `src/TubeForge.YouTube/Player/JavaScriptTokenizer.cs::TryTokenize`; `SignatureTransformExtractor.cs::Extract` |
 | Media URLs/redirects | Parsed stream metadata | Extractor → downloader | HTTPS Google media allowlist checked before and after redirect | `src/TubeForge.Downloads/DownloadUriPolicy.cs::IsAllowed`; `DirectDownloadEngine.cs::DownloadAttemptAsync` |
+| HLS playlists/segments | Public active/upcoming capture | Internet → capture engine | Bounded unencrypted playlists, trusted hosts, duration/size/wait limits, recoverable URL-free journal | `src/TubeForge.Downloads/Hls/` |
+| SponsorBlock response | Explicit opt-in selection | Internet → timeline planner | Hash-prefix request, bounded response/segment count, full-ID local match, validated timeline | `src/TubeForge.YouTube/SponsorBlock/SponsorBlockClient.cs` |
 | MP4/WebM bytes | Downloaded tracks | Internet → parser/muxer | Bounded box/element parsing and atomic output | `src/TubeForge.Media/IsoBmff/`; `src/TubeForge.Media/Ebml/` |
+| FFmpeg process | Finalization or explicit conversion/edit | App → native subprocess | Pinned staged executable, `UseShellExecute=false`, `ArgumentList`, bounded logs, validated output | `src/TubeForge.Media/FfmpegMediaProcessor.cs` |
 | Destination and filename | User selection plus metadata | App → filesystem | Full-path normalization, safe extension/stem, no overwrite | `src/TubeForge.Core/Files/FileNamePolicy.cs`; `DirectDownloadEngine.cs::FinalizeCompletedPartial` |
 | Local JSON state | App startup and queue changes | Filesystem → app | Schema/depth/size validation and crash recovery | `src/TubeForge.Downloads/Queue/DownloadQueueStore.cs`; `History/DownloadHistoryStore.cs`; `src/TubeForge.Core/Settings/TubeForgeSettingsStore.cs` |
+| Proxy configuration | Settings UI or Windows system settings | User/OS → outbound network | Direct/system/manual modes, URI bounds, no userinfo/query/fragment, no proxy credentials | `src/TubeForge.Core/Networking/ConfigurableWebProxy.cs` |
 | Diagnostics/issues | Explicit user export/share | App → user/GitHub | Whitelist-only report; local state itself is more sensitive | `src/TubeForge.Core/Diagnostics/RedactedDiagnosticReportBuilder.cs::Build` |
 | Release tag/workflow | Maintainer pushes tag | Repository → users | Build/test/checksum/attestation/release pipeline | `.github/workflows/release.yml`; `scripts/Publish-Release.ps1` |
 | Update metadata and installer | Opt-in app check or manual release download | GitHub → app → user account | Pinned repository/assets, digest/checksum agreement, bounded staging, explicit execution | `src/TubeForge.Updates/GitHubUpdateClient.cs`; `GitHubReleasePolicy.cs`; `src/TubeForge.Installation/` |
@@ -109,6 +123,10 @@ flowchart LR
 6. Maintainer token/workflow/tag is compromised → malicious artifacts are published → users trust the GitHub release. Impact: code execution as user; protected credentials, tests, SHA-256 manifests, optional Authenticode, and GitHub attestations provide prevention/detection but repository governance remains critical.
 7. Large batch plus network faults fills disk and recovery files → queue repeatedly retries/resumes → user disk/application availability degrades. Impact: local DoS; concurrency, retry, rate, disk-forecast, and state-size limits constrain it.
 8. Compromised or spoofed release metadata offers an installer → updater validates repository, stable version, exact asset name/size, API digest, and checksum manifest → mismatches fail closed before explicit execution. Impact sought: code execution as user.
+9. Hostile HLS playlist expands into excessive, encrypted, discontinuous, or untrusted-host segments → capture consumes resources or follows unsafe locations. Impact: local availability/network reach; strict parsing, host checks, encryption rejection, and duration/size/wait bounds constrain it.
+10. Malicious SponsorBlock response returns wrong or extreme segment ranges → timeline edit removes unintended media or consumes resources. Impact: output integrity; opt-in use, full-ID matching, category/action checks, response/segment bounds, normalization, and explicit transcode mode limit it.
+11. Hostile media reaches the pinned FFmpeg subprocess → native parser vulnerability or resource exhaustion is triggered. Impact: code execution or local availability; verified pinned binary, argument-list invocation, constrained inputs, process cancellation, and output validation reduce but cannot eliminate third-party native-code risk.
+12. User or OS selects an untrusted proxy → proxy observes destinations or interferes with outbound connections. Impact: privacy/integrity/availability; HTTPS, retained origin policies, explicit manual mode, credential rejection, and endpoint redaction limit exposure, but proxy trust remains a user/OS decision.
 
 ## Threat model table
 
@@ -116,19 +134,23 @@ flowchart LR
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
 | TM-001 | Malicious/changed upstream player | User analyzes attacker-influenced public media | Send pathological or semantically deceptive JS/JSON to exhaust or confuse extraction | Analysis failure or local DoS; wrong transform candidate | Process availability, extraction integrity | 6 MiB/token/operation/body bounds and no JS execution (`JavaScriptTokenizer`, `SignatureTransformExtractor`); probe before cache (`YouTubeMetadataResolver`) | Required JS subset and upstream shapes evolve | Keep synthetic mutation/fuzz corpus; cap total analysis wall time/memory; require probe and host validation for new operations | Typed extraction stage, plan/probe counts, canary failures | Medium | Medium | medium |
 | TM-002 | Malicious media bytes | Accepted Google media response is hostile or compromised | Abuse MP4/WebM lengths, nesting, offsets, or fragmentation | CPU/memory/disk DoS or corrupt output | Process availability, output integrity | Bounded readers, 64 MiB metadata ceilings, hostile mutation tests, temp output then atomic move (`src/TubeForge.Media/`) | Complex parser surface remains | Continue coverage-guided deterministic mutations; add per-operation mux time/size ceilings if real samples expose hotspots | Container validation failure codes; no final file on failure | Medium | Medium | medium |
-| TM-003 | Redirect/metadata attacker | Stream or sidecar URL redirects | Redirect downloader to localhost, LAN, metadata service, or arbitrary host | SSRF or unwanted content fetch | User network, process | HTTPS and exact host suffix policy; redirect revalidation (`DownloadUriPolicy`, `DirectDownloadEngine`) | DNS rebinding/IP class is not independently pinned after TLS host validation | Keep host allowlist narrow; never add arbitrary proxy URLs or user-defined hosts without a separate policy | `Download.UnsafeRedirect`; sanitized aggregate diagnostics | Low | Medium | low |
+| TM-003 | Redirect/metadata attacker | Stream or sidecar URL redirects | Redirect downloader to localhost, LAN, metadata service, or arbitrary host | SSRF or unwanted content fetch | User network, process | HTTPS and exact host suffix policy; redirect revalidation (`DownloadUriPolicy`, `DirectDownloadEngine`) | DNS rebinding/IP class is not independently pinned after TLS host validation | Keep host allowlist narrow; preserve origin and redirect policy in every proxy mode | `Download.UnsafeRedirect`; sanitized aggregate diagnostics | Low | Medium | low |
 | TM-004 | Same-user local attacker/race | Attacker can modify user-writable destination/state during operation | Swap junction/reparse target or state between validation and file operation | Write/delete within another same-user-accessible location; lost partial state | Output and local state integrity | Full-path normalization, child naming, no-overwrite final move, schema validation, fixed recovery siblings | Reparse points and TOCTOU are not opened with handle-relative anti-race semantics | Before installer/enterprise use, reject reparse-point destinations or use handle-based finalization; keep app unelevated | Destination/finalization failures; unexpected canonical path review | Low | Medium | low |
 | TM-005 | Local corruption or untrusted state copy | Attacker can write `%LOCALAPPDATA%\TubeForge` | Insert oversized/malformed queue/settings/history or privacy-bearing values | Startup degradation, state loss, misleading UI, privacy exposure | Local state C/I/A | File-size/depth/schema/path/identity validation; pending/backup recovery (`*Store.cs`) | State is not encrypted or authenticated | Document same-user boundary; consider DPAPI only if future credentials exist; never store cookies/signatures | Typed persistence failure; preserve corrupt file for manual review | Low | Low | low |
-| TM-006 | Compromised maintainer/workflow dependency | Repository/tag/token/action supply chain compromised | Build and publish altered executable under trusted release | Code execution as downloading user | Release integrity, user account | Read-only CI; tag release build/test; deterministic ZIP; SHA-256 manifest; `actions/attest@v4`; optional Authenticode (`release.yml`, `Publish-Release.ps1`) | Action tags are major-version references; no branch protection evidence in repo; signing cert not currently present | Enable protected `main`/tags and required reviews; pin actions to reviewed commit SHAs; use environment approval for stable release; protect signing key hardware/secret | Verify GitHub attestation/checksum; compare deterministic rebuild; monitor release/tag events | Low | High | medium |
+| TM-006 | Compromised maintainer/workflow dependency | Repository/tag/token/action supply chain compromised | Build and publish altered executable under trusted release | Code execution as downloading user | Release integrity, user account | Protected `main` rejects force-push/deletion; tag release build/test; deterministic ZIP; SHA-256 manifest; `actions/attest@v4`; optional Authenticode (`release.yml`, `Publish-Release.ps1`) | Direct pushes remain allowed; action tags are major-version references; no protected-tag evidence; signing cert may be absent | Add required checks/reviews if a multi-contributor workflow begins; protect release tags; pin actions to reviewed commit SHAs; use environment approval for stable release; protect signing key | Verify GitHub attestation/checksum; compare deterministic rebuild; monitor release/tag events | Low | High | medium |
 | TM-007 | User/upstream availability abuse | Large batch, stalls, truncation, rate limits, low disk | Consume sockets, disk, queue state, or retry time | Local resource exhaustion and failed downloads | Availability, user disk | 1–4 queue concurrency, per-host gate, bounded retries/`Retry-After`, cancellation, disk forecasting, resumable state | Forecast is advisory when remote sizes unknown; no global byte quota | Keep unknown-size warning visible; add optional per-job/global byte caps if demanded | Queue failure counts, disk-space typed errors, performance/soak tests | Medium | Low | low |
 | TM-008 | User disclosure mistake | User shares raw state, screenshot, URL, or media instead of redacted report | Expose titles, IDs, paths, signatures, private context, or copyrighted bytes | Privacy/copyright harm | Personal local data | Explicit whitelist diagnostics and issue template (`RedactedDiagnosticReportBuilder`, `.github/ISSUE_TEMPLATE/extractor.yml`) | Clipboard/screenshots and local JSON remain outside enforcement | Keep report workflow prominent; add confirmation preview before export if fields expand | Manual issue moderation; schema exclusion tests | Low | Medium | low |
+| TM-009 | Malicious/compromised SponsorBlock service | User explicitly enables SponsorBlock for public media | Return mismatched IDs, categories, actions, extreme counts, or invalid ranges | Wrong chapters/removal, output corruption, CPU/memory pressure | Output integrity, process availability, video-ID privacy | Four-character hash prefix, full-ID local match, allowed category/action set, 2 MiB/1,000-segment limits, normalized timeline, disabled by default (`SponsorBlockClient`, `MediaTimelineEditor`) | Hash prefix leaks a bounded anonymity set; service correctness is external | Keep opt-in notice; never send full ID; retain local match and bounds; require transcode for removal | Typed SponsorBlock failures; synthetic hostile-response tests | Low | Medium | low |
+| TM-010 | Malicious media/native dependency | Hostile accepted input reaches FFmpeg finalization or explicit conversion | Exploit codec/container parser or force excessive CPU/disk/process output | Code execution as user, local DoS, corrupt output | Process/user account, output integrity, availability | Pinned SHA-256-verified LGPL build, package verification, `UseShellExecute=false`, `ArgumentList`, redirected bounded output, cancellation, temporary output, post-process validation (`FfmpegMediaProcessor`) | Third-party native parser surface remains; pin ages over time | Track upstream FFmpeg security fixes; update pin deliberately with full synthetic/media/package gates | Process exit/failure code, output validation, release dependency manifest | Low | High | medium |
+| TM-011 | Untrusted user/OS proxy | Manual or system proxy routes TubeForge HTTPS | Observe destination metadata, block traffic, or tamper when trusted by Windows TLS | Privacy loss, extraction/update failure, possible integrity loss with compromised trust root | Network privacy, update/download integrity | Explicit system/manual/off modes, bounded URI policy, proxy credentials rejected, HTTPS, retained destination policy, endpoint excluded from diagnostics (`ConfigurableWebProxy`) | System trust store and proxy operator remain external trust decisions | Keep manual mode explicit; never store credentials; preserve digest/checksum verification and host policies | Proxy mode only in diagnostics; typed network/update verification failures | Low | Medium | low |
+| TM-012 | Malicious/changed HLS source | User captures supported public active/upcoming stream | Return oversized/deep playlists, unsafe hosts, encryption, discontinuities, stalls, or excessive segments | SSRF attempt, disk/network/CPU exhaustion, corrupt capture | Network, disk, process availability, output integrity | Bounded parser, trusted-host policy, encryption rejection, duration/size/wait ceilings, retry limits, URL-free recovery journal, validated MKV finalization (`src/TubeForge.Downloads/Hls/`) | Long-running public streams remain availability-sensitive | Keep all limits mandatory; extend hostile playlist/segment fixtures before broadening support | Typed HLS failures, journal validation, synthetic capture/decode gate | Medium | Medium | medium |
 
 ## Criticality calibration
 
 - Critical: unauthenticated remote code execution from a pasted URL; stable release-signing key theft enabling broadly trusted malware; arbitrary privileged file overwrite. No current finding meets this bar.
 - High: reliable code execution as the desktop user from media bytes; release compromise with realistic maintainer-token path; broad exfiltration of future credentials. Current release compromise is medium because it requires privileged repository control and has attest/checksum detection.
 - Medium: remotely triggerable application DoS; corruption of selected output; privacy exposure of titles/paths; same-user filesystem race with meaningful loss. TM-001, TM-002, and TM-006 fit this concern range before existing-control adjustment.
-- Low: bounded analysis/download failure, recoverable queue corruption, noisy local resource use, or issues requiring same-user write access with no privilege gain. Most residual v1 threats fit here.
+- Low: bounded analysis/download failure, recoverable queue corruption, noisy local resource use, or issues requiring same-user write access with no privilege gain. Most residual current threats fit here.
 
 ## Focus paths for security review
 
@@ -139,17 +161,22 @@ flowchart LR
 | `src/TubeForge.YouTube/Extraction/YouTubeWatchPageParser.cs` | Large untrusted HTML/JSON mapping and media URL acceptance | TM-001, TM-003 |
 | `src/TubeForge.Downloads/DirectDownloadEngine.cs` | Redirect policy, resume validators, partial/final file transition | TM-003, TM-004, TM-007 |
 | `src/TubeForge.Downloads/SegmentedDownloadEngine.cs` | Concurrent ranges, state integrity, disk/resource behavior | TM-004, TM-007 |
+| `src/TubeForge.Downloads/Hls/` | Untrusted playlist/segment parsing, host policy, capture bounds, and recovery | TM-003, TM-007, TM-012 |
 | `src/TubeForge.Downloads/DownloadUriPolicy.cs` | SSRF boundary and allowed transport/host set | TM-003 |
 | `src/TubeForge.Media/IsoBmff/` | Complex untrusted MP4 sizes, offsets, and mux output | TM-002 |
 | `src/TubeForge.Media/Ebml/` | Complex untrusted WebM variable integers and nesting | TM-002 |
+| `src/TubeForge.Media/FfmpegMediaProcessor.cs` | Native subprocess argument isolation, cancellation, and output validation | TM-002, TM-010 |
+| `src/TubeForge.YouTube/SponsorBlock/SponsorBlockClient.cs` | External privacy boundary and untrusted timeline response | TM-009 |
+| `src/TubeForge.Core/Networking/ConfigurableWebProxy.cs` | User/OS-selected network mediation and credential rejection | TM-003, TM-011 |
 | `src/TubeForge.Downloads/Queue/DownloadQueueStore.cs` | Privacy-bearing crash-consistent state and path validation | TM-004, TM-005 |
 | `src/TubeForge.Core/Diagnostics/RedactedDiagnosticReportBuilder.cs` | Privacy boundary for shared support data | TM-008 |
+| `src/TubeForge.Updates/` and `src/TubeForge.Installation/` | Release metadata verification, staged installer policy, and per-user update handoff | TM-006, TM-011 |
 | `scripts/Publish-Release.ps1` | Runtime-pack restore, optional signing, deterministic archives/checksums | TM-006 |
 | `.github/workflows/release.yml` | Tag-to-public-binary trust and workflow permissions | TM-006 |
 
 ## Quality check
 
-- [x] Covered desktop, URL, network, parser, media, filesystem, state, diagnostics, and release entry points.
+- [x] Covered desktop, URL, network/proxy, parser, media/FFmpeg, HLS, SponsorBlock, filesystem, state, diagnostics, update/install, and release entry points.
 - [x] Represented every discovered runtime/build trust boundary in at least one threat.
 - [x] Separated runtime behavior from CI/release tooling and tests.
 - [x] Reflected confirmed public single-user, no-backend/no-auth deployment context.

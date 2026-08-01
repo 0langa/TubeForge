@@ -1,0 +1,42 @@
+name: Feature request
+description: Propose a focused improvement within TubeForge's public-media scope
+title: "[Feature] "
+labels:
+  - enhancement
+body:
+  - type: markdown
+    attributes:
+      value: |
+        TubeForge supports public YouTube media only. Requests for DRM, login, cookie import, payment, membership, private-media, or access-control bypass are out of scope.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: Describe the user problem without media URLs, private details, or personal data.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+      description: Describe the workflow, defaults, and user-visible result.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Optional. Note workarounds or smaller changes that may solve the problem.
+
+  - type: checkboxes
+    id: boundaries
+    attributes:
+      label: Scope checklist
+      options:
+        - label: This request concerns public media I own or am authorized to save.
+          required: true
+        - label: This request does not require login, cookies, credentials, DRM, payment, membership, or access-control bypass.
+          required: true

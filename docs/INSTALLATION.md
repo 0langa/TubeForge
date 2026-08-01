@@ -2,6 +2,8 @@
 
 TubeForge provides a recommended per-user installer and portable ZIP distributions. Neither option adds a Windows service or modifies `PATH`.
 
+Download releases only from the [official TubeForge releases page](https://github.com/0langa/TubeForge/releases/latest).
+
 ## Choose a build
 
 - `setup.exe`: recommended. Installs the self-contained app for the current user, adds a Start Menu shortcut, and registers TubeForge in Add/Remove Programs without elevation.
@@ -17,7 +19,7 @@ The self-contained release build restores only the exact Microsoft .NET runtime 
 Keep the downloaded installer or ZIP and `SHA256SUMS.txt` in the same directory. In PowerShell:
 
 ```powershell
-$version = '2.1.0'
+$version = '2.2.0'
 $name = "TubeForge-$version-win-x64-setup.exe"
 $expected = (Get-Content .\SHA256SUMS.txt | Where-Object { $_ -match "  $([regex]::Escape($name))$" }).Split(' ')[0]
 $actual = (Get-FileHash -LiteralPath ".\$name" -Algorithm SHA256).Hash
@@ -53,9 +55,9 @@ Portable rollback uses the previous version directory. Installer rollback requir
 
 TubeForge stores application state in `%LOCALAPPDATA%\TubeForge`:
 
-- `settings.json`: download directory, filename template, optional quality suffix, default preset, simple/advanced disclosure, concurrency, accelerated-transfer preference, update preference, Library sort preference, responsible-use acknowledgement;
+- `settings.json`: download directory, filename template, optional quality suffix, default preset, simple/advanced disclosure, global/per-host concurrency, accelerated-transfer preference, retry/timeout limits, update preference, proxy mode and optional credential-free manual proxy endpoint, Library sort preference, responsible-use acknowledgement;
 - `archives.json`: user-created playlist/channel archive sources, local destination/template/quality-suffix/output preferences, and bounded checked video identifiers; no signed media URLs or credentials;
-- `queue.json`: video IDs, display titles, format identities, destination paths, byte counts, attempt counts, timestamps, and failure codes;
+- `queue.json`: video IDs, display titles, format/source identities, destination paths, output/caption/chapter/trim/SponsorBlock/live-capture selections, byte counts, attempt counts, timestamps, and failure codes; no signed media URLs, SponsorBlock payloads, or HLS manifest URLs;
 - `history.json`: completed video IDs, display titles, format identities, destination paths, sizes, and timestamps;
 - `.bak` and `.pending` siblings: crash-recovery copies of those stores.
 

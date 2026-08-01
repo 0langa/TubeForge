@@ -11,10 +11,10 @@ $ErrorActionPreference = 'Stop'
 
 $upstreamArchiveName = 'ffmpeg-n8.1.2-22-g94138f6973-win64-lgpl-8.1.zip'
 $upstreamArchiveHash = '66fdaf7e314968332c4c3fffbe730fedce47f9ac456ae3a04f73cd531080f4b3'
-$upstreamArchiveUrl = 'https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-07-17-13-22/' + $upstreamArchiveName
+$upstreamBuildTag = 'autobuild-2026-07-17-13-22'
 $bootstrapArchiveName = 'TubeForge-1.2.5-win-x64-framework-dependent.zip'
 $bootstrapArchiveHash = 'e1a43566a114a09a71d178608a1a21f1a996121475f1a9681e3b95ea0b639b82'
-$bootstrapArchiveUrl = 'https://github.com/0langa/TubeForge/releases/download/v1.2.5/' + $bootstrapArchiveName
+$bootstrapArchiveUrl = 'https://github.com/0langa/TubeForge/releases/download/v1.2.5/TubeForge-1.2.5-win-x64-framework-dependent.zip'
 $ffmpegExecutableHash = 'c63b7c29e268acb70f058c2c1863fdeae16830d401b226a6c6d25a29c55a4702'
 $ffmpegLicenseName = 'ffmpeg-license-94138f6973.txt'
 $ffmpegLicenseHash = '246041b6ecf9bc32d718a62c57877c78b5eb397b6467e74ed7ae2626ab189c30'
@@ -100,7 +100,8 @@ $provenance = @"
 FFmpeg 8.1.2-22-g94138f6973
 Target: Windows x64
 Variant: LGPL static command-line executable
-Original build archive: $upstreamArchiveUrl
+Original build tag: $upstreamBuildTag
+Original build archive name: $upstreamArchiveName
 Original build archive SHA-256: $upstreamArchiveHash
 Distribution bootstrap archive: $bootstrapArchiveUrl
 Distribution bootstrap archive SHA-256: $bootstrapArchiveHash

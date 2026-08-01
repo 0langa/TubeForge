@@ -3,9 +3,10 @@
 ## FFmpeg
 
 TubeForge distributes an unmodified FFmpeg command-line executable as a separate
-process for MP4, WebM, and MKV stream-copy muxing and compatibility normalization. TubeForge
-does not link to FFmpeg libraries. Media finalization uses `-c copy`, so video and
-audio are not re-encoded and source quality is preserved.
+process for MP4, WebM, and MKV stream-copy finalization plus explicitly selected
+audio/video conversion and timeline editing. TubeForge does not link to FFmpeg
+libraries. Original-quality finalization uses `-c copy`; conversion presets and
+SponsorBlock removal re-encode only when the user selects those modes.
 
 - FFmpeg source revision: `94138f6973dd1ac6208ace92148ac0d172455d65`
 - FFmpeg version: `8.1.2-22-g94138f6973`
@@ -29,7 +30,7 @@ licenses. TubeForge's pinned build is BtbN's LGPL variant. License text ships as
 - [Exact FFmpeg source](https://github.com/FFmpeg/FFmpeg/archive/94138f6973dd1ac6208ace92148ac0d172455d65.tar.gz)
 - [FFmpeg legal information](https://ffmpeg.org/legal.html)
 - [Exact BtbN build scripts](https://github.com/BtbN/FFmpeg-Builds/archive/1f74efed63f467dbf0d1e5dd8548bf2188f4ad21.tar.gz)
-- [Pinned build release](https://github.com/BtbN/FFmpeg-Builds/releases/tag/autobuild-2026-07-17-13-22)
+- [Archived verified binary bootstrap](https://github.com/0langa/TubeForge/releases/download/v1.2.5/TubeForge-1.2.5-win-x64-framework-dependent.zip)
 
 BtbN's FFmpeg-Builds scripts are MIT-licensed. Their license text ships as
 `ffmpeg/FFmpeg-Builds-LICENSE.txt`.

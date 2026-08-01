@@ -2,6 +2,10 @@
 
 YouTube is an upstream service outside TubeForge's control. Compatibility is versioned by TubeForge release and verified with synthetic fixtures plus bounded public canaries; it is not a permanent guarantee.
 
+## v2.2.0 compatibility status
+
+TubeForge v2.2.0 carries forward the v2.1.0 extraction, download, and media stack unchanged. The v2.2.0 code changes are limited to update UI/orchestration and installer-argument coverage, so the v2.1.0 compatibility evidence below remains current.
+
 ## v2.1.0 compatibility update
 
 Release validation combines the current deterministic extraction/media suite with installed-candidate evidence gathered on 2026-07-27 from commit `2aead44`:
@@ -82,7 +86,7 @@ The live 4K canary resolved 27 formats and selected 2160p MP4 video plus AAC aud
 - arbitrary JavaScript execution or general-purpose JavaScript evaluation;
 - formats whose container/codec combination the supported finalization pipeline cannot represent safely.
 
-TubeForge v2.1.0 supports bounded public unencrypted HLS capture plus explicit H.264/AAC, H.265/AAC, and VP9/Opus conversion profiles. Authenticated/access-controlled media and encrypted/DRM HLS remain unsupported.
+TubeForge v2.2.0 supports bounded public unencrypted HLS capture plus explicit H.264/AAC, H.265/AAC, and VP9/Opus conversion profiles. Authenticated/access-controlled media and encrypted/DRM HLS remain unsupported.
 
 Malformed, oversized, or unsupported player scripts fail closed. When public extraction changes, follow the [extractor maintenance playbook](EXTRACTOR_PLAYBOOK.md) and add a sanitized synthetic regression before changing a client profile or transform rule.
 
