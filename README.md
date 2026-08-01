@@ -9,7 +9,7 @@ TubeForge is an experimental, ad-free Windows desktop downloader built from scra
 
 ## Status
 
-TubeForge v2.1.0 is the current public stable release.
+TubeForge v2.2.0 is the current public stable release.
 
 Working now:
 
@@ -46,7 +46,7 @@ Working now:
 - isolated performance budgets for analysis latency, startup, CPU, memory, and UI frame pacing, with the deterministic core gate enforced in CI.
 - bounded structural classic/ES6 signature and `n` throttling transforms without executing player JavaScript;
 - reproducible portable framework-dependent and self-contained Windows x64 packaging with SHA-256 manifests.
-- branded per-user installer, Add/Remove Programs integration, clean uninstall, and opt-in verified updates from the official GitHub release.
+- branded per-user installer, Add/Remove Programs integration, clean uninstall, and opt-in verified updates with an explicit one-click download, install, and restart flow.
 
 Not included: authenticated/access-controlled media, encrypted/DRM HLS, or generic non-YouTube M3U8 capture.
 
@@ -129,14 +129,14 @@ dotnet run --project src/TubeForge.App --configuration Release
 Create framework-dependent and self-contained Windows x64 archives, a manifest, and SHA-256 checksums:
 
 ```powershell
-.\scripts\Publish-Release.ps1 -Version 2.1.0
-.\scripts\Test-Release.ps1 -Version 2.1.0
+.\scripts\Publish-Release.ps1 -Version 2.2.0
+.\scripts\Test-Release.ps1 -Version 2.2.0
 ```
 
 Create the self-contained per-user installer and checksum manifest:
 
 ```powershell
-.\scripts\Publish-Installer.ps1 -Version 2.1.0
+.\scripts\Publish-Installer.ps1 -Version 2.2.0
 ```
 
 Authenticode signing is optional and fails closed when a requested certificate cannot produce a valid signature. See [installation and data retention](docs/INSTALLATION.md), [extraction compatibility](docs/EXTRACTION_COMPATIBILITY.md), and the [support policy](docs/SUPPORT_POLICY.md).

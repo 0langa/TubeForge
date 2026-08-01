@@ -14,6 +14,7 @@ public partial class MainWindow : Window
 {
     private readonly DesktopPerformanceProbe? _performanceProbe;
     private readonly MainViewModel _viewModel;
+    private Version? _promptedUpdateVersion;
 
     public MainWindow() : this(performanceProbe: null)
     {
@@ -25,8 +26,10 @@ public partial class MainWindow : Window
         _viewModel = new MainViewModel(performanceProbe?.ApplicationDataDirectory);
         InitializeComponent();
         DataContext = _viewModel;
+        _viewModel.UpdateAvailable += ViewModel_OnUpdateAvailable;
+        _viewModel.UpdateInstallerStarted += ViewModel_OnUpdateInstallerStarted;
         Loaded += MainWindow_OnLoaded;
-        Closed += (_, _) => _viewModel.Dispose();
+        Closed += MainWindow_OnClosed;
     }
 
     protected override void OnSourceInitialized(EventArgs e)
@@ -184,17 +187,29 @@ public partial class MainWindow : Window
         }
     }
 
-    private async void InstallUpdateButton_OnClick(object sender, RoutedEventArgs e)
+    private void ViewModel_OnUpdateAvailable(object? sender, UpdateAvailableEventArgs e)
     {
-        var answer = MessageBox.Show(
-            "Install the verified TubeForge update and restart the app?\n\nYour settings, queue, Library history, and downloaded media remain unchanged.",
-            "Update TubeForge",
-            MessageBoxButton.YesNo,
-            MessageBoxImage.Question);
-        if (answer == MessageBoxResult.Yes && await _viewModel.StartReadyUpdateAsync())
+        if (_promptedUpdateVersion is not null && _promptedUpdateVersion >= e.Version)
         {
-            Application.Current.Shutdown();
+            return;
         }
+
+        _promptedUpdateVersion = e.Version;
+        var dialog = new UpdateAvailableWindow(_viewModel, e.Version)
+        {
+            Owner = this
+        };
+        _ = dialog.ShowDialog();
+    }
+
+    private static void ViewModel_OnUpdateInstallerStarted(object? sender, EventArgs e) =>
+        Application.Current.Shutdown();
+
+    private void MainWindow_OnClosed(object? sender, EventArgs e)
+    {
+        _viewModel.UpdateAvailable -= ViewModel_OnUpdateAvailable;
+        _viewModel.UpdateInstallerStarted -= ViewModel_OnUpdateInstallerStarted;
+        _viewModel.Dispose();
     }
 
     [DllImport("dwmapi.dll", PreserveSig = true)]
