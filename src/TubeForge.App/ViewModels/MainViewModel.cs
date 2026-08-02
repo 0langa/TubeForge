@@ -2981,6 +2981,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                     StatusMessage = work.Output.BitrateKbps > 0
                         ? $"Converting to {work.Output.DisplayName} · {work.Output.BitrateKbps} kbps"
                         : $"Converting to {work.Output.DisplayName}";
+                    UpdateQueueProcessing(itemId, StatusMessage);
                     var transcodeResult = await _audioTranscoder.TranscodeAsync(new AudioTranscodeRequest
                     {
                         SourcePath = sourcePath,
@@ -3022,6 +3023,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                 else
                 {
                     StatusMessage = $"Transcoding to {work.Output.DisplayName} · local FFmpeg";
+                    UpdateQueueProcessing(itemId, StatusMessage);
                     var transcodeResult = await _videoTranscoder.TranscodeAsync(new VideoTranscodeRequest
                     {
                         SourcePath = sourcePath,
@@ -3481,6 +3483,12 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         ProgressDetail = $"{_queueDispatcher.ActiveCount} active · global limit {SelectedMaxConcurrentDownloads} · host limit {PerHostConcurrency}";
     }
 
+    private void UpdateQueueProcessing(Guid itemId, string detail)
+    {
+        var card = QueueItems.FirstOrDefault(item => item.Id == itemId);
+        card?.UpdateProcessing(detail);
+    }
+
     private long? QueuePartialLength(Guid itemId)
     {
         if (_preparedQueueWork.TryGetValue(itemId, out var work))
@@ -3539,6 +3547,18 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         _cancelledQueueItems.Add(itemId);
         if (_downloadCancellations.TryGetValue(itemId, out var cancellation))
         {
+            var persistenceError = await UpdateQueueItemAsync(
+                itemId,
+                DownloadQueueStatus.Cancelled,
+                "Operation.Cancelled",
+                QueuePartialLength(itemId));
+            if (persistenceError is not null)
+            {
+                _cancelledQueueItems.Remove(itemId);
+                ReportQueueError(persistenceError);
+                return;
+            }
+
             cancellation.Cancel();
             return;
         }
@@ -5350,6 +5370,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             return;
         }
 
+        var restoreTrim = EnableTrim;
         _applyingDownloadPreset = true;
         try
         {
@@ -5381,6 +5402,10 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         finally
         {
             _applyingDownloadPreset = false;
+            if (restoreTrim && CanTrim)
+            {
+                EnableTrim = true;
+            }
         }
     }
 

@@ -169,7 +169,8 @@ public static class YouTubeCollectionPageParser
     private static void TryAddLockupItem(JsonElement lockup, ParseState state)
     {
         var rawId = ReadNestedString(lockup, "onTap", "innertubeCommand", "watchEndpoint", "videoId") ??
-                    ReadString(lockup, "contentId");
+                    ReadString(lockup, "contentId") ??
+                    FindStringProperty(lockup, "videoId", depth: 0, maximumDepth: 16);
         var title = ReadNestedString(lockup, "metadata", "lockupMetadataViewModel", "title", "content")?.Trim();
         if (!YouTubeVideoId.TryCreate(rawId, out var videoId) ||
             string.IsNullOrWhiteSpace(title) ||
@@ -418,9 +419,13 @@ public static class YouTubeCollectionPageParser
         return true;
     }
 
-    private static string? FindStringProperty(JsonElement element, string property, int depth)
+    private static string? FindStringProperty(
+        JsonElement element,
+        string property,
+        int depth,
+        int maximumDepth = 8)
     {
-        if (depth > 8)
+        if (depth > maximumDepth)
         {
             return null;
         }
@@ -434,7 +439,7 @@ public static class YouTubeCollectionPageParser
 
             foreach (var child in element.EnumerateObject())
             {
-                var found = FindStringProperty(child.Value, property, depth + 1);
+                var found = FindStringProperty(child.Value, property, depth + 1, maximumDepth);
                 if (found is not null)
                 {
                     return found;
@@ -445,7 +450,7 @@ public static class YouTubeCollectionPageParser
         {
             foreach (var child in element.EnumerateArray())
             {
-                var found = FindStringProperty(child, property, depth + 1);
+                var found = FindStringProperty(child, property, depth + 1, maximumDepth);
                 if (found is not null)
                 {
                     return found;

@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 2.2.3 - 2026-08-02
+
+- Preserve an enabled trim range when switching between compatible Quick presets.
+- Show an explicit `PROCESSING` queue phase and local FFmpeg detail instead of stale transfer speed/ETA during audio or video conversion.
+- Persist and render `Cancelled` before signalling an active queue cancellation so restart recovery does not resurrect cancelled conversion work as paused.
+- Accept modern playlist lockups whose video command is nested under bounded renderer actions while retaining fail-closed depth and identifier validation.
+
 ## 2.2.2 - 2026-08-02
 
 - Launch the verified update installer through the Windows graphical shell before TubeForge exits, reducing direct child-process coupling under supervised launches.

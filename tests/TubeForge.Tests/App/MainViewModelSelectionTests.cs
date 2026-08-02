@@ -4,6 +4,7 @@ using TubeForge.Core.Files;
 using TubeForge.Core.Media;
 using TubeForge.Core.Results;
 using TubeForge.Core.YouTube;
+using TubeForge.Downloads.Queue;
 using TubeForge.Downloads.Archives;
 using TubeForge.Tests.Framework;
 
@@ -211,6 +212,68 @@ public static class MainViewModelSelectionTests
         viewModel.SelectedDownloadPreset = viewModel.DownloadPresets.First(option =>
             option.Value == DownloadPresetKind.Custom);
         Assert.True(viewModel.ShowAdvancedDownloadOptions);
+    }
+
+    [Test]
+    public static void QuickPresetsPreserveEnabledTrim()
+    {
+        using var viewModel = new MainViewModel();
+        SetFormats(viewModel, BuildCompleteCatalog());
+        Assert.True(YouTubeVideoId.TryCreate("Fixture123_", out var videoId));
+        SetMetadata(viewModel, new VideoMetadata
+        {
+            Id = videoId,
+            Title = "Fixture",
+            Duration = TimeSpan.FromMinutes(2),
+            Formats = BuildCompleteCatalog()
+        });
+        viewModel.EnableTrim = true;
+
+        foreach (var preset in viewModel.DownloadPresets.Where(option =>
+                     option.Value is not DownloadPresetKind.Custom))
+        {
+            viewModel.SelectedDownloadPreset = preset;
+
+            Assert.True(viewModel.CanTrim);
+            Assert.True(viewModel.EnableTrim, preset.Label);
+        }
+    }
+
+    [Test]
+    public static void QueueCardShowsExplicitLocalProcessingPhase()
+    {
+        var now = new DateTimeOffset(2026, 8, 2, 2, 0, 0, TimeSpan.Zero);
+        var item = new DownloadQueueItem
+        {
+            Id = Guid.Parse("11111111-1111-1111-1111-111111111111"),
+            VideoId = "Fixture123_",
+            FormatId = 22,
+            SourceIdentity = "Fixture123_:22",
+            DisplayTitle = "Fixture",
+            DestinationPath = Path.Combine(Path.GetTempPath(), "fixture.mp4"),
+            ExpectedLength = 1024,
+            BytesReceived = 1024,
+            AttemptCount = 1,
+            Status = DownloadQueueStatus.Downloading,
+            CreatedAtUtc = now,
+            UpdatedAtUtc = now
+        };
+        var card = new QueueItemViewModel(
+            item,
+            _ => Task.CompletedTask,
+            _ => { },
+            _ => Task.CompletedTask,
+            _ => Task.CompletedTask,
+            _ => { });
+        var updateProcessing = typeof(QueueItemViewModel).GetMethod(
+            "UpdateProcessing",
+            BindingFlags.Instance | BindingFlags.NonPublic);
+
+        Assert.True(updateProcessing is not null);
+        updateProcessing!.Invoke(card, ["Transcoding to H.265/AAC MP4 · local FFmpeg"]);
+
+        Assert.Equal("PROCESSING", card.StatusLabel);
+        Assert.Equal("Transcoding to H.265/AAC MP4 · local FFmpeg", card.ProgressDetail);
     }
 
     [Test]

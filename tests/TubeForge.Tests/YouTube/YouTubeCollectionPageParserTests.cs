@@ -75,6 +75,27 @@ public static class YouTubeCollectionPageParserTests
         Assert.Equal(TimeSpan.FromSeconds(65), result.Value.Items[0].Duration);
         Assert.Equal("CurrentContinuation_1", result.Value.ContinuationToken);
     }
+
+    [Test]
+    public static void ParsesCurrentPlaylistLockupWithNestedWatchCommand()
+    {
+        var result = YouTubeCollectionPageParser.ParseInitialHtml("""
+            <script>var ytInitialData = {"contents":[{"lockupViewModel":{
+              "contentImage":{"thumbnailViewModel":{"image":{"sources":[]}}},
+              "metadata":{"lockupMetadataViewModel":{"title":{"content":"Nested command video"}}},
+              "rendererContext":{"actions":[{"button":{"onTap":{"innertubeCommand":{
+                "signalServiceEndpoint":{"actions":[{"addToPlaylistCommand":{"videoCommand":{
+                  "watchEndpoint":{"videoId":"Video000005"}
+                }}}]}
+              }}}}]}
+            }}]};</script>
+            """);
+
+        Assert.True(result.IsSuccess, result.Error?.TechnicalDetail);
+        Assert.Equal(1, result.Value.Items.Count);
+        Assert.Equal("Video000005", result.Value.Items[0].VideoId.Value);
+        Assert.Equal("Nested command video", result.Value.Items[0].Title);
+    }
 }
 
 internal static class CollectionFixtures

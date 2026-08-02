@@ -12,6 +12,7 @@ public sealed class QueueItemViewModel : INotifyPropertyChanged
     private DownloadQueueItem _item;
     private long _liveBytes;
     private string _transferDetail = string.Empty;
+    private bool _isProcessing;
 
     public QueueItemViewModel(
         DownloadQueueItem item,
@@ -54,16 +55,18 @@ public sealed class QueueItemViewModel : INotifyPropertyChanged
 
     public DownloadQueueStatus Status => _item.Status;
 
-    public string StatusLabel => Status switch
-    {
-        DownloadQueueStatus.Queued => "QUEUED",
-        DownloadQueueStatus.Downloading => "DOWNLOADING",
-        DownloadQueueStatus.Paused => "PAUSED",
-        DownloadQueueStatus.Completed => "COMPLETED",
-        DownloadQueueStatus.Failed => "FAILED",
-        DownloadQueueStatus.Cancelled => "CANCELLED",
-        _ => "UNKNOWN"
-    };
+    public string StatusLabel => _isProcessing
+        ? "PROCESSING"
+        : Status switch
+        {
+            DownloadQueueStatus.Queued => "QUEUED",
+            DownloadQueueStatus.Downloading => "DOWNLOADING",
+            DownloadQueueStatus.Paused => "PAUSED",
+            DownloadQueueStatus.Completed => "COMPLETED",
+            DownloadQueueStatus.Failed => "FAILED",
+            DownloadQueueStatus.Cancelled => "CANCELLED",
+            _ => "UNKNOWN"
+        };
 
     public string StatusForeground => Status switch
     {
@@ -135,11 +138,13 @@ public sealed class QueueItemViewModel : INotifyPropertyChanged
         _item = item;
         _liveBytes = item.BytesReceived;
         _transferDetail = string.Empty;
+        _isProcessing = false;
         NotifyAll();
     }
 
     internal void UpdateProgress(DownloadProgress progress)
     {
+        _isProcessing = false;
         _liveBytes = progress.BytesReceived;
         var speed = progress.BytesPerSecond > 0
             ? $" · {FormatBytes((long)progress.BytesPerSecond)}/s"
@@ -150,6 +155,15 @@ public sealed class QueueItemViewModel : INotifyPropertyChanged
         _transferDetail = $"{FormatBytes(progress.BytesReceived)}{speed}{eta}";
         OnPropertyChanged(nameof(Progress));
         OnPropertyChanged(nameof(ProgressDetail));
+        OnPropertyChanged(nameof(StatusLabel));
+    }
+
+    internal void UpdateProcessing(string detail)
+    {
+        _isProcessing = true;
+        _transferDetail = detail;
+        OnPropertyChanged(nameof(ProgressDetail));
+        OnPropertyChanged(nameof(StatusLabel));
     }
 
     private void NotifyAll()
