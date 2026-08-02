@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 2.2.4 - 2026-08-02
+
+- Treat a narrowly validated context-only YouTube continuation response as the terminal page of a public collection instead of failing after already parsing its video items.
+- Keep initial collection HTML and arbitrary empty or malformed continuation JSON fail-closed.
+
 ## 2.2.3 - 2026-08-02
 
 - Preserve an enabled trim range when switching between compatible Quick presets.

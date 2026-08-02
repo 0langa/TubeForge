@@ -73,6 +73,34 @@ public static class YouTubeCollectionResolverTests
     }
 
     [Test]
+    public static async Task AcceptsContextOnlyContinuationAsTerminalPage()
+    {
+        using var handler = new StubHandler((request, _) => Task.FromResult(
+            new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(request.Method == HttpMethod.Get
+                    ? CollectionFixtures.InitialHtml
+                    : """
+                      {
+                        "responseContext": {"mainAppWebResponseContext":{"loggedOut":true}},
+                        "trackingParams": "TerminalTracking_1"
+                      }
+                      """)
+            }));
+        using var client = new HttpClient(handler);
+        var resolver = new YouTubeCollectionResolver(client);
+        var source = YouTubeCollectionUrlParser.Parse(
+            "https://www.youtube.com/playlist?list=PL1234567890").Value;
+
+        var result = await resolver.ResolveAsync(source);
+
+        Assert.True(result.IsSuccess, result.Error?.TechnicalDetail);
+        Assert.Equal(1, result.Value.Items.Count);
+        Assert.Equal(2, result.Value.PagesRead);
+        Assert.False(result.Value.IsTruncated);
+    }
+
+    [Test]
     public static async Task PreservesBoundedRetryAfterOnRateLimit()
     {
         using var handler = new StubHandler((_, _) =>

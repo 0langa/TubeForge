@@ -2,9 +2,9 @@
 
 YouTube is an upstream service outside TubeForge's control. Compatibility is versioned by TubeForge release and verified with synthetic fixtures plus bounded public canaries; it is not a permanent guarantee.
 
-## v2.2.3 compatibility status
+## v2.2.4 compatibility status
 
-TubeForge v2.2.3 retains the v2.1.0 download and media stack. Its collection parser adds one bounded fallback for modern playlist lockups whose `videoId` moved below nested renderer actions. Synthetic coverage verifies the current nested shape while preserving strict video-ID/title validation, a 16-level fallback bound, the existing global traversal-node limit, and the 5,000-item page limit. Public-playlist compatibility also requires installed canary evidence; upstream compatibility is never inferred from fixture coverage alone.
+TubeForge v2.2.4 retains the v2.1.0 download and media stack plus the v2.2.3 bounded fallback for modern playlist lockups whose `videoId` moved below nested renderer actions. It also recognizes a continuation response as terminal only when it contains an object `responseContext`, a non-empty string `trackingParams`, no supported videos, and no next token. Initial collection HTML and arbitrary empty or malformed continuation JSON remain fail-closed. Synthetic parser/resolver coverage and a current public resolver canary pass; installed v2.2.4 canary evidence remains required before release closure.
 
 ## v2.1.0 compatibility update
 
@@ -86,7 +86,7 @@ The live 4K canary resolved 27 formats and selected 2160p MP4 video plus AAC aud
 - arbitrary JavaScript execution or general-purpose JavaScript evaluation;
 - formats whose container/codec combination the supported finalization pipeline cannot represent safely.
 
-TubeForge v2.2.3 supports bounded public unencrypted HLS capture plus explicit H.264/AAC, H.265/AAC, and VP9/Opus conversion profiles. Authenticated/access-controlled media and encrypted/DRM HLS remain unsupported.
+TubeForge v2.2.4 supports bounded public unencrypted HLS capture plus explicit H.264/AAC, H.265/AAC, and VP9/Opus conversion profiles. Authenticated/access-controlled media and encrypted/DRM HLS remain unsupported.
 
 Malformed, oversized, or unsupported player scripts fail closed. When public extraction changes, follow the [extractor maintenance playbook](EXTRACTOR_PLAYBOOK.md) and add a sanitized synthetic regression before changing a client profile or transform rule.
 

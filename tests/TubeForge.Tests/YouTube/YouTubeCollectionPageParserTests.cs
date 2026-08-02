@@ -96,6 +96,28 @@ public static class YouTubeCollectionPageParserTests
         Assert.Equal("Video000005", result.Value.Items[0].VideoId.Value);
         Assert.Equal("Nested command video", result.Value.Items[0].Title);
     }
+
+    [Test]
+    public static void TreatsContextOnlyContinuationAsTerminalPage()
+    {
+        const string terminal = """
+            {
+              "responseContext": {
+                "serviceTrackingParams": [{"service":"CSI","params":[]}],
+                "mainAppWebResponseContext": {"loggedOut":true}
+              },
+              "trackingParams": "TerminalTracking_1"
+            }
+            """;
+
+        var continuation = YouTubeCollectionPageParser.ParseContinuationJson(terminal);
+
+        Assert.True(continuation.IsSuccess, continuation.Error?.TechnicalDetail);
+        Assert.Equal(0, continuation.Value.Items.Count);
+        Assert.Equal<string?>(null, continuation.Value.ContinuationToken);
+        Assert.False(YouTubeCollectionPageParser.ParseInitialHtml(
+            $"<script>var ytInitialData = {terminal};</script>").IsSuccess);
+    }
 }
 
 internal static class CollectionFixtures

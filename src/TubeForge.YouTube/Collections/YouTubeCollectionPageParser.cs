@@ -24,7 +24,7 @@ public static class YouTubeCollectionPageParser
         while (TryFindNextJsonObject(html, InitialDataMarker, searchIndex, out var json, out var nextIndex))
         {
             searchIndex = nextIndex;
-            var parsed = ParseJson(json, includeTitle: true);
+            var parsed = ParseJson(json, includeTitle: true, allowTerminalEmpty: false);
             if (parsed.IsSuccess)
             {
                 var context = ParseContinuationContext(html);
@@ -45,10 +45,13 @@ public static class YouTubeCollectionPageParser
             return Failure("The collection continuation was empty.");
         }
 
-        return ParseJson(json, includeTitle: false);
+        return ParseJson(json, includeTitle: false, allowTerminalEmpty: true);
     }
 
-    private static Result<YouTubeCollectionPage> ParseJson(string json, bool includeTitle)
+    private static Result<YouTubeCollectionPage> ParseJson(
+        string json,
+        bool includeTitle,
+        bool allowTerminalEmpty)
     {
         try
         {
@@ -60,7 +63,9 @@ public static class YouTubeCollectionPageParser
             });
             var state = new ParseState(includeTitle);
             Visit(document.RootElement, state, depth: 0);
-            if (state.Items.Count == 0 && state.ContinuationToken is null)
+            if (state.Items.Count == 0 &&
+                state.ContinuationToken is null &&
+                !(allowTerminalEmpty && IsTerminalContinuation(document.RootElement)))
             {
                 return Failure("The collection data contained no supported videos or continuation.");
             }
@@ -79,6 +84,14 @@ public static class YouTubeCollectionPageParser
             return Failure("The collection data was malformed.", exception.GetType().Name);
         }
     }
+
+    private static bool IsTerminalContinuation(JsonElement root) =>
+        root.ValueKind == JsonValueKind.Object &&
+        root.TryGetProperty("responseContext", out var responseContext) &&
+        responseContext.ValueKind == JsonValueKind.Object &&
+        root.TryGetProperty("trackingParams", out var trackingParams) &&
+        trackingParams.ValueKind == JsonValueKind.String &&
+        !string.IsNullOrWhiteSpace(trackingParams.GetString());
 
     private static void Visit(JsonElement element, ParseState state, int depth)
     {
