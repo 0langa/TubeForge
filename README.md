@@ -72,7 +72,6 @@ Requirements: Windows 10 or 11, x64. Self-contained builds include the .NET runt
 - [Extraction compatibility history](docs/EXTRACTION_COMPATIBILITY.md) and [maintainer playbook](docs/EXTRACTOR_PLAYBOOK.md)
 - [Security policy](SECURITY.md), [threat model](TUBEFORGE_THREAT_MODEL.md), and [false-positive response guide](docs/SECURITY_FALSE_POSITIVE_RESPONSE.md)
 - [FFmpeg licensing and build provenance](THIRD_PARTY_NOTICES.md)
-- [Contributor and maintainer checks](CONTRIBUTING.md)
 
 ## Build from source
 
@@ -84,7 +83,6 @@ dotnet run --project tests/TubeForge.Tests --configuration Release -- --all
 dotnet run --project src/TubeForge.App --configuration Release
 ```
 
-Release packaging downloads one pinned, SHA-256-verified FFmpeg x64 archive. Advanced extractor, media, performance, packaging, and installer checks are documented in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Security
 
