@@ -29,17 +29,29 @@ public sealed class HlsCaptureEngine
     private readonly DownloadUriPolicy _uriPolicy;
     private readonly HostRequestGate _hostRequestGate;
     private readonly Func<TimeSpan, CancellationToken, Task> _delay;
+    private readonly TimeSpan _stallTimeout;
 
     public HlsCaptureEngine(
         HttpClient httpClient,
         HostRequestGate hostRequestGate,
         DownloadUriPolicy? uriPolicy = null,
         Func<TimeSpan, CancellationToken, Task>? delay = null)
+        : this(httpClient, hostRequestGate, uriPolicy, delay, stallTimeout: null)
+    {
+    }
+
+    internal HlsCaptureEngine(
+        HttpClient httpClient,
+        HostRequestGate hostRequestGate,
+        DownloadUriPolicy? uriPolicy,
+        Func<TimeSpan, CancellationToken, Task>? delay,
+        TimeSpan? stallTimeout)
     {
         _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
         _hostRequestGate = hostRequestGate ?? throw new ArgumentNullException(nameof(hostRequestGate));
         _uriPolicy = uriPolicy ?? DownloadUriPolicy.YouTubeMediaOnly;
         _delay = delay ?? Task.Delay;
+        _stallTimeout = TransferStallGuard.Validate(stallTimeout);
     }
 
     public async Task<Result<DownloadReceipt>> CaptureAsync(
@@ -270,12 +282,14 @@ public sealed class HlsCaptureEngine
             return FailurePlaylist("Hls.InvalidUserAgent", "The HLS request contained an invalid HTTP user agent.");
         }
 
+        using var stall = new TransferStallGuard(_stallTimeout, cancellationToken);
         try
         {
             using var response = await _httpClient.SendAsync(
                 request,
                 HttpCompletionOption.ResponseHeadersRead,
-                cancellationToken).ConfigureAwait(false);
+                stall.Token).ConfigureAwait(false);
+            stall.Progressed();
             var finalUri = response.RequestMessage?.RequestUri ?? uri;
             if (!_uriPolicy.IsAllowed(finalUri))
             {
@@ -292,8 +306,12 @@ public sealed class HlsCaptureEngine
                 return FailurePlaylist("Hls.PlaylistTooLarge", "The HLS playlist exceeds its safe size limit.");
             }
 
-            var text = await ReadBoundedTextAsync(response.Content, cancellationToken).ConfigureAwait(false);
+            var text = await ReadBoundedTextAsync(response.Content, stall).ConfigureAwait(false);
             return HlsPlaylistParser.Parse(text, finalUri);
+        }
+        catch (Exception exception) when ((exception is OperationCanceledException or IOException) && stall.HasStalled)
+        {
+            return Result<HlsPlaylist>.Failure(DirectDownloadEngine.StalledError(_stallTimeout));
         }
         catch (HttpRequestException exception)
         {
@@ -436,12 +454,14 @@ public sealed class HlsCaptureEngine
             return FailureLong("Hls.InvalidUserAgent", "The HLS request contained an invalid HTTP user agent.");
         }
 
+        using var stall = new TransferStallGuard(_stallTimeout, cancellationToken);
         try
         {
             using var response = await _httpClient.SendAsync(
                 request,
                 HttpCompletionOption.ResponseHeadersRead,
-                cancellationToken).ConfigureAwait(false);
+                stall.Token).ConfigureAwait(false);
+            stall.Progressed();
             var finalUri = response.RequestMessage?.RequestUri ?? uri;
             if (!_uriPolicy.IsAllowed(finalUri))
             {
@@ -458,18 +478,20 @@ public sealed class HlsCaptureEngine
                 return FailureLong("Hls.SizeLimitReached", "The live capture reached its configured size limit.");
             }
 
-            await using var input = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+            await using var input = await response.Content.ReadAsStreamAsync(stall.Token).ConfigureAwait(false);
             var buffer = new byte[BufferSize];
             long written = 0;
             while (true)
             {
-                var read = await input.ReadAsync(buffer, cancellationToken).ConfigureAwait(false);
+                var read = await input.ReadAsync(buffer, stall.Token).ConfigureAwait(false);
                 if (read == 0)
                 {
                     return written > 0
                         ? Result<long>.Success(written)
                         : FailureLong("Hls.EmptySegment", "An HLS segment was empty.");
                 }
+
+                stall.Progressed();
 
                 if (written > maximumBytes - read)
                 {
@@ -479,6 +501,10 @@ public sealed class HlsCaptureEngine
                 await output.WriteAsync(buffer.AsMemory(0, read), cancellationToken).ConfigureAwait(false);
                 written += read;
             }
+        }
+        catch (Exception exception) when ((exception is OperationCanceledException or IOException) && stall.HasStalled)
+        {
+            return Result<long>.Failure(DirectDownloadEngine.StalledError(_stallTimeout));
         }
         catch (HttpRequestException exception)
         {
@@ -642,20 +668,21 @@ public sealed class HlsCaptureEngine
 
     private static async Task<string> ReadBoundedTextAsync(
         HttpContent content,
-        CancellationToken cancellationToken)
+        TransferStallGuard stall)
     {
-        await using var stream = await content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+        await using var stream = await content.ReadAsStreamAsync(stall.Token).ConfigureAwait(false);
         using var reader = new StreamReader(stream, Encoding.UTF8, true);
         var buffer = new char[8_192];
         var builder = new StringBuilder();
         while (builder.Length <= HlsPlaylistParser.MaximumCharacters)
         {
-            var read = await reader.ReadAsync(buffer.AsMemory(), cancellationToken).ConfigureAwait(false);
+            var read = await reader.ReadAsync(buffer.AsMemory(), stall.Token).ConfigureAwait(false);
             if (read == 0)
             {
                 return builder.ToString();
             }
 
+            stall.Progressed();
             builder.Append(buffer, 0, read);
         }
 

@@ -591,6 +591,185 @@ public static class DirectDownloadEngineTests
     }
 
     [Test]
+    public static async Task RetriesAndResumesWhenResponseStopsDeliveringBytes()
+    {
+        using var directory = new TestDirectory();
+        var destination = Path.Combine(directory.Path, "silent-response.mp4");
+        var payload = Enumerable.Range(0, 256 * 1024).Select(index => (byte)(index % 239)).ToArray();
+        var ranges = new List<RangeItemHeaderValue?>();
+        var stalled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var neverResumes = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var handler = new StubHandler((request, _) =>
+        {
+            lock (ranges)
+            {
+                ranges.Add(request.Headers.Range?.Ranges.Single());
+                if (ranges.Count == 1)
+                {
+                    // The connection stays open but goes silent after the first half.
+                    var silent = new HttpResponseMessage(HttpStatusCode.OK)
+                    {
+                        Content = new StreamContent(new GatedReadStream(payload, stalled, neverResumes.Task))
+                    };
+                    silent.Content.Headers.ContentLength = payload.Length;
+                    return Task.FromResult(silent);
+                }
+            }
+
+            var from = request.Headers.Range!.Ranges.Single().From!.Value;
+            return Task.FromResult(RangeResponse(payload, from, payload.Length - 1, "\"silent-v1\""));
+        });
+        using var client = new HttpClient(handler);
+        var engine = new DirectDownloadEngine(
+            client,
+            DownloadUriPolicy.YouTubeMediaAndLoopback,
+            (_, _) => Task.CompletedTask,
+            outputStreamFactory: null,
+            stallTimeout: TimeSpan.FromMilliseconds(200));
+
+        var result = await engine.DownloadAsync(Request(destination, payload.Length))
+            .WaitAsync(TimeSpan.FromSeconds(15));
+
+        Assert.True(result.IsSuccess, result.Error?.Message);
+        Assert.True(result.Value.Resumed);
+        Assert.SequenceEqual(payload, await File.ReadAllBytesAsync(destination));
+        Assert.Equal(2, ranges.Count);
+        Assert.Equal<long?>(payload.Length / 2, ranges[1]?.From);
+    }
+
+    [Test]
+    public static async Task ReportsSilentResponseAsTransientStallAfterFinalAttempt()
+    {
+        using var directory = new TestDirectory();
+        var destination = Path.Combine(directory.Path, "always-silent.mp4");
+        var payload = Enumerable.Range(0, 64 * 1024).Select(index => (byte)(index % 233)).ToArray();
+        var neverResumes = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var attempts = 0;
+        using var handler = new StubHandler((_, _) =>
+        {
+            Interlocked.Increment(ref attempts);
+            var silent = new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StreamContent(new GatedReadStream(
+                    payload,
+                    new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously),
+                    neverResumes.Task))
+            };
+            silent.Content.Headers.ContentLength = payload.Length;
+            return Task.FromResult(silent);
+        });
+        using var client = new HttpClient(handler);
+        var engine = new DirectDownloadEngine(
+            client,
+            DownloadUriPolicy.YouTubeMediaAndLoopback,
+            (_, _) => Task.CompletedTask,
+            outputStreamFactory: null,
+            maximumAttempts: 2,
+            stallTimeout: TimeSpan.FromMilliseconds(150));
+
+        var result = await engine.DownloadAsync(Request(destination, payload.Length))
+            .WaitAsync(TimeSpan.FromSeconds(15));
+
+        Assert.False(result.IsSuccess);
+        Assert.Equal("Network.Stalled", result.Error?.Code);
+        Assert.True(result.Error!.IsTransient);
+        Assert.Equal(2, Volatile.Read(ref attempts));
+        Assert.False(File.Exists(destination));
+    }
+
+    [Test]
+    public static async Task CancellationDuringSilentResponseIsReportedAsCancellation()
+    {
+        using var directory = new TestDirectory();
+        var destination = Path.Combine(directory.Path, "cancel-silent.mp4");
+        var payload = Enumerable.Range(0, 64 * 1024).Select(index => (byte)(index % 229)).ToArray();
+        var stalled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var neverResumes = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var handler = new StubHandler((_, _) =>
+        {
+            var silent = new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StreamContent(new GatedReadStream(payload, stalled, neverResumes.Task))
+            };
+            silent.Content.Headers.ContentLength = payload.Length;
+            return Task.FromResult(silent);
+        });
+        using var client = new HttpClient(handler);
+        var engine = new DirectDownloadEngine(
+            client,
+            DownloadUriPolicy.YouTubeMediaAndLoopback,
+            (_, _) => Task.CompletedTask,
+            outputStreamFactory: null,
+            stallTimeout: TimeSpan.FromMinutes(5));
+        using var cancellation = new CancellationTokenSource();
+
+        var download = engine.DownloadAsync(Request(destination, payload.Length), cancellationToken: cancellation.Token);
+        await stalled.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await cancellation.CancelAsync();
+        var result = await download.WaitAsync(TimeSpan.FromSeconds(15));
+
+        Assert.False(result.IsSuccess);
+        Assert.Equal("Operation.Cancelled", result.Error?.Code);
+        Assert.True(File.Exists(destination + ".part"));
+    }
+
+    [Test]
+    public static async Task SegmentedTransferRetriesRangeThatStopsDeliveringBytes()
+    {
+        using var directory = new TestDirectory();
+        var destination = Path.Combine(directory.Path, "segmented-silent.mp4");
+        var payload = Enumerable.Range(0, 256 * 1024).Select(index => (byte)(index % 227)).ToArray();
+        const int segmentBytes = 64 * 1024;
+        var neverResumes = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var silencedOnce = 0;
+        var requests = 0;
+        using var handler = new StubHandler((request, _) =>
+        {
+            Interlocked.Increment(ref requests);
+            var range = request.Headers.Range!.Ranges.Single();
+            if (range.From == segmentBytes && Interlocked.Exchange(ref silencedOnce, 1) == 0)
+            {
+                var segment = payload.AsSpan(segmentBytes, segmentBytes).ToArray();
+                var silent = new HttpResponseMessage(HttpStatusCode.PartialContent)
+                {
+                    Content = new StreamContent(new GatedReadStream(
+                        segment,
+                        new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously),
+                        neverResumes.Task))
+                };
+                silent.Content.Headers.ContentLength = segmentBytes;
+                silent.Content.Headers.ContentRange = new ContentRangeHeaderValue(
+                    segmentBytes,
+                    (2 * segmentBytes) - 1,
+                    payload.Length);
+                silent.Headers.ETag = new EntityTagHeaderValue("\"segmented-silent-v1\"");
+                return Task.FromResult(silent);
+            }
+
+            return Task.FromResult(RangeResponse(payload, range.From!.Value, range.To!.Value, "\"segmented-silent-v1\""));
+        });
+        using var client = new HttpClient(handler);
+        var engine = new DirectDownloadEngine(
+            client,
+            DownloadUriPolicy.YouTubeMediaAndLoopback,
+            (_, _) => Task.CompletedTask,
+            outputStreamFactory: null,
+            stallTimeout: TimeSpan.FromMilliseconds(200));
+
+        var result = await engine.DownloadAsync(SegmentedRequest(destination, payload.Length) with
+            {
+                SegmentedTransferChunkBytes = segmentBytes
+            })
+            .WaitAsync(TimeSpan.FromSeconds(15));
+
+        Assert.True(result.IsSuccess, result.Error?.Message);
+        Assert.SequenceEqual(payload, await File.ReadAllBytesAsync(destination));
+        Assert.Equal(1, Volatile.Read(ref silencedOnce));
+        Assert.True(Volatile.Read(ref requests) >= 5, "The silent range must be requested again.");
+        Assert.False(File.Exists(destination + ".part.segments.json"));
+    }
+
+    [Test]
     public static async Task BackpressureFromSlowDestinationDoesNotLoseBytes()
     {
         using var directory = new TestDirectory();

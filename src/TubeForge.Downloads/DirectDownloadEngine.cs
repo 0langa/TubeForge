@@ -22,6 +22,7 @@ public sealed class DirectDownloadEngine
     private readonly Func<string, bool, Stream> _outputStreamFactory;
     private readonly SegmentedDownloadEngine _segmentedDownloadEngine;
     private readonly int _maximumAttempts;
+    private readonly TimeSpan _stallTimeout;
 
     public DirectDownloadEngine(
         HttpClient httpClient,
@@ -37,7 +38,8 @@ public sealed class DirectDownloadEngine
         DownloadUriPolicy? uriPolicy,
         Func<TimeSpan, CancellationToken, Task>? delay,
         Func<string, bool, Stream>? outputStreamFactory,
-        int maximumAttempts = DownloadRetryPolicy.MaximumAttempts)
+        int maximumAttempts = DownloadRetryPolicy.MaximumAttempts,
+        TimeSpan? stallTimeout = null)
     {
         _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
         _uriPolicy = uriPolicy ?? DownloadUriPolicy.YouTubeMediaOnly;
@@ -49,7 +51,8 @@ public sealed class DirectDownloadEngine
         }
 
         _maximumAttempts = maximumAttempts;
-        _segmentedDownloadEngine = new SegmentedDownloadEngine(_httpClient, _uriPolicy);
+        _stallTimeout = TransferStallGuard.Validate(stallTimeout);
+        _segmentedDownloadEngine = new SegmentedDownloadEngine(_httpClient, _uriPolicy, _stallTimeout);
     }
 
     public async Task<Result<DownloadReceipt>> DownloadAsync(
@@ -108,6 +111,7 @@ public sealed class DirectDownloadEngine
         var destinationPath = Path.GetFullPath(request.DestinationPath);
         var partialPath = destinationPath + ".part";
         var statePath = destinationPath + ".part.json";
+        using var stall = new TransferStallGuard(_stallTimeout, cancellationToken);
         try
         {
             if (File.Exists(destinationPath))
@@ -192,7 +196,8 @@ public sealed class DirectDownloadEngine
                 using var response = await _httpClient.SendAsync(
                     requestMessage,
                     HttpCompletionOption.ResponseHeadersRead,
-                    cancellationToken).ConfigureAwait(false);
+                    stall.Token).ConfigureAwait(false);
+                stall.Progressed();
                 var finalUri = response.RequestMessage?.RequestUri ?? request.SourceUrl;
                 if (!_uriPolicy.IsAllowed(finalUri))
                 {
@@ -299,6 +304,7 @@ public sealed class DirectDownloadEngine
                     currentLength,
                     expectedLength,
                     progress,
+                    stall,
                     cancellationToken).ConfigureAwait(false);
                 currentLength = checked(currentLength + transferred);
 
@@ -348,6 +354,10 @@ public sealed class DirectDownloadEngine
                 }
             }
         }
+        catch (OperationCanceledException) when (stall.HasStalled)
+        {
+            return Stalled(_stallTimeout);
+        }
         catch (OperationCanceledException)
         {
             return Cancelled();
@@ -374,6 +384,10 @@ public sealed class DirectDownloadEngine
                 "The destination drive is full.",
                 exception.GetType().Name));
         }
+        catch (IOException) when (stall.HasStalled)
+        {
+            return Stalled(_stallTimeout);
+        }
         catch (IOException exception)
         {
             return Result<DownloadReceipt>.Failure(new TubeForgeError(
@@ -391,9 +405,10 @@ public sealed class DirectDownloadEngine
         long startingLength,
         long? totalLength,
         IProgress<DownloadProgress>? progress,
+        TransferStallGuard stall,
         CancellationToken cancellationToken)
     {
-        await using var input = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+        await using var input = await response.Content.ReadAsStreamAsync(stall.Token).ConfigureAwait(false);
         await using var output = _outputStreamFactory(partialPath, append);
         var buffer = ArrayPool<byte>.Shared.Rent(BufferSize);
         var stopwatch = Stopwatch.StartNew();
@@ -404,13 +419,14 @@ public sealed class DirectDownloadEngine
         {
             while (true)
             {
-                var count = await input.ReadAsync(buffer.AsMemory(0, BufferSize), cancellationToken)
+                var count = await input.ReadAsync(buffer.AsMemory(0, BufferSize), stall.Token)
                     .ConfigureAwait(false);
                 if (count == 0)
                 {
                     break;
                 }
 
+                stall.Progressed();
                 await output.WriteAsync(buffer.AsMemory(0, count), cancellationToken).ConfigureAwait(false);
                 transferred += count;
 
@@ -601,6 +617,15 @@ public sealed class DirectDownloadEngine
         Result<DownloadReceipt>.Failure(new TubeForgeError(
             "Operation.Cancelled",
             "The download was cancelled."));
+
+    internal static TubeForgeError StalledError(TimeSpan timeout) => new(
+        TransferStallGuard.StalledCode,
+        "The media server stopped sending data.",
+        FormattableString.Invariant($"No response bytes arrived for {timeout.TotalSeconds:0.#} seconds."),
+        IsTransient: true);
+
+    private static Result<DownloadReceipt> Stalled(TimeSpan timeout) =>
+        Result<DownloadReceipt>.Failure(StalledError(timeout));
 
     private static bool IsDiskFull(IOException exception) =>
         (exception.HResult & 0xFFFF) is 0x27 or 0x70;
