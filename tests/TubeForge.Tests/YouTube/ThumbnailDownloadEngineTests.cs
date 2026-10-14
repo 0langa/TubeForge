@@ -144,6 +144,67 @@ public static class ThumbnailDownloadEngineTests
         Assert.False(File.Exists(destination + ".part"));
     }
 
+    [Test]
+    public static async Task ReportsADroppedConnectionAsANetworkFailureNotAWriteFailure()
+    {
+        using var directory = new TestDirectory();
+        var destination = Path.Combine(directory.Path, "dropped.jpg");
+        using var handler = new StubHandler((_, _) =>
+        {
+            var response = new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StreamContent(new SilentStream(new IOException("The response ended prematurely.")))
+            };
+            response.Content.Headers.ContentType = new MediaTypeHeaderValue("image/jpeg");
+            return Task.FromResult(response);
+        });
+        using var client = new HttpClient(handler);
+
+        var result = await new ThumbnailDownloadEngine(client).DownloadAsync(new ThumbnailDownloadRequest
+            {
+                SourceUrl = new Uri("https://i.ytimg.com/vi/Fixture123_/maxresdefault.jpg"),
+                DestinationPath = destination
+            })
+            .WaitAsync(TimeSpan.FromSeconds(15));
+
+        // The disk was fine; the server went away. This used to read "could not save the thumbnail".
+        Assert.False(result.IsSuccess);
+        Assert.Equal("Network.RequestFailed", result.Error?.Code);
+        Assert.True(result.Error!.IsTransient);
+        Assert.False(File.Exists(destination));
+        Assert.False(File.Exists(destination + ".part"));
+    }
+
+    [Test]
+    public static async Task StillReportsARealWriteFailureAsOne()
+    {
+        using var directory = new TestDirectory();
+        var destination = Path.Combine(directory.Path, "blocked.jpg");
+        // A folder where the partial file has to go: the write side fails, the network does not.
+        Directory.CreateDirectory(destination + ".part");
+        var payload = new byte[] { 0xFF, 0xD8, 0xFF, 0xDB, 0x00, 0x43, 0xFF, 0xD9 };
+        using var handler = new StubHandler((_, _) =>
+        {
+            var response = new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new ByteArrayContent(payload)
+            };
+            response.Content.Headers.ContentType = new MediaTypeHeaderValue("image/jpeg");
+            return Task.FromResult(response);
+        });
+        using var client = new HttpClient(handler);
+
+        var result = await new ThumbnailDownloadEngine(client).DownloadAsync(new ThumbnailDownloadRequest
+        {
+            SourceUrl = new Uri("https://i.ytimg.com/vi/Fixture123_/maxresdefault.jpg"),
+            DestinationPath = destination
+        });
+
+        Assert.False(result.IsSuccess);
+        Assert.Equal("Thumbnail.WriteFailed", result.Error?.Code);
+        Assert.False(File.Exists(destination));
+    }
+
     private sealed class StubHandler(
         Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> responseFactory)
         : HttpMessageHandler
