@@ -176,6 +176,44 @@ public static class GitHubUpdateClientTests
     }
 
     [Test]
+    public static async Task SlowCachedInstallerCheckDoesNotCountAsNetworkSilence()
+    {
+        var fixture = ReleaseFixture.Create();
+        using var client = new HttpClient(new ReleaseHandler(fixture))
+        {
+            Timeout = Timeout.InfiniteTimeSpan
+        };
+        var updates = new GitHubUpdateClient(client, TimeSpan.FromMilliseconds(200));
+        var release = GitHubReleasePolicy.ParseLatest(fixture.Json, new Version(1, 0, 0)).Value!;
+        var directory = Path.Combine(Path.GetTempPath(), $"tubeforge-update-slow-cache-{Guid.NewGuid():N}");
+        try
+        {
+            // A stale installer of the expected size is re-hashed from disk before the download
+            // starts. That is local work: a slow disk or scanner must not look like a dead server.
+            Directory.CreateDirectory(directory);
+            await File.WriteAllBytesAsync(
+                Path.Combine(directory, fixture.SetupName),
+                new byte[fixture.SetupBytes.Length]);
+            var progress = new SlowCacheCheckProgress(TimeSpan.FromMilliseconds(600));
+
+            var download = await updates.DownloadInstallerAsync(release, directory, progress)
+                .WaitAsync(TimeSpan.FromSeconds(15));
+
+            Assert.True(progress.Slowed, "The cached installer must have been re-verified.");
+            Assert.True(download.IsSuccess, download.Error?.Code + " " + download.Error?.Message);
+            Assert.Equal(fixture.SetupHash, download.Value.Sha256);
+            Assert.SequenceEqual(fixture.SetupBytes, await File.ReadAllBytesAsync(download.Value.InstallerPath));
+        }
+        finally
+        {
+            if (Directory.Exists(directory))
+            {
+                Directory.Delete(directory, recursive: true);
+            }
+        }
+    }
+
+    [Test]
     public static async Task CachedInstallerVerificationReportsMonotonicProgress()
     {
         var fixture = ReleaseFixture.Create();
@@ -214,6 +252,24 @@ public static class GitHubUpdateClientTests
         public List<double> Values { get; } = [];
 
         public void Report(double value) => Values.Add(value);
+    }
+
+    /// <summary>
+    /// Blocks once inside the cached-installer check, which reports progress between 5% and 15%,
+    /// standing in for a slow disk or an on-access scanner.
+    /// </summary>
+    private sealed class SlowCacheCheckProgress(TimeSpan delay) : IProgress<double>
+    {
+        public bool Slowed { get; private set; }
+
+        public void Report(double value)
+        {
+            if (!Slowed && value is > 0.05 and < 0.15)
+            {
+                Slowed = true;
+                Thread.Sleep(delay);
+            }
+        }
     }
 
     private sealed record ReleaseFixture(

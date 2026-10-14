@@ -126,6 +126,9 @@ public sealed class GitHubUpdateClient
 
             progress?.Report(0.05);
 
+            // Re-hashing a cached installer is local work, not network silence, and a slow disk
+            // or on-access scanner can take longer than the stall window.
+            stall.Suspend();
             if (File.Exists(destination) &&
                 await FileMatchesAsync(
                     destination,
@@ -144,7 +147,6 @@ public sealed class GitHubUpdateClient
 
             progress?.Report(0.15);
             TryDelete(temporary);
-            // Verifying a cached installer above is local work, not network silence.
             stall.Progressed();
             using var response = await SendAssetRequestAsync(
                 release.SetupDownloadUri,

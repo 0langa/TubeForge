@@ -44,6 +44,13 @@ public sealed class TransferStallGuard : IDisposable
     /// <summary>Restarts the silence window after the transfer made progress.</summary>
     public void Progressed() => _source.CancelAfter(_timeout);
 
+    /// <summary>
+    /// Stops the silence window while the caller does local work between requests, however long
+    /// that takes. <see cref="Progressed"/> starts it again. Restarting the window afterwards is
+    /// not enough on its own: once the window has expired the token is already cancelled.
+    /// </summary>
+    public void Suspend() => _source.CancelAfter(Timeout.InfiniteTimeSpan);
+
     public static TimeSpan Validate(TimeSpan? timeout)
     {
         var value = timeout ?? DefaultTimeout;
