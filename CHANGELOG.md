@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 2.4.0 - 2026-10-15
+
+### Queue
+
 - Removing a failed or cancelled download from the queue now also deletes what it left beside its
   destination: the partial file and its resume state, intermediate audio and video tracks,
   pre-processing sources, a live capture's segment folder, and FFmpeg scratch files. These could
@@ -9,14 +13,63 @@
   "Title (1)". Only files named after that item's destination with a suffix TubeForge itself
   writes are touched; the destination file, other files, links, and folders holding anything
   unexpected are left alone, as is anything another queue item still uses.
+
+### Updates
+
 - When the running TubeForge is Authenticode-signed, an update installer must be signed by the
   same certificate before it is launched, on top of the SHA-256 checks against the release API and
   the checksum manifest. Those checks come from the same GitHub release as the installer, so on
   their own a compromised token or workflow could publish an installer that passes them. An
   unsigned build has no certificate to pin to and keeps the hash checks alone.
+- TubeForge releases are not Authenticode-signed yet, so that certificate check does not apply to
+  them today: an update is still accepted on the SHA-256 checks alone, exactly as in v2.3.2.
+- **Update now** and the update check no longer hang on a connection that stops sending data.
+  After 60 seconds of silence they fail safely and remove the partial installer. Re-hashing a
+  cached installer on a slow disk does not count as silence.
+
+### Reliability
+
+- Downloads, segmented ranges, live captures, and caption fetches no longer wait forever on a
+  connection that stops sending data. After 60 seconds of silence the transfer fails over, and the
+  normal retry resumes from what is already on disk.
+- A connection that times out while connecting is retried as a transient network error instead of
+  pausing the download.
+- **Save thumbnail** and playlist loading no longer hang on a silent connection. A hung thumbnail
+  save used to keep Save thumbnail and Save metadata disabled until restart.
 - A thumbnail save whose connection dropped mid-download is reported as a transient network
   failure (`Network.RequestFailed`), not as "could not save the thumbnail".
+- A slow SponsorBlock lookup no longer marks the job as paused or holds it forever.
+- FFmpeg's diagnostic output is capped at its last 64K characters instead of being collected
+  without limit.
+
+### Output names
+
+- Output names that Windows 10 still opens as devices get a leading `_`: `COM0`, `LPT0`, `CONIN$`,
+  `CONOUT$`, the superscript forms such as `COM¹`, and a device name followed by spaces before the
+  first dot, such as `NUL .mp4`.
+- Chapter and SponsorBlock-chapter embedding works for long titles. An internal probe file name
+  went over 255 characters, so the embed failed with `Media.ChapterValidationFailed`.
+
+### Build and release
+
 - Dependabot opens one grouped pull request a month for the pinned GitHub Actions.
+- Workflow actions are pinned to full commit SHAs, and the release workflow passes the tag and
+  step outputs to its scripts only through environment variables.
+
+### Upgrade notes
+
+- Installed releases from v2.2.0 on offer this version through **Update now** as before. v2.1.0
+  still needs one manual install.
+- **Remove** on a Failed or Cancelled item now deletes its partial and temporary files, so that
+  download can no longer be resumed afterwards. Paused items keep their resume data when removed.
+
+### Known limitations
+
+- While releases stay unsigned, the certificate check never runs. Once signing is enabled, a
+  certificate change such as a renewal needs one manual install, because the check requires the
+  exact same certificate.
+- A stalled transfer uses one of a download's three attempts, so an outage longer than about a
+  minute still ends as Failed. **Retry** resumes from the partial file.
 
 ## 2.3.2 - 2026-08-18
 
