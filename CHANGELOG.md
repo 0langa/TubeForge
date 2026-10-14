@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+- Removing a failed or cancelled download from the queue now also deletes what it left beside its
+  destination: the partial file and its resume state, intermediate audio and video tracks,
+  pre-processing sources, a live capture's segment folder, and FFmpeg scratch files. These could
+  run to gigabytes, and the leftover partial file pushed the next download of the same video to
+  "Title (1)". Only files named after that item's destination with a suffix TubeForge itself
+  writes are touched; the destination file, other files, links, and folders holding anything
+  unexpected are left alone, as is anything another queue item still uses.
+- When the running TubeForge is Authenticode-signed, an update installer must be signed by the
+  same certificate before it is launched, on top of the SHA-256 checks against the release API and
+  the checksum manifest. Those checks come from the same GitHub release as the installer, so on
+  their own a compromised token or workflow could publish an installer that passes them. An
+  unsigned build has no certificate to pin to and keeps the hash checks alone.
+- A thumbnail save whose connection dropped mid-download is reported as a transient network
+  failure (`Network.RequestFailed`), not as "could not save the thumbnail".
+- Dependabot opens one grouped pull request a month for the pinned GitHub Actions.
+
 ## 2.3.2 - 2026-08-18
 
 - Delete the previous installation the installer retains for rollback, once the new version has
