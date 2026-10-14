@@ -1,0 +1,12 @@
+# Pinned workflow actions are updated by hand otherwise. Monthly, one grouped
+# pull request, GitHub Actions only: TubeForge has no package dependencies.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    groups:
+      github-actions:
+        patterns:
+          - "*"

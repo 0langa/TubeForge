@@ -84,7 +84,17 @@ public sealed class ThumbnailDownloadEngine
                 return Failure("Thumbnail.InvalidImage", "The thumbnail server returned a non-image response.");
             }
 
-            await using var input = await response.Content.ReadAsStreamAsync(stall.Token).ConfigureAwait(false);
+            Stream input;
+            try
+            {
+                input = await response.Content.ReadAsStreamAsync(stall.Token).ConfigureAwait(false);
+            }
+            catch (IOException exception) when (!stall.HasStalled)
+            {
+                return ConnectionInterrupted(exception);
+            }
+
+            await using var inputScope = input;
             await using var output = new FileStream(
                 partialPath,
                 FileMode.Create,
@@ -100,8 +110,19 @@ public sealed class ThumbnailDownloadEngine
             {
                 while (true)
                 {
-                    var count = await input.ReadAsync(buffer.AsMemory(0, BufferSize), stall.Token)
-                        .ConfigureAwait(false);
+                    int count;
+                    try
+                    {
+                        count = await input.ReadAsync(buffer.AsMemory(0, BufferSize), stall.Token)
+                            .ConfigureAwait(false);
+                    }
+                    catch (IOException exception) when (!stall.HasStalled)
+                    {
+                        // The connection dropped mid-body. That is a network failure, not
+                        // a disk one; only the write below may report Thumbnail.WriteFailed.
+                        return ConnectionInterrupted(exception);
+                    }
+
                     if (count == 0)
                     {
                         break;
@@ -328,6 +349,13 @@ public sealed class ThumbnailDownloadEngine
             _ => false
         };
     }
+
+    private static Result<ThumbnailDownloadReceipt> ConnectionInterrupted(IOException exception) =>
+        Failure(
+            "Network.RequestFailed",
+            "The thumbnail connection was interrupted.",
+            exception.GetType().Name,
+            isTransient: true);
 
     private static Result<ThumbnailDownloadReceipt> Failure(
         string code,

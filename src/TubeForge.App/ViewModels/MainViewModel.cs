@@ -140,6 +140,12 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     private readonly GitHubUpdateClient _updateClient;
     private readonly Version _currentVersion;
     private readonly string _updateDirectory;
+
+    // The running executable, whose own Authenticode signer an update installer must
+    // match, and how signatures are read. Fields rather than constants so tests can
+    // substitute them; production never changes them.
+    private string _runningExecutablePath = Environment.ProcessPath ?? string.Empty;
+    private Func<string, AuthenticodeSignature> _readSignature = AuthenticodeReader.Read;
     private readonly DownloadQueueDispatcher _queueDispatcher = new(2);
     private HostRequestGate _hostRequestGate;
     private RateLimitedRequestExecutor _rateLimitedRequests;
@@ -2726,6 +2732,21 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                 throw new IOException("Update installer hash changed after verification.");
             }
 
+            // The hashes come from the same GitHub release as the installer. When this
+            // build is Authenticode-signed, the installer must be signed by the same
+            // certificate as well; an unsigned build keeps the hash checks alone.
+            var signatureRejection = InstallerSignaturePolicy.Check(
+                _runningExecutablePath,
+                installerPath,
+                _readSignature);
+            if (signatureRejection is not null)
+            {
+                HasUpdateError = true;
+                UpdateProgressStage = "Update stopped safely";
+                UpdateStatus = $"Update install refused: {signatureRejection.Message} ({signatureRejection.Code})";
+                return false;
+            }
+
             SetUpdateProgress(0.99, "Starting installer");
             var start = CreateUpdateInstallerStartInfo(installerPath, Environment.ProcessId);
             _ = Process.Start(start) ?? throw new IOException("The verified update installer did not start.");
@@ -4015,6 +4036,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         try
         {
             var ids = itemIds.ToHashSet();
+            var removed = _queueSnapshot.Items.Where(item => ids.Contains(item.Id)).ToArray();
             var nextSnapshot = _queueSnapshot with
             {
                 Items = _queueSnapshot.Items.Where(item => !ids.Contains(item.Id)).ToArray()
@@ -4040,10 +4062,64 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             }
 
             NotifyQueueProperties();
+
+            // Still under the queue lock, so no new item can claim the same destination
+            // while its leftovers are being deleted.
+            await DeleteAbandonedArtifactsAsync(removed, nextSnapshot.Items);
         }
         finally
         {
             _queueMutationLock.Release();
+        }
+    }
+
+    /// <summary>
+    /// Removing a failed or cancelled item also removes what it left beside its
+    /// destination: the partial download, resume state, intermediate tracks and
+    /// FFmpeg scratch files, which can run to gigabytes and otherwise push the next
+    /// download of the same video to "Title (1)". Only the item's own artifacts are
+    /// touched (see <see cref="QueueItemArtifacts"/>), never its destination file, and
+    /// nothing whose destination another queue item still uses.
+    /// </summary>
+    private async Task DeleteAbandonedArtifactsAsync(
+        IReadOnlyList<DownloadQueueItem> removed,
+        IReadOnlyList<DownloadQueueItem> remaining)
+    {
+        var stillQueued = remaining
+            .Select(item => NormalizedDestination(item.DestinationPath))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var destinations = removed
+            .Where(item =>
+                item.Status is DownloadQueueStatus.Failed or DownloadQueueStatus.Cancelled &&
+                !_queueDispatcher.IsActive(item.Id))
+            .Select(item => NormalizedDestination(item.DestinationPath))
+            .Where(destination => destination.Length > 0 && !stillQueued.Contains(destination))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        if (destinations.Length == 0)
+        {
+            return;
+        }
+
+        var cleanups = await Task.Run(() => destinations.Select(QueueItemArtifacts.Delete).ToArray());
+        var failed = cleanups.Sum(cleanup => cleanup.Failed.Count);
+        if (failed > 0)
+        {
+            StatusMessage = failed == 1
+                ? "Removed from the queue; 1 partial file could not be deleted"
+                : $"Removed from the queue; {failed} partial files could not be deleted";
+        }
+
+        static string NormalizedDestination(string path)
+        {
+            try
+            {
+                return Path.GetFullPath(path);
+            }
+            catch (Exception exception) when (exception is ArgumentException or NotSupportedException or PathTooLongException)
+            {
+                return string.Empty;
+            }
         }
     }
 
