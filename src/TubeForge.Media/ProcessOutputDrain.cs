@@ -30,7 +30,8 @@ public static class ProcessOutputDrain
         ArgumentNullException.ThrowIfNull(reader);
         ArgumentOutOfRangeException.ThrowIfLessThan(maximumCharacters, 1);
 
-        var ring = new char[maximumCharacters];
+        // A successful run usually prints nothing, so the ring is only allocated once output arrives.
+        char[]? ring = null;
         var next = 0;
         long total = 0;
         var chunk = ArrayPool<char>.Shared.Rent(ChunkCharacters);
@@ -45,6 +46,7 @@ public static class ProcessOutputDrain
                     break;
                 }
 
+                ring ??= new char[maximumCharacters];
                 total += count;
                 var read = chunk.AsSpan(0, count);
                 if (read.Length >= ring.Length)
@@ -63,6 +65,11 @@ public static class ProcessOutputDrain
         finally
         {
             ArrayPool<char>.Shared.Return(chunk);
+        }
+
+        if (ring is null)
+        {
+            return string.Empty;
         }
 
         if (total <= ring.Length)
