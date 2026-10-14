@@ -1,4 +1,6 @@
-namespace TubeForge.Downloads;
+using TubeForge.Core.Errors;
+
+namespace TubeForge.Core.Networking;
 
 /// <summary>
 /// Cancels a network transfer that stops delivering bytes. The media client deliberately has no
@@ -7,7 +9,7 @@ namespace TubeForge.Downloads;
 /// stops sending — waits forever instead of failing into the retry and resume path. Callers pass
 /// <see cref="Token"/> to every network wait and call <see cref="Progressed"/> whenever bytes arrive.
 /// </summary>
-internal sealed class TransferStallGuard : IDisposable
+public sealed class TransferStallGuard : IDisposable
 {
     /// <summary>
     /// How long a request may wait for response headers or the next body bytes. Generous enough
@@ -52,6 +54,13 @@ internal sealed class TransferStallGuard : IDisposable
 
         return value;
     }
+
+    /// <summary>Transient error reported for a transfer the guard cancelled.</summary>
+    public static TubeForgeError StalledError(TimeSpan timeout) => new(
+        StalledCode,
+        "The server stopped sending data.",
+        FormattableString.Invariant($"No response bytes arrived for {timeout.TotalSeconds:0.#} seconds."),
+        IsTransient: true);
 
     public void Dispose() => _source.Dispose();
 }

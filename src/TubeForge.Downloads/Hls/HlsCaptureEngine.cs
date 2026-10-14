@@ -311,7 +311,7 @@ public sealed class HlsCaptureEngine
         }
         catch (Exception exception) when ((exception is OperationCanceledException or IOException) && stall.HasStalled)
         {
-            return Result<HlsPlaylist>.Failure(DirectDownloadEngine.StalledError(_stallTimeout));
+            return Result<HlsPlaylist>.Failure(TransferStallGuard.StalledError(_stallTimeout));
         }
         catch (HttpRequestException exception)
         {
@@ -504,7 +504,7 @@ public sealed class HlsCaptureEngine
         }
         catch (Exception exception) when ((exception is OperationCanceledException or IOException) && stall.HasStalled)
         {
-            return Result<long>.Failure(DirectDownloadEngine.StalledError(_stallTimeout));
+            return Result<long>.Failure(TransferStallGuard.StalledError(_stallTimeout));
         }
         catch (HttpRequestException exception)
         {

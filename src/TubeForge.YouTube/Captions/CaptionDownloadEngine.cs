@@ -2,16 +2,33 @@ using System.Buffers;
 using System.Net;
 using System.Text;
 using TubeForge.Core.Errors;
+using TubeForge.Core.Networking;
 using TubeForge.Core.Results;
 
 namespace TubeForge.YouTube.Captions;
 
-public sealed class CaptionDownloadEngine(HttpClient httpClient)
+public sealed class CaptionDownloadEngine
 {
     private const int BufferSize = 32 * 1024;
     private const long MaximumCaptionBytes = 10 * 1024 * 1024;
     private static readonly UTF8Encoding StrictUtf8 = new(false, true);
-    private readonly HttpClient _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
+    private readonly HttpClient _httpClient;
+    private readonly TimeSpan _stallTimeout;
+
+    public CaptionDownloadEngine(HttpClient httpClient)
+        : this(httpClient, stallTimeout: null)
+    {
+    }
+
+    /// <param name="stallTimeout">
+    /// Caption requests share the media client, which has no overall timeout. Queued downloads
+    /// fetch captions while finalizing, so a silent caption response would otherwise hold the job.
+    /// </param>
+    internal CaptionDownloadEngine(HttpClient httpClient, TimeSpan? stallTimeout)
+    {
+        _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
+        _stallTimeout = TransferStallGuard.Validate(stallTimeout);
+    }
 
     public async Task<Result<CaptionDownloadReceipt>> DownloadAsync(
         CaptionDownloadRequest request,
@@ -25,6 +42,7 @@ public sealed class CaptionDownloadEngine(HttpClient httpClient)
         }
 
         string? partialPath = null;
+        using var stall = new TransferStallGuard(_stallTimeout, cancellationToken);
         try
         {
             var destination = Path.GetFullPath(request.DestinationPath);
@@ -48,7 +66,8 @@ public sealed class CaptionDownloadEngine(HttpClient httpClient)
             using var response = await _httpClient.SendAsync(
                 message,
                 HttpCompletionOption.ResponseHeadersRead,
-                cancellationToken).ConfigureAwait(false);
+                stall.Token).ConfigureAwait(false);
+            stall.Progressed();
             var finalUri = response.RequestMessage?.RequestUri ?? message.RequestUri!;
             if (!IsAllowedCaptionUrl(finalUri))
             {
@@ -73,7 +92,7 @@ public sealed class CaptionDownloadEngine(HttpClient httpClient)
                 return Failure("Caption.TooLarge", "The caption response exceeds the safe size limit.");
             }
 
-            var bytes = await ReadBoundedAsync(response.Content, cancellationToken).ConfigureAwait(false);
+            var bytes = await ReadBoundedAsync(response.Content, stall).ConfigureAwait(false);
             string source;
             try
             {
@@ -118,6 +137,11 @@ public sealed class CaptionDownloadEngine(HttpClient httpClient)
                 outputBytes.LongLength,
                 cueCount.Value));
         }
+        catch (Exception exception) when ((exception is OperationCanceledException or IOException) && stall.HasStalled)
+        {
+            TryDelete(partialPath);
+            return Result<CaptionDownloadReceipt>.Failure(TransferStallGuard.StalledError(_stallTimeout));
+        }
         catch (OperationCanceledException)
         {
             TryDelete(partialPath);
@@ -157,22 +181,23 @@ public sealed class CaptionDownloadEngine(HttpClient httpClient)
 
     private static async Task<byte[]> ReadBoundedAsync(
         HttpContent content,
-        CancellationToken cancellationToken)
+        TransferStallGuard stall)
     {
-        await using var input = await content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+        await using var input = await content.ReadAsStreamAsync(stall.Token).ConfigureAwait(false);
         using var output = new MemoryStream();
         var buffer = ArrayPool<byte>.Shared.Rent(BufferSize);
         try
         {
             while (true)
             {
-                var count = await input.ReadAsync(buffer.AsMemory(0, BufferSize), cancellationToken)
+                var count = await input.ReadAsync(buffer.AsMemory(0, BufferSize), stall.Token)
                     .ConfigureAwait(false);
                 if (count == 0)
                 {
                     break;
                 }
 
+                stall.Progressed();
                 if (output.Length + count > MaximumCaptionBytes)
                 {
                     throw new CaptionTooLargeException();

@@ -618,14 +618,8 @@ public sealed class DirectDownloadEngine
             "Operation.Cancelled",
             "The download was cancelled."));
 
-    internal static TubeForgeError StalledError(TimeSpan timeout) => new(
-        TransferStallGuard.StalledCode,
-        "The media server stopped sending data.",
-        FormattableString.Invariant($"No response bytes arrived for {timeout.TotalSeconds:0.#} seconds."),
-        IsTransient: true);
-
     private static Result<DownloadReceipt> Stalled(TimeSpan timeout) =>
-        Result<DownloadReceipt>.Failure(StalledError(timeout));
+        Result<DownloadReceipt>.Failure(TransferStallGuard.StalledError(timeout));
 
     private static bool IsDiskFull(IOException exception) =>
         (exception.HResult & 0xFFFF) is 0x27 or 0x70;

@@ -433,7 +433,7 @@ internal sealed class SegmentedDownloadEngine(
         }
         catch (Exception exception) when ((exception is OperationCanceledException or IOException) && stall.HasStalled)
         {
-            return Result<bool>.Failure(DirectDownloadEngine.StalledError(_stallTimeout));
+            return Result<bool>.Failure(TransferStallGuard.StalledError(_stallTimeout));
         }
         catch (OperationCanceledException)
         {
