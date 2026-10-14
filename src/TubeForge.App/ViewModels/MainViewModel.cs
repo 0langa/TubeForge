@@ -140,6 +140,12 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     private readonly GitHubUpdateClient _updateClient;
     private readonly Version _currentVersion;
     private readonly string _updateDirectory;
+
+    // The running executable, whose own Authenticode signer an update installer must
+    // match, and how signatures are read. Fields rather than constants so tests can
+    // substitute them; production never changes them.
+    private string _runningExecutablePath = Environment.ProcessPath ?? string.Empty;
+    private Func<string, AuthenticodeSignature> _readSignature = AuthenticodeReader.Read;
     private readonly DownloadQueueDispatcher _queueDispatcher = new(2);
     private HostRequestGate _hostRequestGate;
     private RateLimitedRequestExecutor _rateLimitedRequests;
@@ -2724,6 +2730,21 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             if (!hash.Equals(ready.Sha256, StringComparison.OrdinalIgnoreCase))
             {
                 throw new IOException("Update installer hash changed after verification.");
+            }
+
+            // The hashes come from the same GitHub release as the installer. When this
+            // build is Authenticode-signed, the installer must be signed by the same
+            // certificate as well; an unsigned build keeps the hash checks alone.
+            var signatureRejection = InstallerSignaturePolicy.Check(
+                _runningExecutablePath,
+                installerPath,
+                _readSignature);
+            if (signatureRejection is not null)
+            {
+                HasUpdateError = true;
+                UpdateProgressStage = "Update stopped safely";
+                UpdateStatus = $"Update install refused: {signatureRejection.Message} ({signatureRejection.Code})";
+                return false;
             }
 
             SetUpdateProgress(0.99, "Starting installer");
