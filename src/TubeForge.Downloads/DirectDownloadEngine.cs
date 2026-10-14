@@ -358,6 +358,10 @@ public sealed class DirectDownloadEngine
         {
             return Stalled(_stallTimeout);
         }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            return TimedOut();
+        }
         catch (OperationCanceledException)
         {
             return Cancelled();
@@ -620,6 +624,17 @@ public sealed class DirectDownloadEngine
 
     private static Result<DownloadReceipt> Stalled(TimeSpan timeout) =>
         Result<DownloadReceipt>.Failure(TransferStallGuard.StalledError(timeout));
+
+    /// <summary>
+    /// A cancellation nobody requested: SocketsHttpHandler reports its ConnectTimeout (DNS, TCP or
+    /// TLS not answering) this way. Reporting it as Operation.Cancelled paused the queued job
+    /// instead of retrying it.
+    /// </summary>
+    internal static TubeForgeError TimeoutError(string message) =>
+        new("Network.Timeout", message, IsTransient: true);
+
+    private static Result<DownloadReceipt> TimedOut() =>
+        Result<DownloadReceipt>.Failure(TimeoutError("The media connection timed out."));
 
     private static bool IsDiskFull(IOException exception) =>
         (exception.HResult & 0xFFFF) is 0x27 or 0x70;

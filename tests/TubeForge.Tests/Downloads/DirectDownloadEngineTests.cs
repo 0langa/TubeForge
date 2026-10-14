@@ -770,6 +770,60 @@ public static class DirectDownloadEngineTests
     }
 
     [Test]
+    public static async Task RetriesConnectTimeoutInsteadOfReportingCancellation()
+    {
+        using var directory = new TestDirectory();
+        var destination = Path.Combine(directory.Path, "connect-timeout.mp4");
+        var connects = 0;
+        using var client = new HttpClient(UnreachableHttp.CreateHandler(() => Interlocked.Increment(ref connects)))
+        {
+            Timeout = Timeout.InfiniteTimeSpan
+        };
+        var engine = new DirectDownloadEngine(
+            client,
+            DownloadUriPolicy.YouTubeMediaAndLoopback,
+            (_, _) => Task.CompletedTask,
+            outputStreamFactory: null,
+            maximumAttempts: 2);
+
+        var result = await engine.DownloadAsync(Request(destination, 64 * 1024))
+            .WaitAsync(TimeSpan.FromSeconds(15));
+
+        // Nobody cancelled: Operation.Cancelled here made the queue show the job as Paused, and
+        // the retry after a stalled transfer usually meets exactly this on a dead network.
+        Assert.False(result.IsSuccess);
+        Assert.Equal("Network.Timeout", result.Error?.Code);
+        Assert.True(result.Error!.IsTransient);
+        Assert.Equal(2, Volatile.Read(ref connects));
+    }
+
+    [Test]
+    public static async Task SegmentedTransferRetriesConnectTimeoutInsteadOfReportingCancellation()
+    {
+        using var directory = new TestDirectory();
+        var destination = Path.Combine(directory.Path, "segmented-connect-timeout.mp4");
+        using var client = new HttpClient(UnreachableHttp.CreateHandler())
+        {
+            Timeout = Timeout.InfiniteTimeSpan
+        };
+        var engine = new DirectDownloadEngine(
+            client,
+            DownloadUriPolicy.YouTubeMediaAndLoopback,
+            (_, _) => Task.CompletedTask,
+            outputStreamFactory: null,
+            maximumAttempts: 2);
+
+        var result = await engine.DownloadAsync(SegmentedRequest(destination, 256 * 1024))
+            .WaitAsync(TimeSpan.FromSeconds(15));
+
+        // The timed-out range must win over the Operation.Cancelled its siblings report once the
+        // attempt is cancelled, and stay transient so the attempt is retried.
+        Assert.False(result.IsSuccess);
+        Assert.Equal("Network.Timeout", result.Error?.Code);
+        Assert.True(result.Error!.IsTransient);
+    }
+
+    [Test]
     public static async Task BackpressureFromSlowDestinationDoesNotLoseBytes()
     {
         using var directory = new TestDirectory();

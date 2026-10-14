@@ -142,6 +142,13 @@ public sealed class CaptionDownloadEngine
             TryDelete(partialPath);
             return Result<CaptionDownloadReceipt>.Failure(TransferStallGuard.StalledError(_stallTimeout));
         }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            // A cancellation nobody requested, such as the handler's ConnectTimeout. Reporting it
+            // as Operation.Cancelled paused the queued download that was finalizing captions.
+            TryDelete(partialPath);
+            return Failure("Network.Timeout", "The caption request timed out.", isTransient: true);
+        }
         catch (OperationCanceledException)
         {
             TryDelete(partialPath);

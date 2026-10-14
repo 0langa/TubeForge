@@ -435,6 +435,11 @@ internal sealed class SegmentedDownloadEngine(
         {
             return Result<bool>.Failure(TransferStallGuard.StalledError(_stallTimeout));
         }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            // Neither the caller nor a failed sibling segment cancelled this range.
+            return Result<bool>.Failure(DirectDownloadEngine.TimeoutError("A segmented range request timed out."));
+        }
         catch (OperationCanceledException)
         {
             return FailureBool("Operation.Cancelled", "The download was cancelled.");

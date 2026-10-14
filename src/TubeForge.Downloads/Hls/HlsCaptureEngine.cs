@@ -313,6 +313,10 @@ public sealed class HlsCaptureEngine
         {
             return Result<HlsPlaylist>.Failure(TransferStallGuard.StalledError(_stallTimeout));
         }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            return Result<HlsPlaylist>.Failure(DirectDownloadEngine.TimeoutError("The HLS playlist request timed out."));
+        }
         catch (HttpRequestException exception)
         {
             return FailurePlaylist("Hls.NetworkFailed", "TubeForge could not fetch the HLS playlist.", exception.GetType().Name, true);
@@ -505,6 +509,10 @@ public sealed class HlsCaptureEngine
         catch (Exception exception) when ((exception is OperationCanceledException or IOException) && stall.HasStalled)
         {
             return Result<long>.Failure(TransferStallGuard.StalledError(_stallTimeout));
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            return Result<long>.Failure(DirectDownloadEngine.TimeoutError("An HLS segment request timed out."));
         }
         catch (HttpRequestException exception)
         {

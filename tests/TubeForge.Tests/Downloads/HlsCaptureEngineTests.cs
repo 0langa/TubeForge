@@ -109,6 +109,68 @@ public static class HlsCaptureEngineTests
     }
 
     [Test]
+    public static async Task RetriesSegmentAfterConnectTimeoutInsteadOfPausingCapture()
+    {
+        using var directory = new TestDirectory();
+        using var client = new HttpClient(new FirstRequestConnectTimesOutHandler("/live/30.ts", request =>
+            request.RequestUri!.AbsolutePath switch
+            {
+                "/live/master.m3u8" => Text("""
+                    #EXTM3U
+                    #EXT-X-TARGETDURATION:6
+                    #EXT-X-MEDIA-SEQUENCE:30
+                    #EXTINF:6,
+                    30.ts
+                    #EXTINF:6,
+                    31.ts
+                    #EXT-X-ENDLIST
+                    """),
+                "/live/30.ts" => Bytes("thirty"),
+                "/live/31.ts" => Bytes("thirty-one"),
+                _ => new HttpResponseMessage(HttpStatusCode.NotFound)
+            }))
+        {
+            Timeout = Timeout.InfiniteTimeSpan
+        };
+        var destination = Path.Combine(directory.Path, "capture.source");
+        var engine = new HlsCaptureEngine(
+            client,
+            new HostRequestGate(),
+            uriPolicy: null,
+            delay: (_, _) => Task.CompletedTask);
+
+        var result = await engine.CaptureAsync(Request(destination)).WaitAsync(TimeSpan.FromSeconds(15));
+
+        // A connect timeout is not a pause: the segment is retried like any other network failure.
+        Assert.True(result.IsSuccess, result.Error?.Code + " " + result.Error?.Message);
+        Assert.Equal("thirtythirty-one", await File.ReadAllTextAsync(destination));
+    }
+
+    [Test]
+    public static async Task ReportsPlaylistConnectTimeoutAsTransientFailureNotPause()
+    {
+        using var directory = new TestDirectory();
+        var connects = 0;
+        using var client = new HttpClient(UnreachableHttp.CreateHandler(() => Interlocked.Increment(ref connects)))
+        {
+            Timeout = Timeout.InfiniteTimeSpan
+        };
+        var engine = new HlsCaptureEngine(
+            client,
+            new HostRequestGate(),
+            uriPolicy: null,
+            delay: (_, _) => Task.CompletedTask);
+
+        var result = await engine.CaptureAsync(Request(Path.Combine(directory.Path, "capture.source")))
+            .WaitAsync(TimeSpan.FromSeconds(15));
+
+        Assert.False(result.IsSuccess);
+        Assert.Equal("Network.Timeout", result.Error?.Code);
+        Assert.True(result.Error!.IsTransient);
+        Assert.Equal(3, Volatile.Read(ref connects));
+    }
+
+    [Test]
     public static async Task ResumesJournalAfterCancellationAndRejectsExpiredGap()
     {
         using var directory = new TestDirectory();
@@ -276,6 +338,25 @@ public static class HlsCaptureEngineTests
         protected override Task<HttpResponseMessage> SendAsync(
             HttpRequestMessage request,
             CancellationToken cancellationToken) => Task.FromResult(responseFactory(request));
+    }
+
+    /// <summary>
+    /// Sends the first request for one path through a real handler whose connect times out, and
+    /// answers everything else from the stub.
+    /// </summary>
+    private sealed class FirstRequestConnectTimesOutHandler(
+        string path,
+        Func<HttpRequestMessage, HttpResponseMessage> responseFactory)
+        : DelegatingHandler(UnreachableHttp.CreateHandler())
+    {
+        private int _matches;
+
+        protected override Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken) =>
+            request.RequestUri!.AbsolutePath == path && Interlocked.Increment(ref _matches) == 1
+                ? base.SendAsync(request, cancellationToken)
+                : Task.FromResult(responseFactory(request));
     }
 
     private sealed class TestDirectory : IDisposable

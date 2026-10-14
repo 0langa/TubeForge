@@ -69,6 +69,31 @@ public static class CaptionDownloadEngineTests
     }
 
     [Test]
+    public static async Task ReportsConnectTimeoutAsTransientFailureNotCancellation()
+    {
+        using var directory = new TestDirectory();
+        var destination = Path.Combine(directory.Path, "unreachable.srt");
+        using var client = new HttpClient(UnreachableHttp.CreateHandler())
+        {
+            Timeout = Timeout.InfiniteTimeSpan
+        };
+
+        var result = await new CaptionDownloadEngine(client).DownloadAsync(new CaptionDownloadRequest
+            {
+                SourceUrl = new Uri("https://www.youtube.com/api/timedtext?v=Fixture123_&lang=en"),
+                DestinationPath = destination,
+                OutputFormat = CaptionOutputFormat.SubRip
+            })
+            .WaitAsync(TimeSpan.FromSeconds(15));
+
+        // A queued download fetches captions while finalizing; Operation.Cancelled paused it.
+        Assert.False(result.IsSuccess);
+        Assert.Equal("Network.Timeout", result.Error?.Code);
+        Assert.True(result.Error!.IsTransient);
+        Assert.False(File.Exists(destination + ".part"));
+    }
+
+    [Test]
     public static async Task RejectsUnsafeSourceAndRedirect()
     {
         using var directory = new TestDirectory();
