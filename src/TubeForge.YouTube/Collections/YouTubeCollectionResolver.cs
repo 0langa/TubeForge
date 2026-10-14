@@ -9,14 +9,31 @@ using TubeForge.Core.YouTube;
 
 namespace TubeForge.YouTube.Collections;
 
-public sealed class YouTubeCollectionResolver(HttpClient httpClient)
+public sealed class YouTubeCollectionResolver
 {
     private const int BufferSize = 32 * 1024;
     private const int MaximumCharacters = 10 * 1024 * 1024;
     private const int MaximumItems = 10_000;
     private const int MaximumPages = 100;
     private static readonly Uri ContinuationEndpoint = new("https://www.youtube.com/youtubei/v1/browse");
-    private readonly HttpClient _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
+    private readonly HttpClient _httpClient;
+    private readonly TimeSpan _stallTimeout;
+
+    public YouTubeCollectionResolver(HttpClient httpClient)
+        : this(httpClient, stallTimeout: null)
+    {
+    }
+
+    /// <param name="stallTimeout">
+    /// Collection analysis shares the media client, which has no overall timeout, so a playlist
+    /// or continuation page that went silent left the analysis, and every command it disables,
+    /// waiting until the user cancelled it.
+    /// </param>
+    internal YouTubeCollectionResolver(HttpClient httpClient, TimeSpan? stallTimeout)
+    {
+        _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
+        _stallTimeout = TransferStallGuard.Validate(stallTimeout);
+    }
 
     public async Task<Result<YouTubeCollectionResult>> ResolveAsync(
         YouTubeCollectionReference source,
@@ -29,6 +46,7 @@ public sealed class YouTubeCollectionResolver(HttpClient httpClient)
             return Failure("Collection.InvalidRequest", "The collection request is invalid.");
         }
 
+        using var stall = new TransferStallGuard(_stallTimeout, cancellationToken);
         try
         {
             using var initialRequest = new HttpRequestMessage(HttpMethod.Get, source.CanonicalUrl);
@@ -36,7 +54,8 @@ public sealed class YouTubeCollectionResolver(HttpClient httpClient)
             using var initialResponse = await _httpClient.SendAsync(
                 initialRequest,
                 HttpCompletionOption.ResponseHeadersRead,
-                cancellationToken).ConfigureAwait(false);
+                stall.Token).ConfigureAwait(false);
+            stall.Progressed();
             var finalUri = initialResponse.RequestMessage?.RequestUri ?? source.CanonicalUrl;
             if (!IsAllowedYouTubeUrl(finalUri))
             {
@@ -48,8 +67,10 @@ public sealed class YouTubeCollectionResolver(HttpClient httpClient)
                 return HttpFailure(initialResponse);
             }
 
-            var initialHtml = await ReadBoundedTextAsync(initialResponse.Content, cancellationToken)
+            var initialHtml = await ReadBoundedTextAsync(initialResponse.Content, stall)
                 .ConfigureAwait(false);
+            // Parsing a page is local work, not network silence.
+            stall.Suspend();
             var initialPage = YouTubeCollectionPageParser.ParseInitialHtml(initialHtml);
             if (!initialPage.IsSuccess)
             {
@@ -70,10 +91,12 @@ public sealed class YouTubeCollectionResolver(HttpClient httpClient)
                    context is not null)
             {
                 using var request = BuildContinuationRequest(token, context);
+                stall.Progressed();
                 using var response = await _httpClient.SendAsync(
                     request,
                     HttpCompletionOption.ResponseHeadersRead,
-                    cancellationToken).ConfigureAwait(false);
+                    stall.Token).ConfigureAwait(false);
+                stall.Progressed();
                 var continuationUri = response.RequestMessage?.RequestUri ?? ContinuationEndpoint;
                 if (!IsAllowedYouTubeUrl(continuationUri))
                 {
@@ -87,7 +110,8 @@ public sealed class YouTubeCollectionResolver(HttpClient httpClient)
                     return HttpFailure(response);
                 }
 
-                var json = await ReadBoundedTextAsync(response.Content, cancellationToken).ConfigureAwait(false);
+                var json = await ReadBoundedTextAsync(response.Content, stall).ConfigureAwait(false);
+                stall.Suspend();
                 var page = YouTubeCollectionPageParser.ParseContinuationJson(json);
                 if (!page.IsSuccess)
                 {
@@ -107,6 +131,16 @@ public sealed class YouTubeCollectionResolver(HttpClient httpClient)
                 pagesRead,
                 truncated));
         }
+        catch (Exception exception) when ((exception is OperationCanceledException or IOException) && stall.HasStalled)
+        {
+            return Result<YouTubeCollectionResult>.Failure(TransferStallGuard.StalledError(_stallTimeout));
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            // Nobody cancelled: the handler's ConnectTimeout expired. Operation.Cancelled made a
+            // dead network look as if the user had stopped the analysis.
+            return Failure("Network.Timeout", "The collection request timed out.", isTransient: true);
+        }
         catch (OperationCanceledException)
         {
             return Failure("Operation.Cancelled", "Collection analysis was cancelled.");
@@ -115,8 +149,10 @@ public sealed class YouTubeCollectionResolver(HttpClient httpClient)
         {
             return Failure("Collection.PageTooLarge", "The collection page exceeds the safe size limit.");
         }
-        catch (HttpRequestException exception)
+        catch (Exception exception) when (exception is HttpRequestException or IOException)
         {
+            // A connection that drops mid-page surfaces as an IOException from the body read,
+            // which used to escape the resolver and reach the app as an unexpected error.
             return Failure(
                 "Network.RequestFailed",
                 "The collection connection failed.",
@@ -188,14 +224,14 @@ public sealed class YouTubeCollectionResolver(HttpClient httpClient)
 
     private static async Task<string> ReadBoundedTextAsync(
         HttpContent content,
-        CancellationToken cancellationToken)
+        TransferStallGuard stall)
     {
         if (content.Headers.ContentLength is > MaximumCharacters * 4L)
         {
             throw new ContentTooLargeException();
         }
 
-        await using var stream = await content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+        await using var stream = await content.ReadAsStreamAsync(stall.Token).ConfigureAwait(false);
         var decoder = Encoding.UTF8.GetDecoder();
         var byteBuffer = ArrayPool<byte>.Shared.Rent(BufferSize);
         var charBuffer = ArrayPool<char>.Shared.Rent(BufferSize);
@@ -204,8 +240,13 @@ public sealed class YouTubeCollectionResolver(HttpClient httpClient)
         {
             while (true)
             {
-                var count = await stream.ReadAsync(byteBuffer.AsMemory(0, BufferSize), cancellationToken)
+                var count = await stream.ReadAsync(byteBuffer.AsMemory(0, BufferSize), stall.Token)
                     .ConfigureAwait(false);
+                if (count > 0)
+                {
+                    stall.Progressed();
+                }
+
                 var flush = count == 0;
                 decoder.Convert(
                     byteBuffer,

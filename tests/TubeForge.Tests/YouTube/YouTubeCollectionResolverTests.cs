@@ -121,6 +121,106 @@ public static class YouTubeCollectionResolverTests
         Assert.Equal(TimeSpan.FromSeconds(23), result.Error?.RetryAfter);
     }
 
+    [Test]
+    public static async Task ReportsSilentPlaylistPageAsTransientStall()
+    {
+        using var handler = new StubHandler((_, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StreamContent(new SilentStream())
+        }));
+        using var client = new HttpClient(handler) { Timeout = Timeout.InfiniteTimeSpan };
+        var resolver = new YouTubeCollectionResolver(client, TimeSpan.FromMilliseconds(150));
+
+        // The media client has no overall timeout, so this used to wait until the user cancelled.
+        var result = await resolver.ResolveAsync(PlaylistSource()).WaitAsync(TimeSpan.FromSeconds(15));
+
+        Assert.False(result.IsSuccess);
+        Assert.Equal("Network.Stalled", result.Error?.Code);
+        Assert.True(result.Error!.IsTransient);
+    }
+
+    [Test]
+    public static async Task ReportsSilentContinuationHeadersAsTransientStall()
+    {
+        var continuationRequests = 0;
+        using var handler = new StubHandler(async (request, cancellationToken) =>
+        {
+            if (request.Method == HttpMethod.Get)
+            {
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent(CollectionFixtures.InitialHtml)
+                };
+            }
+
+            continuationRequests++;
+            await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+            return new HttpResponseMessage(HttpStatusCode.OK);
+        });
+        using var client = new HttpClient(handler) { Timeout = Timeout.InfiniteTimeSpan };
+        var resolver = new YouTubeCollectionResolver(client, TimeSpan.FromMilliseconds(150));
+
+        var result = await resolver.ResolveAsync(PlaylistSource()).WaitAsync(TimeSpan.FromSeconds(15));
+
+        Assert.False(result.IsSuccess);
+        Assert.Equal("Network.Stalled", result.Error?.Code);
+        Assert.True(result.Error!.IsTransient);
+        Assert.Equal(1, continuationRequests);
+    }
+
+    [Test]
+    public static async Task KeepsUserCancellationDistinctFromStall()
+    {
+        using var handler = new StubHandler((_, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StreamContent(new SilentStream())
+        }));
+        using var client = new HttpClient(handler) { Timeout = Timeout.InfiniteTimeSpan };
+        var resolver = new YouTubeCollectionResolver(client, TimeSpan.FromSeconds(30));
+        using var cancellation = new CancellationTokenSource(TimeSpan.FromMilliseconds(100));
+
+        var result = await resolver.ResolveAsync(PlaylistSource(), cancellationToken: cancellation.Token)
+            .WaitAsync(TimeSpan.FromSeconds(15));
+
+        Assert.False(result.IsSuccess);
+        Assert.Equal("Operation.Cancelled", result.Error?.Code);
+    }
+
+    [Test]
+    public static async Task ReportsConnectTimeoutAsTransientFailureNotCancellation()
+    {
+        using var client = new HttpClient(UnreachableHttp.CreateHandler()) { Timeout = Timeout.InfiniteTimeSpan };
+
+        var result = await new YouTubeCollectionResolver(client).ResolveAsync(PlaylistSource())
+            .WaitAsync(TimeSpan.FromSeconds(15));
+
+        // Operation.Cancelled made a dead network look as if the user had stopped the analysis.
+        Assert.False(result.IsSuccess);
+        Assert.Equal("Network.Timeout", result.Error?.Code);
+        Assert.True(result.Error!.IsTransient);
+    }
+
+    [Test]
+    public static async Task ReportsConnectionDroppedMidPageAsTransientFailure()
+    {
+        using var handler = new StubHandler((_, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StreamContent(new SilentStream(failure: new IOException("The fixture connection was reset.")))
+        }));
+        using var client = new HttpClient(handler) { Timeout = Timeout.InfiniteTimeSpan };
+
+        // The IOException used to escape ResolveAsync and reach the app as an unexpected error.
+        var result = await new YouTubeCollectionResolver(client).ResolveAsync(PlaylistSource())
+            .WaitAsync(TimeSpan.FromSeconds(15));
+
+        Assert.False(result.IsSuccess);
+        Assert.Equal("Network.RequestFailed", result.Error?.Code);
+        Assert.True(result.Error!.IsTransient);
+    }
+
+    private static YouTubeCollectionReference PlaylistSource() =>
+        YouTubeCollectionUrlParser.Parse("https://www.youtube.com/playlist?list=PL1234567890").Value;
+
     private sealed class StubHandler(
         Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> responseFactory)
         : HttpMessageHandler
