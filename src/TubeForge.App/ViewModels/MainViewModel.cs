@@ -4015,6 +4015,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         try
         {
             var ids = itemIds.ToHashSet();
+            var removed = _queueSnapshot.Items.Where(item => ids.Contains(item.Id)).ToArray();
             var nextSnapshot = _queueSnapshot with
             {
                 Items = _queueSnapshot.Items.Where(item => !ids.Contains(item.Id)).ToArray()
@@ -4040,10 +4041,64 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             }
 
             NotifyQueueProperties();
+
+            // Still under the queue lock, so no new item can claim the same destination
+            // while its leftovers are being deleted.
+            await DeleteAbandonedArtifactsAsync(removed, nextSnapshot.Items);
         }
         finally
         {
             _queueMutationLock.Release();
+        }
+    }
+
+    /// <summary>
+    /// Removing a failed or cancelled item also removes what it left beside its
+    /// destination: the partial download, resume state, intermediate tracks and
+    /// FFmpeg scratch files, which can run to gigabytes and otherwise push the next
+    /// download of the same video to "Title (1)". Only the item's own artifacts are
+    /// touched (see <see cref="QueueItemArtifacts"/>), never its destination file, and
+    /// nothing whose destination another queue item still uses.
+    /// </summary>
+    private async Task DeleteAbandonedArtifactsAsync(
+        IReadOnlyList<DownloadQueueItem> removed,
+        IReadOnlyList<DownloadQueueItem> remaining)
+    {
+        var stillQueued = remaining
+            .Select(item => NormalizedDestination(item.DestinationPath))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var destinations = removed
+            .Where(item =>
+                item.Status is DownloadQueueStatus.Failed or DownloadQueueStatus.Cancelled &&
+                !_queueDispatcher.IsActive(item.Id))
+            .Select(item => NormalizedDestination(item.DestinationPath))
+            .Where(destination => destination.Length > 0 && !stillQueued.Contains(destination))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        if (destinations.Length == 0)
+        {
+            return;
+        }
+
+        var cleanups = await Task.Run(() => destinations.Select(QueueItemArtifacts.Delete).ToArray());
+        var failed = cleanups.Sum(cleanup => cleanup.Failed.Count);
+        if (failed > 0)
+        {
+            StatusMessage = failed == 1
+                ? "Removed from the queue; 1 partial file could not be deleted"
+                : $"Removed from the queue; {failed} partial files could not be deleted";
+        }
+
+        static string NormalizedDestination(string path)
+        {
+            try
+            {
+                return Path.GetFullPath(path);
+            }
+            catch (Exception exception) when (exception is ArgumentException or NotSupportedException or PathTooLongException)
+            {
+                return string.Empty;
+            }
         }
     }
 
