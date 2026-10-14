@@ -673,7 +673,12 @@ public sealed class FfmpegMediaProcessor
             }
         }
 
-        var probePath = Path.GetFullPath(path) + "." + Guid.NewGuid().ToString("N") + ".probe.ffmetadata";
+        // Named on its own rather than after the media file: the processing file already carries a
+        // GUID suffix, and appending a second one pushed long titles past the 255-character
+        // file name limit, which failed every chapter embed for them.
+        var probePath = Path.Combine(
+            Path.GetDirectoryName(Path.GetFullPath(path))!,
+            Guid.NewGuid().ToString("N") + ".probe.ffmetadata");
         try
         {
             var arguments = new[]
