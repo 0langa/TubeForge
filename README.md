@@ -83,6 +83,7 @@ dotnet run --project tests/TubeForge.Tests --configuration Release -- --all
 dotnet run --project src/TubeForge.App --configuration Release
 ```
 
+Release packaging downloads one pinned, SHA-256-verified FFmpeg x64 archive (`scripts/Stage-FFmpeg.ps1`). The synthetic FFmpeg gates for chapter embedding, timeline editing, and HLS capture are `scripts/Test-ChapterEmbedding.ps1`, `scripts/Test-TimelineEditing.ps1`, and `scripts/Test-HlsCapture.ps1`; the [performance budget](docs/PERFORMANCE_BUDGET.md) documents the probe that CI runs with `--core-only`.
 
 ## Security
 
