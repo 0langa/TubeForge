@@ -921,7 +921,10 @@ public sealed class FfmpegMediaProcessor
         Result<MediaProcessReceipt>.Failure(new TubeForgeError(code, message, detail));
 }
 
-/// <summary>Exit code plus the captured diagnostic output of one FFmpeg invocation.</summary>
+/// <summary>
+/// Exit code plus the end of the diagnostic output of one FFmpeg invocation, at most
+/// <see cref="ProcessOutputDrain.DefaultTailCharacters"/> characters.
+/// </summary>
 internal readonly record struct FfmpegRunResult(int ExitCode, string StandardError);
 
 internal interface IFfmpegProcessRunner
@@ -1042,8 +1045,10 @@ internal sealed class FfmpegProcessRunner : IFfmpegProcessRunner
             throw new Win32Exception("FFmpeg did not start.");
         }
 
-        var standardError = process.StandardError.ReadToEndAsync();
-        var standardOutput = process.StandardOutput.ReadToEndAsync();
+        // Only the tail of the diagnostics is kept and the unused output is discarded, so a chatty
+        // FFmpeg cannot grow memory for as long as it runs.
+        var standardError = ProcessOutputDrain.KeepTailAsync(process.StandardError);
+        var standardOutput = ProcessOutputDrain.DiscardAsync(process.StandardOutput);
         try
         {
             await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
@@ -1060,7 +1065,7 @@ internal sealed class FfmpegProcessRunner : IFfmpegProcessRunner
         }
 
         var diagnostics = await standardError.ConfigureAwait(false);
-        _ = await standardOutput.ConfigureAwait(false);
+        await standardOutput.ConfigureAwait(false);
         return new FfmpegRunResult(process.ExitCode, diagnostics);
     }
 }
