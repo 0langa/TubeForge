@@ -77,6 +77,53 @@ public static class QueueItemArtifactsTests
     }
 
     [Test]
+    public static void DeletesTheChainedLeftoversOfCombinedSteps()
+    {
+        using var directory = new TestDirectory();
+        var destination = Path.Combine(directory.Path, "Clip.mp4");
+
+        // Names the app builds when steps combine: captions or chapters plus a trim,
+        // a video conversion that fetches separate tracks, and FFmpeg scratch files
+        // next to an intermediate.
+        string[] owned =
+        [
+            "Clip.mp4.caption-source.mp4.part",
+            "Clip.mp4.caption-source.mp4.trim-source.mp4.part.segments.json",
+            "Clip.mp4.chapter-source.mp4.video-track.webm.part",
+            "Clip.mp4.chapter-source.mp4.audio-track.webm",
+            "Clip.mp4.source.webm.video-track.webm.part.json",
+            "Clip.mp4.caption-source.mp4.source.webm.audio-track.m4a.part",
+            $"Clip.mp4.caption-source.mp4.{Guid32}.transcoding.mp4",
+        ];
+        string[] kept =
+        [
+            "Clip.mp4",
+            "Clip.mp4.source.webm.notes.txt",           // ends in a name the app never writes
+            "Clip.mp4.caption-source.mp4.final.mp4",
+            "Clip.mp4.part.video-track.webm",           // a partial suffix only ever comes last
+            "Clip.mp4.video-track.webm.part.part",
+        ];
+        foreach (var name in owned.Concat(kept))
+        {
+            File.WriteAllText(Path.Combine(directory.Path, name), name);
+        }
+
+        var cleanup = QueueItemArtifacts.Delete(destination);
+
+        Assert.Equal(owned.Length, cleanup.Deleted);
+        Assert.Equal(0, cleanup.Failed.Count);
+        foreach (var name in owned)
+        {
+            Assert.False(File.Exists(Path.Combine(directory.Path, name)), $"{name} should have been deleted.");
+        }
+
+        foreach (var name in kept)
+        {
+            Assert.True(File.Exists(Path.Combine(directory.Path, name)), $"{name} must be left alone.");
+        }
+    }
+
+    [Test]
     public static void LeavesASegmentFolderHoldingAnythingUnexpected()
     {
         using var directory = new TestDirectory();

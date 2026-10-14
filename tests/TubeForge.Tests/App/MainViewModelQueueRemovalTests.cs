@@ -69,6 +69,59 @@ public static class MainViewModelQueueRemovalTests
         }
     }
 
+    [Test]
+    public static async Task RemovingAFailedItemKeepsFilesAnotherQueuedItemStillUses()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "TubeForge.Tests", $"queue-shared-{Guid.NewGuid():N}");
+        var applicationData = Path.Combine(root, "appdata");
+        var downloads = Path.Combine(root, "downloads");
+        Directory.CreateDirectory(downloads);
+        try
+        {
+            var settings = await new TubeForgeSettingsStore(Path.Combine(applicationData, "settings.json"))
+                .SaveAsync(new TubeForgeSettings
+                {
+                    DownloadFolder = downloads,
+                    EnableAutomaticUpdateChecks = false,
+                    ResponsibleUseAccepted = true
+                });
+            Assert.True(settings.IsSuccess, settings.Error?.Message);
+
+            // Two queue entries for one destination: the paused one still owns the
+            // partial data, so removing the failed one must not delete it.
+            var destination = Path.Combine(downloads, "Shared.mp4");
+            var failed = Item(destination, DownloadQueueStatus.Failed);
+            var paused = Item(destination, DownloadQueueStatus.Paused);
+            var queue = await new DownloadQueueStore(Path.Combine(applicationData, "queue.json"))
+                .SaveAsync(new DownloadQueueSnapshot { Items = [failed, paused] });
+            Assert.True(queue.IsSuccess, queue.Error?.Message);
+
+            string[] shared = ["Shared.mp4.part", "Shared.mp4.part.json"];
+            foreach (var name in shared)
+            {
+                await File.WriteAllTextAsync(Path.Combine(downloads, name), name);
+            }
+
+            using var viewModel = CreateViewModel(applicationData);
+            await viewModel.InitializeAsync();
+
+            await RemoveAsync(viewModel, failed.Id);
+
+            Assert.Equal(1, viewModel.QueueItems.Count);
+            foreach (var name in shared)
+            {
+                Assert.True(File.Exists(Path.Combine(downloads, name)), $"{name} still belongs to the paused item.");
+            }
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
+    }
+
     private static MainViewModel CreateViewModel(string applicationData)
     {
         var constructor = typeof(MainViewModel).GetConstructor(

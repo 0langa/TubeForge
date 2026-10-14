@@ -158,8 +158,13 @@ public static partial class QueueItemArtifacts
         return true;
     }
 
+    // Steps nest: a download that also embeds captions and trims writes
+    // "<name>.caption-source.mp4.trim-source.mp4.part", and a video conversion
+    // fetches its tracks as "<name>.source.webm.video-track.webm". So any chain of
+    // the job's own names belongs to the item, optionally ending in a partial or
+    // scratch suffix. Every segment must still be one of those names.
     [GeneratedRegex(
-        "^(?:" + Core + "|(?:" + Core + @"\.)?" + Suffix + ")$",
+        "^(?:" + Core + @"\.)*(?:" + Core + "|" + Suffix + ")$",
         RegexOptions.CultureInvariant | RegexOptions.IgnoreCase)]
     private static partial Regex OwnedFile();
 
