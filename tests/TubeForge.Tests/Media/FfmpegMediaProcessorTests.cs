@@ -272,6 +272,39 @@ public static class FfmpegMediaProcessorTests
     }
 
     [Test]
+    public static async Task EmbedsChaptersForLongestGeneratedFileName()
+    {
+        using var directory = new MediaTestDirectory();
+        var executable = Path.Combine(directory.Path, "ffmpeg.exe");
+        var media = Path.Combine(directory.Path, "source.mp4");
+        // The longest name FileNamePolicy produces: a full-length stem plus a collision suffix.
+        var output = Path.Combine(
+            directory.Path,
+            new string('x', TubeForge.Core.Files.FileNamePolicy.DefaultMaximumStemLength) + " (99).mp4");
+        await File.WriteAllBytesAsync(executable, []);
+        await File.WriteAllBytesAsync(media, SyntheticMp4.Track(
+            "vide", "VIDEO"u8, 1, 90_000, 90_000));
+        var runner = new ChapterProcessRunner(media);
+
+        var result = await new FfmpegMediaProcessor(executable, runner).EmbedMetadataAsync(
+            media,
+            output,
+            MediaContainer.Mp4,
+            [
+                new VideoChapter { Title = "Intro", StartTime = TimeSpan.Zero },
+                new VideoChapter { Title = "Main", StartTime = TimeSpan.FromSeconds(30) }
+            ],
+            TimeSpan.FromMinutes(1));
+
+        Assert.True(result.IsSuccess, result.Error?.Message + " " + result.Error?.TechnicalDetail);
+        Assert.True(File.Exists(output));
+        Assert.True(
+            runner.OutputPaths.All(path => Path.GetFileName(path).Length <= 255),
+            "Every FFmpeg output path must fit the 255-character file name limit.");
+        Assert.Equal(0, Directory.GetFiles(directory.Path, "*.ffmetadata").Length);
+    }
+
+    [Test]
     public static async Task RejectsUnsafeChapterTimelineBeforeStartingFfmpeg()
     {
         using var directory = new MediaTestDirectory();
@@ -499,6 +532,8 @@ public static class FfmpegMediaProcessorTests
 
         public int CallCount { get; private set; }
 
+        public List<string> OutputPaths { get; } = [];
+
         public async Task<int> RunAsync(
             string executablePath,
             IReadOnlyList<string> arguments,
@@ -506,6 +541,7 @@ public static class FfmpegMediaProcessorTests
             CancellationToken cancellationToken)
         {
             CallCount++;
+            OutputPaths.Add(arguments[^1]);
             if (CallCount == 1)
             {
                 Arguments = arguments.ToArray();

@@ -68,6 +68,109 @@ public static class HlsCaptureEngineTests
     }
 
     [Test]
+    public static async Task RetriesSegmentWhoseResponseGoesSilent()
+    {
+        using var directory = new TestDirectory();
+        var silentAttempts = 0;
+        using var client = new HttpClient(new StubHandler(request => request.RequestUri!.AbsolutePath switch
+        {
+            "/live/master.m3u8" => Text("""
+                #EXTM3U
+                #EXT-X-TARGETDURATION:6
+                #EXT-X-MEDIA-SEQUENCE:30
+                #EXTINF:6,
+                30.ts
+                #EXTINF:6,
+                31.ts
+                #EXT-X-ENDLIST
+                """),
+            "/live/30.ts" when Interlocked.Increment(ref silentAttempts) == 1 => new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                // Headers arrive, then the connection never delivers a body byte.
+                Content = new StreamContent(new SilentStream())
+            },
+            "/live/30.ts" => Bytes("thirty"),
+            "/live/31.ts" => Bytes("thirty-one"),
+            _ => new HttpResponseMessage(HttpStatusCode.NotFound)
+        }));
+        var destination = Path.Combine(directory.Path, "capture.source");
+        var engine = new HlsCaptureEngine(
+            client,
+            new HostRequestGate(),
+            uriPolicy: null,
+            delay: (_, _) => Task.CompletedTask,
+            stallTimeout: TimeSpan.FromMilliseconds(200));
+
+        var result = await engine.CaptureAsync(Request(destination)).WaitAsync(TimeSpan.FromSeconds(15));
+
+        Assert.True(result.IsSuccess, result.Error?.Message);
+        Assert.Equal("thirtythirty-one", await File.ReadAllTextAsync(destination));
+        Assert.Equal(2, Volatile.Read(ref silentAttempts));
+    }
+
+    [Test]
+    public static async Task RetriesSegmentAfterConnectTimeoutInsteadOfPausingCapture()
+    {
+        using var directory = new TestDirectory();
+        using var client = new HttpClient(new FirstRequestConnectTimesOutHandler("/live/30.ts", request =>
+            request.RequestUri!.AbsolutePath switch
+            {
+                "/live/master.m3u8" => Text("""
+                    #EXTM3U
+                    #EXT-X-TARGETDURATION:6
+                    #EXT-X-MEDIA-SEQUENCE:30
+                    #EXTINF:6,
+                    30.ts
+                    #EXTINF:6,
+                    31.ts
+                    #EXT-X-ENDLIST
+                    """),
+                "/live/30.ts" => Bytes("thirty"),
+                "/live/31.ts" => Bytes("thirty-one"),
+                _ => new HttpResponseMessage(HttpStatusCode.NotFound)
+            }))
+        {
+            Timeout = Timeout.InfiniteTimeSpan
+        };
+        var destination = Path.Combine(directory.Path, "capture.source");
+        var engine = new HlsCaptureEngine(
+            client,
+            new HostRequestGate(),
+            uriPolicy: null,
+            delay: (_, _) => Task.CompletedTask);
+
+        var result = await engine.CaptureAsync(Request(destination)).WaitAsync(TimeSpan.FromSeconds(15));
+
+        // A connect timeout is not a pause: the segment is retried like any other network failure.
+        Assert.True(result.IsSuccess, result.Error?.Code + " " + result.Error?.Message);
+        Assert.Equal("thirtythirty-one", await File.ReadAllTextAsync(destination));
+    }
+
+    [Test]
+    public static async Task ReportsPlaylistConnectTimeoutAsTransientFailureNotPause()
+    {
+        using var directory = new TestDirectory();
+        var connects = 0;
+        using var client = new HttpClient(UnreachableHttp.CreateHandler(() => Interlocked.Increment(ref connects)))
+        {
+            Timeout = Timeout.InfiniteTimeSpan
+        };
+        var engine = new HlsCaptureEngine(
+            client,
+            new HostRequestGate(),
+            uriPolicy: null,
+            delay: (_, _) => Task.CompletedTask);
+
+        var result = await engine.CaptureAsync(Request(Path.Combine(directory.Path, "capture.source")))
+            .WaitAsync(TimeSpan.FromSeconds(15));
+
+        Assert.False(result.IsSuccess);
+        Assert.Equal("Network.Timeout", result.Error?.Code);
+        Assert.True(result.Error!.IsTransient);
+        Assert.Equal(3, Volatile.Read(ref connects));
+    }
+
+    [Test]
     public static async Task ResumesJournalAfterCancellationAndRejectsExpiredGap()
     {
         using var directory = new TestDirectory();
@@ -194,12 +297,66 @@ public static class HlsCaptureEngineTests
         Content = new ByteArrayContent(Encoding.UTF8.GetBytes(value))
     };
 
+    private sealed class SilentStream : Stream
+    {
+        public override bool CanRead => true;
+
+        public override bool CanSeek => false;
+
+        public override bool CanWrite => false;
+
+        public override long Length => throw new NotSupportedException();
+
+        public override long Position
+        {
+            get => throw new NotSupportedException();
+            set => throw new NotSupportedException();
+        }
+
+        public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+
+        public override async ValueTask<int> ReadAsync(
+            Memory<byte> buffer,
+            CancellationToken cancellationToken = default)
+        {
+            await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+            return 0;
+        }
+
+        public override void Flush() => throw new NotSupportedException();
+
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+
+        public override void SetLength(long value) => throw new NotSupportedException();
+
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+    }
+
     private sealed class StubHandler(Func<HttpRequestMessage, HttpResponseMessage> responseFactory)
         : HttpMessageHandler
     {
         protected override Task<HttpResponseMessage> SendAsync(
             HttpRequestMessage request,
             CancellationToken cancellationToken) => Task.FromResult(responseFactory(request));
+    }
+
+    /// <summary>
+    /// Sends the first request for one path through a real handler whose connect times out, and
+    /// answers everything else from the stub.
+    /// </summary>
+    private sealed class FirstRequestConnectTimesOutHandler(
+        string path,
+        Func<HttpRequestMessage, HttpResponseMessage> responseFactory)
+        : DelegatingHandler(UnreachableHttp.CreateHandler())
+    {
+        private int _matches;
+
+        protected override Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken) =>
+            request.RequestUri!.AbsolutePath == path && Interlocked.Increment(ref _matches) == 1
+                ? base.SendAsync(request, cancellationToken)
+                : Task.FromResult(responseFactory(request));
     }
 
     private sealed class TestDirectory : IDisposable

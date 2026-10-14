@@ -41,6 +41,59 @@ public static class CaptionDownloadEngineTests
     }
 
     [Test]
+    public static async Task ReportsSilentCaptionResponseAsTransientStall()
+    {
+        using var directory = new TestDirectory();
+        var destination = Path.Combine(directory.Path, "silent.srt");
+        using var handler = new StubHandler((_, _) =>
+            Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StreamContent(new SilentStream())
+            }));
+        using var client = new HttpClient(handler);
+        var engine = new CaptionDownloadEngine(client, TimeSpan.FromMilliseconds(150));
+
+        var result = await engine.DownloadAsync(new CaptionDownloadRequest
+            {
+                SourceUrl = new Uri("https://www.youtube.com/api/timedtext?v=Fixture123_&lang=en"),
+                DestinationPath = destination,
+                OutputFormat = CaptionOutputFormat.SubRip
+            })
+            .WaitAsync(TimeSpan.FromSeconds(15));
+
+        Assert.False(result.IsSuccess);
+        Assert.Equal("Network.Stalled", result.Error?.Code);
+        Assert.True(result.Error!.IsTransient);
+        Assert.False(File.Exists(destination));
+        Assert.False(File.Exists(destination + ".part"));
+    }
+
+    [Test]
+    public static async Task ReportsConnectTimeoutAsTransientFailureNotCancellation()
+    {
+        using var directory = new TestDirectory();
+        var destination = Path.Combine(directory.Path, "unreachable.srt");
+        using var client = new HttpClient(UnreachableHttp.CreateHandler())
+        {
+            Timeout = Timeout.InfiniteTimeSpan
+        };
+
+        var result = await new CaptionDownloadEngine(client).DownloadAsync(new CaptionDownloadRequest
+            {
+                SourceUrl = new Uri("https://www.youtube.com/api/timedtext?v=Fixture123_&lang=en"),
+                DestinationPath = destination,
+                OutputFormat = CaptionOutputFormat.SubRip
+            })
+            .WaitAsync(TimeSpan.FromSeconds(15));
+
+        // A queued download fetches captions while finalizing; Operation.Cancelled paused it.
+        Assert.False(result.IsSuccess);
+        Assert.Equal("Network.Timeout", result.Error?.Code);
+        Assert.True(result.Error!.IsTransient);
+        Assert.False(File.Exists(destination + ".part"));
+    }
+
+    [Test]
     public static async Task RejectsUnsafeSourceAndRedirect()
     {
         using var directory = new TestDirectory();
@@ -108,6 +161,41 @@ public static class CaptionDownloadEngineTests
         protected override Task<HttpResponseMessage> SendAsync(
             HttpRequestMessage request,
             CancellationToken cancellationToken) => responseFactory(request, cancellationToken);
+    }
+
+    private sealed class SilentStream : Stream
+    {
+        public override bool CanRead => true;
+
+        public override bool CanSeek => false;
+
+        public override bool CanWrite => false;
+
+        public override long Length => throw new NotSupportedException();
+
+        public override long Position
+        {
+            get => throw new NotSupportedException();
+            set => throw new NotSupportedException();
+        }
+
+        public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+
+        public override async ValueTask<int> ReadAsync(
+            Memory<byte> buffer,
+            CancellationToken cancellationToken = default)
+        {
+            await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+            return 0;
+        }
+
+        public override void Flush() => throw new NotSupportedException();
+
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+
+        public override void SetLength(long value) => throw new NotSupportedException();
+
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
     }
 
     private sealed class TestDirectory : IDisposable

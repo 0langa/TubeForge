@@ -386,8 +386,10 @@ internal sealed class FfmpegVideoProcessRunner : IFfmpegVideoProcessRunner
             throw new Win32Exception("FFmpeg did not start.");
         }
 
-        var standardError = process.StandardError.ReadToEndAsync();
-        var standardOutput = process.StandardOutput.ReadToEndAsync();
+        // Neither stream is used. Drain both without keeping them, so a chatty FFmpeg cannot grow
+        // memory for as long as it runs.
+        var standardError = ProcessOutputDrain.DiscardAsync(process.StandardError);
+        var standardOutput = ProcessOutputDrain.DiscardAsync(process.StandardOutput);
         try
         {
             await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
@@ -403,8 +405,8 @@ internal sealed class FfmpegVideoProcessRunner : IFfmpegVideoProcessRunner
             throw;
         }
 
-        _ = await standardError.ConfigureAwait(false);
-        _ = await standardOutput.ConfigureAwait(false);
+        await standardError.ConfigureAwait(false);
+        await standardOutput.ConfigureAwait(false);
         return process.ExitCode;
     }
 }

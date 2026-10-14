@@ -10,11 +10,15 @@ public static class FileNamePolicy
     private static readonly HashSet<char> InvalidCharacters =
         ['<', '>', ':', '"', '/', '\\', '|', '?', '*'];
 
+    // Windows treats the superscript digits 1-3 as COM/LPT digits, and documents COM0/LPT0 and
+    // the console handles as reserved too.
     private static readonly HashSet<string> ReservedNames = new(StringComparer.OrdinalIgnoreCase)
     {
-        "CON", "PRN", "AUX", "NUL",
-        "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9",
-        "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9"
+        "CON", "PRN", "AUX", "NUL", "CONIN$", "CONOUT$",
+        "COM0", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9",
+        "COM\u00B9", "COM\u00B2", "COM\u00B3",
+        "LPT0", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
+        "LPT\u00B9", "LPT\u00B2", "LPT\u00B3"
     };
 
     public static string SanitizeStem(string? value, int maximumLength = DefaultMaximumStemLength)
@@ -66,7 +70,9 @@ public static class FileNamePolicy
             stem = "video";
         }
 
-        if (ReservedNames.Contains(stem) || ReservedNames.Contains(stem.Split('.')[0]))
+        // Windows 10 matches device names on the text before the first dot with trailing spaces
+        // ignored, so "NUL .mp4" and "CON.tar.mp4" still open devices there.
+        if (ReservedNames.Contains(stem) || ReservedNames.Contains(stem.Split('.')[0].TrimEnd(' ')))
         {
             stem = "_" + stem;
         }

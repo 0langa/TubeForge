@@ -16,18 +16,22 @@ jobs:
     timeout-minutes: 30
     steps:
       - name: Check out tagged source
-        uses: actions/checkout@v5
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
 
       - name: Install .NET SDK
-        uses: actions/setup-dotnet@v5
+        uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5.4.0
         with:
           global-json-file: global.json
 
       - name: Read version from tag
         id: version
         shell: pwsh
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
         run: |
-          $tag = '${{ github.ref_name }}'
+          # Values reach the scripts in this job through env, never as script text, so a crafted
+          # tag name or variable cannot inject code before it is validated.
+          $tag = $env:RELEASE_TAG
           if ($tag -notmatch '^v\d+\.\d+\.\d+$') {
             throw "TubeForge publishes stable releases only; invalid tag: $tag"
           }
@@ -77,45 +81,61 @@ jobs:
 
       - name: Produce release archives
         shell: pwsh
+        env:
+          RELEASE_VERSION: ${{ steps.version.outputs.value }}
+          SIGNING_ENABLED: ${{ steps.signing.outputs.enabled }}
+          SIGNING_THUMBPRINT: ${{ steps.signing.outputs.thumbprint }}
+          TIMESTAMP_SERVER: ${{ vars.TUBEFORGE_TIMESTAMP_SERVER }}
         run: |
-          $arguments = @{ Version = '${{ steps.version.outputs.value }}' }
-          if ('${{ steps.signing.outputs.enabled }}' -eq 'true') {
-            $arguments.CertificateThumbprint = '${{ steps.signing.outputs.thumbprint }}'
-            $arguments.TimestampServer = '${{ vars.TUBEFORGE_TIMESTAMP_SERVER }}'
+          $arguments = @{ Version = $env:RELEASE_VERSION }
+          if ($env:SIGNING_ENABLED -eq 'true') {
+            $arguments.CertificateThumbprint = $env:SIGNING_THUMBPRINT
+            $arguments.TimestampServer = $env:TIMESTAMP_SERVER
           }
           .\scripts\Publish-Release.ps1 @arguments
 
       - name: Verify release archives
         shell: pwsh
+        env:
+          RELEASE_VERSION: ${{ steps.version.outputs.value }}
+          SIGNING_ENABLED: ${{ steps.signing.outputs.enabled }}
         run: |
-          $arguments = @{ Version = '${{ steps.version.outputs.value }}'; SkipLaunch = $true }
-          if ('${{ steps.signing.outputs.enabled }}' -eq 'true') {
+          $arguments = @{ Version = $env:RELEASE_VERSION; SkipLaunch = $true }
+          if ($env:SIGNING_ENABLED -eq 'true') {
             $arguments.RequireAuthenticode = $true
           }
           .\scripts\Test-Release.ps1 @arguments
 
       - name: Produce installer
         shell: pwsh
+        env:
+          RELEASE_VERSION: ${{ steps.version.outputs.value }}
+          SIGNING_ENABLED: ${{ steps.signing.outputs.enabled }}
+          SIGNING_THUMBPRINT: ${{ steps.signing.outputs.thumbprint }}
+          TIMESTAMP_SERVER: ${{ vars.TUBEFORGE_TIMESTAMP_SERVER }}
         run: |
-          $arguments = @{ Version = '${{ steps.version.outputs.value }}' }
-          if ('${{ steps.signing.outputs.enabled }}' -eq 'true') {
-            $arguments.CertificateThumbprint = '${{ steps.signing.outputs.thumbprint }}'
-            $arguments.TimestampServer = '${{ vars.TUBEFORGE_TIMESTAMP_SERVER }}'
+          $arguments = @{ Version = $env:RELEASE_VERSION }
+          if ($env:SIGNING_ENABLED -eq 'true') {
+            $arguments.CertificateThumbprint = $env:SIGNING_THUMBPRINT
+            $arguments.TimestampServer = $env:TIMESTAMP_SERVER
           }
           .\scripts\Publish-Installer.ps1 @arguments
           Get-Content artifacts/installer/SHA256SUMS.txt | Add-Content artifacts/release/SHA256SUMS.txt
 
       - name: Verify installer
         shell: pwsh
+        env:
+          RELEASE_VERSION: ${{ steps.version.outputs.value }}
+          SIGNING_ENABLED: ${{ steps.signing.outputs.enabled }}
         run: |
-          $arguments = @{ Version = '${{ steps.version.outputs.value }}' }
-          if ('${{ steps.signing.outputs.enabled }}' -eq 'true') {
+          $arguments = @{ Version = $env:RELEASE_VERSION }
+          if ($env:SIGNING_ENABLED -eq 'true') {
             $arguments.RequireAuthenticode = $true
           }
           .\scripts\Test-Installer.ps1 @arguments
 
       - name: Attest release artifacts
-        uses: actions/attest@v4
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
           subject-path: |
             artifacts/release/*.zip
@@ -127,19 +147,22 @@ jobs:
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
         run: |
-          gh release create '${{ github.ref_name }}' `
+          gh release create "$env:RELEASE_TAG" `
             artifacts/release/*.zip `
             artifacts/release/*-manifest.json `
             artifacts/release/SHA256SUMS.txt `
             artifacts/installer/*-setup.exe `
             --verify-tag `
-            --title "TubeForge ${{ github.ref_name }}" `
+            --title "TubeForge $env:RELEASE_TAG" `
             --notes-file docs/RELEASE_NOTES.md `
             --generate-notes
 
       - name: Remove imported signing certificate
         if: always() && steps.signing.outputs.enabled == 'true'
         shell: pwsh
-        run: Remove-Item -LiteralPath 'Cert:\CurrentUser\My\${{ steps.signing.outputs.thumbprint }}' -Force
+        env:
+          SIGNING_THUMBPRINT: ${{ steps.signing.outputs.thumbprint }}
+        run: Remove-Item -LiteralPath "Cert:\CurrentUser\My\$env:SIGNING_THUMBPRINT" -Force
 

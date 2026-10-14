@@ -11,13 +11,17 @@ using TubeForge.Core.Results;
 
 namespace TubeForge.Downloads;
 
-internal sealed class SegmentedDownloadEngine(HttpClient httpClient, DownloadUriPolicy uriPolicy)
+internal sealed class SegmentedDownloadEngine(
+    HttpClient httpClient,
+    DownloadUriPolicy uriPolicy,
+    TimeSpan? stallTimeout = null)
 {
     private const int BufferSize = 128 * 1024;
     private const int MaximumSegmentCount = 4_096;
     private static readonly long ProgressIntervalTicks = TimeSpan.FromMilliseconds(100).Ticks;
     private readonly HttpClient _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
     private readonly DownloadUriPolicy _uriPolicy = uriPolicy ?? throw new ArgumentNullException(nameof(uriPolicy));
+    private readonly TimeSpan _stallTimeout = TransferStallGuard.Validate(stallTimeout);
 
     public static bool ShouldUse(DownloadRequest request)
     {
@@ -260,6 +264,7 @@ internal sealed class SegmentedDownloadEngine(HttpClient httpClient, DownloadUri
         Action<int> reportBytes,
         CancellationToken cancellationToken)
     {
+        using var stall = new TransferStallGuard(_stallTimeout, cancellationToken);
         try
         {
             var usesRangeQuery = DirectDownloadEngine.IsGoogleVideo(request.SourceUrl);
@@ -288,7 +293,8 @@ internal sealed class SegmentedDownloadEngine(HttpClient httpClient, DownloadUri
             using var response = await _httpClient.SendAsync(
                 message,
                 HttpCompletionOption.ResponseHeadersRead,
-                cancellationToken).ConfigureAwait(false);
+                stall.Token).ConfigureAwait(false);
+            stall.Progressed();
             var finalUri = response.RequestMessage?.RequestUri ?? request.SourceUrl;
             if (!_uriPolicy.IsAllowed(finalUri))
             {
@@ -355,19 +361,21 @@ internal sealed class SegmentedDownloadEngine(HttpClient httpClient, DownloadUri
                 stateGate.Release();
             }
 
-            await using var input = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+            await using var input = await response.Content.ReadAsStreamAsync(stall.Token).ConfigureAwait(false);
             var buffer = ArrayPool<byte>.Shared.Rent(BufferSize);
             var received = 0L;
             try
             {
                 while (true)
                 {
-                    var count = await input.ReadAsync(buffer.AsMemory(0, BufferSize), cancellationToken)
+                    var count = await input.ReadAsync(buffer.AsMemory(0, BufferSize), stall.Token)
                         .ConfigureAwait(false);
                     if (count == 0)
                     {
                         break;
                     }
+
+                    stall.Progressed();
 
                     if (received + count > segment.Length)
                     {
@@ -422,6 +430,15 @@ internal sealed class SegmentedDownloadEngine(HttpClient httpClient, DownloadUri
             }
 
             return Result<bool>.Success(true);
+        }
+        catch (Exception exception) when ((exception is OperationCanceledException or IOException) && stall.HasStalled)
+        {
+            return Result<bool>.Failure(TransferStallGuard.StalledError(_stallTimeout));
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            // Neither the caller nor a failed sibling segment cancelled this range.
+            return Result<bool>.Failure(DirectDownloadEngine.TimeoutError("A segmented range request timed out."));
         }
         catch (OperationCanceledException)
         {
