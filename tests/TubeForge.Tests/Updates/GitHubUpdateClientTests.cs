@@ -183,7 +183,11 @@ public static class GitHubUpdateClientTests
         {
             Timeout = Timeout.InfiniteTimeSpan
         };
-        var updates = new GitHubUpdateClient(client, TimeSpan.FromMilliseconds(200));
+        // The window also covers creating the .part file and the write-through writes between
+        // reads, which can take longer than 200 ms on a busy CI runner (this test once failed
+        // there with Network.Stalled). One second leaves room for that, and the simulated slow
+        // check below is still far longer than the window.
+        var updates = new GitHubUpdateClient(client, TimeSpan.FromSeconds(1));
         var release = GitHubReleasePolicy.ParseLatest(fixture.Json, new Version(1, 0, 0)).Value!;
         var directory = Path.Combine(Path.GetTempPath(), $"tubeforge-update-slow-cache-{Guid.NewGuid():N}");
         try
@@ -194,7 +198,7 @@ public static class GitHubUpdateClientTests
             await File.WriteAllBytesAsync(
                 Path.Combine(directory, fixture.SetupName),
                 new byte[fixture.SetupBytes.Length]);
-            var progress = new SlowCacheCheckProgress(TimeSpan.FromMilliseconds(600));
+            var progress = new SlowCacheCheckProgress(TimeSpan.FromMilliseconds(2500));
 
             var download = await updates.DownloadInstallerAsync(release, directory, progress)
                 .WaitAsync(TimeSpan.FromSeconds(15));
