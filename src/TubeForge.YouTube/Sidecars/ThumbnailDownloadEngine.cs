@@ -1,16 +1,34 @@
 using System.Buffers;
 using System.Net;
 using TubeForge.Core.Errors;
+using TubeForge.Core.Networking;
 using TubeForge.Core.Results;
 
 namespace TubeForge.YouTube.Sidecars;
 
-public sealed class ThumbnailDownloadEngine(HttpClient httpClient)
+public sealed class ThumbnailDownloadEngine
 {
     private const int BufferSize = 32 * 1024;
     private const int MaximumRedirects = 3;
     private const long MaximumThumbnailBytes = 20 * 1024 * 1024;
-    private readonly HttpClient _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
+    private readonly HttpClient _httpClient;
+    private readonly TimeSpan _stallTimeout;
+
+    public ThumbnailDownloadEngine(HttpClient httpClient)
+        : this(httpClient, stallTimeout: null)
+    {
+    }
+
+    /// <param name="stallTimeout">
+    /// The sidecar client's own timeout stops at the response headers, and Save thumbnail passes
+    /// no cancellation token, so a response body that went silent held the save, and kept Save
+    /// thumbnail and Save metadata disabled, forever.
+    /// </param>
+    internal ThumbnailDownloadEngine(HttpClient httpClient, TimeSpan? stallTimeout)
+    {
+        _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
+        _stallTimeout = TransferStallGuard.Validate(stallTimeout);
+    }
 
     public async Task<Result<ThumbnailDownloadReceipt>> DownloadAsync(
         ThumbnailDownloadRequest request,
@@ -24,6 +42,7 @@ public sealed class ThumbnailDownloadEngine(HttpClient httpClient)
         }
 
         string? partialPath = null;
+        using var stall = new TransferStallGuard(_stallTimeout, cancellationToken);
         try
         {
             var destination = Path.GetFullPath(request.DestinationPath);
@@ -40,7 +59,7 @@ public sealed class ThumbnailDownloadEngine(HttpClient httpClient)
             }
 
             Directory.CreateDirectory(directory);
-            using var response = await SendTrustedAsync(request.SourceUrl, cancellationToken).ConfigureAwait(false);
+            using var response = await SendTrustedAsync(request.SourceUrl, stall).ConfigureAwait(false);
             if (!response.IsSuccessStatusCode)
             {
                 var transient = response.StatusCode == HttpStatusCode.TooManyRequests ||
@@ -65,7 +84,7 @@ public sealed class ThumbnailDownloadEngine(HttpClient httpClient)
                 return Failure("Thumbnail.InvalidImage", "The thumbnail server returned a non-image response.");
             }
 
-            await using var input = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+            await using var input = await response.Content.ReadAsStreamAsync(stall.Token).ConfigureAwait(false);
             await using var output = new FileStream(
                 partialPath,
                 FileMode.Create,
@@ -81,13 +100,14 @@ public sealed class ThumbnailDownloadEngine(HttpClient httpClient)
             {
                 while (true)
                 {
-                    var count = await input.ReadAsync(buffer.AsMemory(0, BufferSize), cancellationToken)
+                    var count = await input.ReadAsync(buffer.AsMemory(0, BufferSize), stall.Token)
                         .ConfigureAwait(false);
                     if (count == 0)
                     {
                         break;
                     }
 
+                    stall.Progressed();
                     if (written + count > MaximumThumbnailBytes)
                     {
                         return Failure("Thumbnail.TooLarge", "The thumbnail exceeds the safe size limit.");
@@ -124,6 +144,16 @@ public sealed class ThumbnailDownloadEngine(HttpClient httpClient)
                 destination,
                 written,
                 detectedType));
+        }
+        catch (Exception exception) when ((exception is OperationCanceledException or IOException) && stall.HasStalled)
+        {
+            return Result<ThumbnailDownloadReceipt>.Failure(TransferStallGuard.StalledError(_stallTimeout));
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            // Nobody cancelled: the client's Timeout or the handler's ConnectTimeout expired.
+            // Operation.Cancelled told the user they had cancelled a save they cannot cancel.
+            return Failure("Network.Timeout", "The thumbnail request timed out.", isTransient: true);
         }
         catch (OperationCanceledException)
         {
@@ -173,7 +203,7 @@ public sealed class ThumbnailDownloadEngine(HttpClient httpClient)
         };
     }
 
-    private async Task<HttpResponseMessage> SendTrustedAsync(Uri sourceUrl, CancellationToken cancellationToken)
+    private async Task<HttpResponseMessage> SendTrustedAsync(Uri sourceUrl, TransferStallGuard stall)
     {
         var current = sourceUrl;
         for (var redirect = 0; redirect <= MaximumRedirects; redirect++)
@@ -190,7 +220,8 @@ public sealed class ThumbnailDownloadEngine(HttpClient httpClient)
             var response = await _httpClient.SendAsync(
                 message,
                 HttpCompletionOption.ResponseHeadersRead,
-                cancellationToken).ConfigureAwait(false);
+                stall.Token).ConfigureAwait(false);
+            stall.Progressed();
             if (!IsRedirect(response.StatusCode))
             {
                 var finalUri = response.RequestMessage?.RequestUri ?? current;

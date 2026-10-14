@@ -88,6 +88,62 @@ public static class ThumbnailDownloadEngineTests
         Assert.False(Directory.EnumerateFiles(directory.Path, "*.part").Any());
     }
 
+    [Test]
+    public static async Task ReportsSilentThumbnailResponseAsTransientStall()
+    {
+        using var directory = new TestDirectory();
+        var destination = Path.Combine(directory.Path, "silent.jpg");
+        using var handler = new StubHandler((_, _) =>
+        {
+            var response = new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StreamContent(new SilentStream())
+            };
+            response.Content.Headers.ContentType = new MediaTypeHeaderValue("image/jpeg");
+            return Task.FromResult(response);
+        });
+        using var client = new HttpClient(handler);
+        var engine = new ThumbnailDownloadEngine(client, TimeSpan.FromMilliseconds(150));
+
+        // Save thumbnail passes no cancellation token, so before the stall guard this waited forever.
+        var result = await engine.DownloadAsync(new ThumbnailDownloadRequest
+            {
+                SourceUrl = new Uri("https://i.ytimg.com/vi/Fixture123_/maxresdefault.jpg"),
+                DestinationPath = destination
+            })
+            .WaitAsync(TimeSpan.FromSeconds(15));
+
+        Assert.False(result.IsSuccess);
+        Assert.Equal("Network.Stalled", result.Error?.Code);
+        Assert.True(result.Error!.IsTransient);
+        Assert.False(File.Exists(destination));
+        Assert.False(File.Exists(destination + ".part"));
+    }
+
+    [Test]
+    public static async Task ReportsConnectTimeoutAsTransientFailureNotCancellation()
+    {
+        using var directory = new TestDirectory();
+        var destination = Path.Combine(directory.Path, "unreachable.jpg");
+        using var client = new HttpClient(UnreachableHttp.CreateHandler())
+        {
+            Timeout = TimeSpan.FromSeconds(60)
+        };
+
+        var result = await new ThumbnailDownloadEngine(client).DownloadAsync(new ThumbnailDownloadRequest
+            {
+                SourceUrl = new Uri("https://i.ytimg.com/vi/Fixture123_/maxresdefault.jpg"),
+                DestinationPath = destination
+            })
+            .WaitAsync(TimeSpan.FromSeconds(15));
+
+        // Nobody can cancel a thumbnail save, yet this used to report Operation.Cancelled.
+        Assert.False(result.IsSuccess);
+        Assert.Equal("Network.Timeout", result.Error?.Code);
+        Assert.True(result.Error!.IsTransient);
+        Assert.False(File.Exists(destination + ".part"));
+    }
+
     private sealed class StubHandler(
         Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> responseFactory)
         : HttpMessageHandler
