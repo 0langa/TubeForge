@@ -147,6 +147,35 @@ public static class GitHubUpdateClientTests
     }
 
     [Test]
+    public static async Task SilentInstallerDownloadFailsSafelyInsteadOfHanging()
+    {
+        var fixture = ReleaseFixture.Create();
+        using var client = new HttpClient(new ReleaseHandler(fixture, silentSetup: true))
+        {
+            Timeout = Timeout.InfiniteTimeSpan
+        };
+        var updates = new GitHubUpdateClient(client, TimeSpan.FromMilliseconds(200));
+        var release = GitHubReleasePolicy.ParseLatest(fixture.Json, new Version(1, 0, 0)).Value!;
+        var directory = Path.Combine(Path.GetTempPath(), $"tubeforge-update-silent-{Guid.NewGuid():N}");
+        try
+        {
+            var download = await updates.DownloadInstallerAsync(release, directory)
+                .WaitAsync(TimeSpan.FromSeconds(15));
+
+            Assert.False(download.IsSuccess);
+            Assert.Equal("Network.Stalled", download.Error!.Code);
+            Assert.False(Directory.Exists(directory) && Directory.EnumerateFiles(directory).Any());
+        }
+        finally
+        {
+            if (Directory.Exists(directory))
+            {
+                Directory.Delete(directory, recursive: true);
+            }
+        }
+    }
+
+    [Test]
     public static async Task CachedInstallerVerificationReportsMonotonicProgress()
     {
         var fixture = ReleaseFixture.Create();
@@ -235,7 +264,10 @@ public static class GitHubUpdateClientTests
             Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
     }
 
-    private sealed class ReleaseHandler(ReleaseFixture fixture, bool tamperSetup = false) : HttpMessageHandler
+    private sealed class ReleaseHandler(
+        ReleaseFixture fixture,
+        bool tamperSetup = false,
+        bool silentSetup = false) : HttpMessageHandler
     {
         protected override Task<HttpResponseMessage> SendAsync(
             HttpRequestMessage request,
@@ -273,6 +305,17 @@ public static class GitHubUpdateClientTests
                     bytes[^1] ^= 0xff;
                 }
 
+                if (silentSetup)
+                {
+                    // The first bytes arrive, then the connection goes silent.
+                    var silent = new HttpResponseMessage(HttpStatusCode.OK)
+                    {
+                        Content = new StreamContent(new SilentAfterPrefixStream(bytes.AsSpan(0, 64 * 1024).ToArray()))
+                    };
+                    silent.Content.Headers.ContentLength = bytes.LongLength;
+                    return Task.FromResult(silent);
+                }
+
                 return Response(HttpStatusCode.OK, new ByteArrayContent(bytes));
             }
 
@@ -281,6 +324,59 @@ public static class GitHubUpdateClientTests
 
         private static Task<HttpResponseMessage> Response(HttpStatusCode status, HttpContent content) =>
             Task.FromResult(new HttpResponseMessage(status) { Content = content });
+    }
+
+    private sealed class SilentAfterPrefixStream(byte[] prefix) : Stream
+    {
+        private readonly MemoryStream _prefix = new(prefix, writable: false);
+
+        public override bool CanRead => true;
+
+        public override bool CanSeek => false;
+
+        public override bool CanWrite => false;
+
+        public override long Length => throw new NotSupportedException();
+
+        public override long Position
+        {
+            get => throw new NotSupportedException();
+            set => throw new NotSupportedException();
+        }
+
+        public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+
+        public override async ValueTask<int> ReadAsync(
+            Memory<byte> buffer,
+            CancellationToken cancellationToken = default)
+        {
+            var read = await _prefix.ReadAsync(buffer, cancellationToken);
+            if (read > 0)
+            {
+                return read;
+            }
+
+            await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+            return 0;
+        }
+
+        public override void Flush() => throw new NotSupportedException();
+
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+
+        public override void SetLength(long value) => throw new NotSupportedException();
+
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+            {
+                _prefix.Dispose();
+            }
+
+            base.Dispose(disposing);
+        }
     }
 
     private sealed class TestDirectory : IDisposable

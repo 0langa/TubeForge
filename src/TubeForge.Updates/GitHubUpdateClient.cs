@@ -3,29 +3,44 @@ using System.Net.Http.Headers;
 using System.Security.Cryptography;
 using System.Text;
 using TubeForge.Core.Errors;
+using TubeForge.Core.Networking;
 using TubeForge.Core.Results;
 
 namespace TubeForge.Updates;
 
-public sealed class GitHubUpdateClient(HttpClient httpClient)
+public sealed class GitHubUpdateClient
 {
     private const int MaximumReleaseJsonBytes = 2 * 1024 * 1024;
     private static readonly Uri LatestReleaseUri = new(
         "https://api.github.com/repos/0langa/TubeForge/releases/latest");
-    private readonly HttpClient _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
+    private readonly HttpClient _httpClient;
+    private readonly TimeSpan _stallTimeout;
+
+    public GitHubUpdateClient(HttpClient httpClient)
+        : this(httpClient, stallTimeout: null)
+    {
+    }
+
+    internal GitHubUpdateClient(HttpClient httpClient, TimeSpan? stallTimeout)
+    {
+        _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
+        _stallTimeout = TransferStallGuard.Validate(stallTimeout);
+    }
 
     public async Task<Result<UpdateRelease?>> CheckForUpdateAsync(
         Version currentVersion,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(currentVersion);
+        using var stall = new TransferStallGuard(_stallTimeout, cancellationToken);
         try
         {
             using var request = CreateRequest(HttpMethod.Get, LatestReleaseUri, "application/vnd.github+json");
             using var response = await _httpClient.SendAsync(
                 request,
                 HttpCompletionOption.ResponseHeadersRead,
-                cancellationToken).ConfigureAwait(false);
+                stall.Token).ConfigureAwait(false);
+            stall.Progressed();
             if (response.StatusCode == HttpStatusCode.NotFound)
             {
                 return Result<UpdateRelease?>.Success(null);
@@ -42,7 +57,7 @@ public sealed class GitHubUpdateClient(HttpClient httpClient)
             var bytes = await ReadBoundedAsync(
                 response,
                 MaximumReleaseJsonBytes,
-                cancellationToken).ConfigureAwait(false);
+                stall).ConfigureAwait(false);
             if (bytes is null)
             {
                 return Failure<UpdateRelease?>(
@@ -51,6 +66,10 @@ public sealed class GitHubUpdateClient(HttpClient httpClient)
             }
 
             return GitHubReleasePolicy.ParseLatest(Encoding.UTF8.GetString(bytes), currentVersion);
+        }
+        catch (Exception exception) when ((exception is OperationCanceledException or IOException) && stall.HasStalled)
+        {
+            return Result<UpdateRelease?>.Failure(TransferStallGuard.StalledError(_stallTimeout));
         }
         catch (OperationCanceledException)
         {
@@ -75,6 +94,7 @@ public sealed class GitHubUpdateClient(HttpClient httpClient)
         ArgumentException.ThrowIfNullOrWhiteSpace(updateDirectory);
         var temporary = string.Empty;
         progress?.Report(0);
+        using var stall = new TransferStallGuard(_stallTimeout, cancellationToken);
         try
         {
             var directory = Path.GetFullPath(updateDirectory);
@@ -87,7 +107,7 @@ public sealed class GitHubUpdateClient(HttpClient httpClient)
                 release.ChecksumsLength,
                 GitHubReleasePolicy.MaximumChecksumsBytes,
                 release.ChecksumsSha256,
-                cancellationToken).ConfigureAwait(false);
+                stall).ConfigureAwait(false);
             if (!checksumBytes.IsSuccess)
             {
                 return Result<UpdateDownloadReceipt>.Failure(checksumBytes.Error!);
@@ -124,9 +144,11 @@ public sealed class GitHubUpdateClient(HttpClient httpClient)
 
             progress?.Report(0.15);
             TryDelete(temporary);
+            // Verifying a cached installer above is local work, not network silence.
+            stall.Progressed();
             using var response = await SendAssetRequestAsync(
                 release.SetupDownloadUri,
-                cancellationToken).ConfigureAwait(false);
+                stall).ConfigureAwait(false);
             if (!response.IsSuccessStatusCode ||
                 response.Content.Headers.ContentLength is long contentLength &&
                 contentLength != release.SetupLength)
@@ -137,7 +159,7 @@ public sealed class GitHubUpdateClient(HttpClient httpClient)
                     $"HTTP {(int)response.StatusCode}");
             }
 
-            await using var input = await response.Content.ReadAsStreamAsync(cancellationToken)
+            await using var input = await response.Content.ReadAsStreamAsync(stall.Token)
                 .ConfigureAwait(false);
             await using var output = new FileStream(
                 temporary,
@@ -151,12 +173,13 @@ public sealed class GitHubUpdateClient(HttpClient httpClient)
             long total = 0;
             while (true)
             {
-                var read = await input.ReadAsync(buffer, cancellationToken).ConfigureAwait(false);
+                var read = await input.ReadAsync(buffer, stall.Token).ConfigureAwait(false);
                 if (read == 0)
                 {
                     break;
                 }
 
+                stall.Progressed();
                 total = checked(total + read);
                 if (total > release.SetupLength || total > GitHubReleasePolicy.MaximumInstallerBytes)
                 {
@@ -190,6 +213,10 @@ public sealed class GitHubUpdateClient(HttpClient httpClient)
                 total,
                 actualHash));
         }
+        catch (Exception exception) when ((exception is OperationCanceledException or IOException) && stall.HasStalled)
+        {
+            return Result<UpdateDownloadReceipt>.Failure(TransferStallGuard.StalledError(_stallTimeout));
+        }
         catch (OperationCanceledException)
         {
             return Failure<UpdateDownloadReceipt>("Operation.Cancelled", "The update download was cancelled.");
@@ -215,9 +242,9 @@ public sealed class GitHubUpdateClient(HttpClient httpClient)
         long expectedLength,
         long maximumLength,
         string expectedSha256,
-        CancellationToken cancellationToken)
+        TransferStallGuard stall)
     {
-        using var response = await SendAssetRequestAsync(uri, cancellationToken).ConfigureAwait(false);
+        using var response = await SendAssetRequestAsync(uri, stall).ConfigureAwait(false);
         if (!response.IsSuccessStatusCode ||
             response.Content.Headers.ContentLength is long contentLength && contentLength != expectedLength)
         {
@@ -226,7 +253,7 @@ public sealed class GitHubUpdateClient(HttpClient httpClient)
                 "The update checksum response failed validation.");
         }
 
-        var bytes = await ReadBoundedAsync(response, maximumLength, cancellationToken).ConfigureAwait(false);
+        var bytes = await ReadBoundedAsync(response, maximumLength, stall).ConfigureAwait(false);
         if (bytes is null || bytes.LongLength != expectedLength)
         {
             return Failure<byte[]>(
@@ -244,7 +271,7 @@ public sealed class GitHubUpdateClient(HttpClient httpClient)
 
     private async Task<HttpResponseMessage> SendAssetRequestAsync(
         Uri uri,
-        CancellationToken cancellationToken)
+        TransferStallGuard stall)
     {
         if (!IsGitHubReleaseUri(uri))
         {
@@ -255,7 +282,8 @@ public sealed class GitHubUpdateClient(HttpClient httpClient)
         var response = await _httpClient.SendAsync(
             firstRequest,
             HttpCompletionOption.ResponseHeadersRead,
-            cancellationToken).ConfigureAwait(false);
+            stall.Token).ConfigureAwait(false);
+        stall.Progressed();
         if (!IsRedirect(response.StatusCode))
         {
             return response;
@@ -271,10 +299,12 @@ public sealed class GitHubUpdateClient(HttpClient httpClient)
         }
 
         using var redirectedRequest = CreateRequest(HttpMethod.Get, redirect, "application/octet-stream");
-        return await _httpClient.SendAsync(
+        var redirected = await _httpClient.SendAsync(
             redirectedRequest,
             HttpCompletionOption.ResponseHeadersRead,
-            cancellationToken).ConfigureAwait(false);
+            stall.Token).ConfigureAwait(false);
+        stall.Progressed();
+        return redirected;
     }
 
     private static HttpRequestMessage CreateRequest(HttpMethod method, Uri uri, string accept)
@@ -289,24 +319,26 @@ public sealed class GitHubUpdateClient(HttpClient httpClient)
     private static async Task<byte[]?> ReadBoundedAsync(
         HttpResponseMessage response,
         long maximumLength,
-        CancellationToken cancellationToken)
+        TransferStallGuard stall)
     {
         if (response.Content.Headers.ContentLength is long declared && declared > maximumLength)
         {
             return null;
         }
 
-        await using var input = await response.Content.ReadAsStreamAsync(cancellationToken)
+        await using var input = await response.Content.ReadAsStreamAsync(stall.Token)
             .ConfigureAwait(false);
         using var output = new MemoryStream();
         var buffer = new byte[16 * 1024];
         while (true)
         {
-            var read = await input.ReadAsync(buffer, cancellationToken).ConfigureAwait(false);
+            var read = await input.ReadAsync(buffer, stall.Token).ConfigureAwait(false);
             if (read == 0)
             {
                 return output.ToArray();
             }
+
+            stall.Progressed();
 
             if (output.Length + read > maximumLength)
             {
